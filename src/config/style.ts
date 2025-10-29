@@ -1,7 +1,6 @@
 import { css, type IMThemeVariables } from "jimu-core"
 import { useTheme } from "jimu-theme"
 
-// Helper for flex layouts
 const flex = (dir: "row" | "column", styles: { [key: string]: any } = {}) =>
   css({
     display: "flex",
@@ -9,77 +8,47 @@ const flex = (dir: "row" | "column", styles: { [key: string]: any } = {}) =>
     ...styles,
   })
 
-// Widget styles factory
 export const createWidgetStyles = (theme: IMThemeVariables) => {
   const spacing = theme.sys.spacing
   const colors = theme.sys.color
+  const gap = spacing?.(2)
+  const auto = "1 1 auto"
 
   return {
-    parent: flex("column", {
-      backgroundColor: colors?.surface?.paper,
-      flex: "1 1 auto",
-      padding: spacing?.(2),
-      gap: spacing?.(2),
-    }),
+    parent: flex("column", { flex: auto, gap, padding: gap }),
     header: css({ flex: "0 0 auto" }),
-    gridContainer: flex("column", {
-      flex: "1 1 auto",
-      overflow: "auto",
+    listContainer: flex("column", { flex: auto, overflow: "auto" }),
+    list: flex("column", { flex: auto }),
+    listItem: flex("row", {
+      flex: "0 0 auto",
+      gap: spacing?.(1),
+      padding: spacing?.(1),
+      borderBlockEnd: `1px solid ${colors?.divider?.secondary}`,
     }),
-    footer: css({ flex: "0 0 auto" }),
+    column: flex("column", { flex: auto }),
+    actions: flex("row", { flex: "0 0 auto", alignItems: "center" }),
+    empty: flex("column", {
+      flex: auto,
+      placeContent: "center",
+      alignItems: "center",
+      color: colors?.surface?.backgroundHint,
+    }),
     loading: css({ padding: spacing?.(1.5) }),
     error: css({ padding: spacing?.(1.5) }),
-    table: css({
-      width: "100%",
-      borderCollapse: "separate",
-      borderSpacing: 0,
-      border: `1px solid ${colors?.divider?.secondary}`,
-      borderRadius: "0.375rem",
-      overflow: "hidden",
-    }),
-    tableHead: css({
-      backgroundColor: colors?.surface?.paper,
-    }),
-    tableCell: css({
-      padding: spacing?.(1),
-      borderBottom: `1px solid ${colors?.divider?.secondary}`,
-      textAlign: "left",
-      verticalAlign: "top",
-    }),
-    tableHeaderCell: css({
-      fontWeight: 600,
-      backgroundColor: colors?.surface?.paper,
-    }),
-    tableDataCell: css({
-      backgroundColor: colors?.surface?.background,
-    }),
-    tableLastRow: css({
-      "& td": {
-        borderBottom: "none",
-      },
-    }),
-    tableActions: flex("row", {
-      alignItems: "center",
-      justifyContent: "flex-end",
-      gap: spacing?.(0.5),
-    }),
-    tableEmpty: css({
-      textAlign: "center",
-      color: colors?.surface?.backgroundHint,
-    }),
     errorBoundary: flex("column", {
-      padding: spacing?.(2),
+      flex: auto,
       gap: spacing?.(1),
+      padding: gap,
     }),
     errorDetails: css({
-      fontSize: "0.75rem",
       color: colors?.surface?.backgroundHint,
     }),
-    heading: css({
-      margin: 0,
-      fontSize: "inherit",
-      fontWeight: "inherit",
+    footer: flex("row", {
+      flex: "0 0 auto",
+      alignItems: "center",
+      justifyContent: "space-between",
     }),
+    footerActions: flex("row", { flex: "0 0 auto", gap: spacing?.(1) }),
   } as const
 }
 
@@ -90,18 +59,17 @@ export const useWidgetStyles = (): WidgetStyles => {
   return createWidgetStyles(theme)
 }
 
-// Settings styles factory
 export const createSettingStyles = (theme: IMThemeVariables) => {
   const spacing = theme.sys.spacing
   const colors = theme.sys.color
+  const typography = theme.sys.typography
 
   return {
-    row: css({ width: "100%" }),
+    row: css({ inlineSize: "100%" }),
     description: css({
-      fontSize: "0.875rem",
+      fontSize: typography?.body1?.fontSize,
       color: colors?.surface?.backgroundHint,
-      marginTop: spacing?.(1),
-      lineHeight: 1.5,
+      marginBlockStart: spacing?.(1),
     }),
   } as const
 }

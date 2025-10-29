@@ -596,7 +596,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         </div>
       </div>
 
-      <div css={styles.gridContainer} role="main">
+      <div css={styles.listContainer} role="main">
         {state.loading && (
           <div
             css={styles.loading}
@@ -617,80 +617,48 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         )}
 
         {!state.loading && !state.error && (
-          <table
-            css={styles.table}
-            role="table"
-            aria-label={translate("widgetTitle")}
-            aria-describedby={`${id}-instructions`}
-            aria-rowcount={state.selectedProperties.length + 1}
-          >
-            <thead css={styles.tableHead} role="rowgroup">
-              <tr role="row" aria-rowindex={1}>
-                <th
-                  role="columnheader"
-                  css={styles.tableHeaderCell}
-                  scope="col"
-                >
-                  {translate("columnFastighet")}
-                </th>
-                <th
-                  role="columnheader"
-                  css={styles.tableHeaderCell}
-                  scope="col"
-                >
-                  {translate("columnOwner")}
-                </th>
-                <th
-                  role="columnheader"
-                  css={styles.tableHeaderCell}
-                  scope="col"
-                >
-                  {translate("actions")}
-                </th>
-              </tr>
-            </thead>
-            <tbody role="rowgroup">
-              {state.selectedProperties.length === 0 && (
-                <tr role="row">
-                  <td
-                    css={[styles.tableCell, styles.tableEmpty]}
-                    role="cell"
-                    colSpan={3}
-                  >
-                    {translate("noDataMessage")}
-                  </td>
-                </tr>
-              )}
-              {state.selectedProperties.map((row, idx) => (
-                <tr role="row" key={row.id} aria-rowindex={idx + 2}>
-                  <td
-                    role="cell"
-                    css={styles.tableCell}
-                    data-column={GRID_COLUMN_KEYS.FASTIGHET}
-                  >
-                    {row.FASTIGHET}
-                  </td>
-                  <td
-                    role="cell"
-                    css={styles.tableCell}
-                    data-column={GRID_COLUMN_KEYS.BOSTADR}
-                  >
-                    {row.BOSTADR}
-                  </td>
-                  <td role="cell" css={[styles.tableCell, styles.tableActions]}>
-                    <Button
-                      type="tertiary"
-                      size="sm"
-                      onClick={() => handleRemoveProperty(row.FNR)}
-                      aria-label={`${translate("removeProperty")} ${row.FASTIGHET}`}
+          <>
+            {state.selectedProperties.length === 0 && (
+              <div css={styles.empty} role="status" aria-live="polite">
+                {translate("noDataMessage")}
+              </div>
+            )}
+            {state.selectedProperties.length > 0 && (
+              <div
+                css={styles.list}
+                role="list"
+                aria-label={translate("widgetTitle")}
+                aria-describedby={`${id}-instructions`}
+              >
+                {state.selectedProperties.map((row) => (
+                  <div css={styles.listItem} role="listitem" key={row.id}>
+                    <div
+                      css={styles.column}
+                      data-column={GRID_COLUMN_KEYS.FASTIGHET}
                     >
-                      {translate("removeProperty")}
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                      {row.FASTIGHET}
+                    </div>
+                    <div
+                      css={styles.column}
+                      data-column={GRID_COLUMN_KEYS.BOSTADR}
+                    >
+                      {row.BOSTADR}
+                    </div>
+                    <div css={styles.actions}>
+                      <Button
+                        type="tertiary"
+                        size="sm"
+                        onClick={() => handleRemoveProperty(row.FNR)}
+                        aria-label={`${translate("removeProperty")} ${row.FASTIGHET}`}
+                      >
+                        {translate("removeProperty")}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -698,7 +666,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         <div role="status" aria-live="polite">
           {state.selectedProperties.length} {translate("propertySelected")}
         </div>
-        <div>
+        <div css={styles.footerActions}>
           {state.undoHistory.length > 0 && (
             <Button
               size="sm"
