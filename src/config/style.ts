@@ -70,7 +70,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     errorHint: css({ color: colors?.surface?.backgroundHint }),
     buttons: flexAuto("row", { gap: spacing?.(1) }),
     footer: flexAuto("row", {
-      backgroundColor: colors?.surface?.background,
+      borderBlockStart: `2px solid ${colors?.surface?.background}`,
       ...typo(typography?.label2),
     }),
   } as const
