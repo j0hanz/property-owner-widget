@@ -1,0 +1,136 @@
+import type { ImmutableObject } from "jimu-core"
+import type { WidgetStyles } from "./style"
+
+export interface Config {
+  propertyDataSourceId: string
+  ownerDataSourceId: string
+  displayColumns: readonly string[]
+  maxResults: number
+  enableToggleRemoval: boolean
+  allowedHosts?: readonly string[]
+  enablePIIMasking: boolean
+}
+
+export type IMConfig = ImmutableObject<Config>
+
+export interface PropertyAttributes {
+  OBJECTID: number
+  FNR: string | number
+  UUID_FASTIGHET: string
+  FASTIGHET: string
+  [key: string]: any
+}
+
+export interface OwnerAttributes {
+  OBJECTID: number
+  FNR: string | number
+  UUID_FASTIGHET: string
+  FASTIGHET: string
+  NAMN?: string
+  BOSTADR?: string
+  POSTNR?: string
+  POSTADR?: string
+  ANDEL?: string
+  ORGNR?: string
+  [key: string]: any
+}
+
+export interface GridRowData {
+  id: string
+  FNR: string | number
+  UUID_FASTIGHET: string
+  FASTIGHET: string
+  BOSTADR: string
+  graphic?: __esri.Graphic
+}
+
+export interface SelectionGraphicsHelpers {
+  addGraphicsToMap: (
+    graphic: __esri.Graphic | null | undefined,
+    view: __esri.MapView | null | undefined,
+    extractFnr: (attrs: any) => string | number | null,
+    normalizeFnrKey: (fnr: any) => string,
+    highlightColor: [number, number, number, number],
+    outlineWidth: number
+  ) => void
+  extractFnr: (attrs: any) => string | number | null
+  normalizeFnrKey: (fnr: any) => string
+}
+
+export interface SelectionGraphicsParams {
+  graphicsToAdd: Array<{ graphic: __esri.Graphic; fnr: string | number }>
+  selectedRows: GridRowData[]
+  getCurrentView: () => __esri.MapView | null | undefined
+  helpers: SelectionGraphicsHelpers
+  highlightColor: [number, number, number, number]
+  outlineWidth: number
+}
+
+export interface ErrorBoundaryProps {
+  children: React.ReactNode
+  styles: WidgetStyles
+  translate: (id: string) => string
+}
+
+export interface ErrorState {
+  type: "QUERY_ERROR" | "NETWORK_ERROR" | "VALIDATION_ERROR" | "GEOMETRY_ERROR"
+  message: string
+  details?: string
+}
+
+export interface PropertyWidgetState {
+  loading: boolean
+  error: ErrorState | null
+  selectedProperties: GridRowData[]
+  undoHistory: UndoOperation[]
+}
+
+export interface UndoOperation {
+  type: "remove" | "clear"
+  timestamp: number
+  data: GridRowData[]
+}
+
+export interface QueryResult {
+  features: __esri.Graphic[]
+  propertyId: string | number
+}
+
+export interface InflightQuery {
+  promise: Promise<unknown>
+  timestamp: number
+}
+
+export interface EsriModules {
+  SimpleFillSymbol: new (
+    properties?: __esri.SimpleFillSymbolProperties
+  ) => __esri.SimpleFillSymbol
+  Graphic: new (properties?: __esri.GraphicProperties) => __esri.Graphic
+  GraphicsLayer: new (
+    properties?: __esri.GraphicsLayerProperties
+  ) => __esri.GraphicsLayer
+}
+
+export interface UrlErrors {
+  property: string | null
+  owner: string | null
+}
+
+export interface ProcessPropertyResult {
+  rowsToProcess: GridRowData[]
+  graphicsToAdd: Array<{ graphic: __esri.Graphic; fnr: string | number }>
+}
+
+export interface TelemetryEvent {
+  category: string
+  action: string
+  label?: string
+  value?: number
+}
+
+export interface PerformanceMetric {
+  operation: string
+  duration: number
+  success: boolean
+  error?: string
+}

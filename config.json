@@ -1,0 +1,14 @@
+{
+	"displayColumns": [
+		"FASTIGHET",
+		"BOSTADR"
+	],
+	"maxResults": 100,
+	"enableToggleRemoval": true,
+	"enablePIIMasking": true,
+	"allowedHosts": [
+		"lund.se",
+		"arcgis.com",
+		"esri.com"
+	]
+}

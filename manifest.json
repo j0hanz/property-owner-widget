@@ -1,0 +1,27 @@
+{
+  "name": "property",
+  "label": "Property",
+  "type": "widget",
+  "version": "1.18.0",
+  "exbVersion": "1.18.0",
+  "author": "j0hanz",
+  "description": "Displays property information.",
+  "icon": "icon.svg",
+  "dependency": "jimu-arcgis",
+  "defaultSize": {
+    "width": 325,
+    "height": 375
+  },
+  "translatedLocales": [
+    "en",
+    "sv"
+  ],
+  "settingDependency": [
+    "jimu-arcgis"
+  ],
+  "properties": {
+    "supportedDataSourceTypes": [
+      "FEATURE_LAYER"
+    ]
+  }
+}
