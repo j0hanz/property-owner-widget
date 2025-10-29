@@ -21,18 +21,22 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       overflowY: "auto",
       blockSize: "100%",
       gap: spacing?.(2),
-      padding: spacing?.(1),
       backgroundColor: colors?.surface?.paper,
     }),
     header: flexAuto("row", {
       alignItems: "center",
       justifyContent: "space-between",
+      padding: spacing?.(1),
     }),
     cols: flexAuto("row", {
-      padding: spacing?.(1),
       borderBlockEnd: `1px solid ${colors?.divider?.primary}`,
     }),
-    col: css({ flex: "1 1 0", minWidth: 0 }),
+    col: css({
+      flex: "1 1 0",
+      display: "flex",
+      justifyContent: "center",
+      padding: spacing?.(1),
+    }),
     body: flex("column", { flex: "1 1 0", overflow: "auto" }),
     list: flexAuto("column"),
     row: flexAuto("row", {
