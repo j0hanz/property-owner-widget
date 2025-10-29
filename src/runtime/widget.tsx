@@ -591,9 +591,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       aria-label={translate("widgetTitle")}
     >
       <div css={styles.header}>
-        <div role="status" aria-live="polite">
-          {state.selectedProperties.length} {translate("propertySelected")}
-        </div>
         <div css={styles.buttons}>
           {state.undoHistory.length > 0 && (
             <Button
@@ -674,6 +671,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
               ))}
             </div>
           )}
+      </div>
+
+      <div css={styles.footer}>
+        <div role="status" aria-live="polite">
+          {state.selectedProperties.length} {translate("propertySelected")}
+        </div>
       </div>
 
       {mapWidgetId && (

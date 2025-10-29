@@ -29,6 +29,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       padding: spacing?.(1),
     }),
     cols: flexAuto("row", {
+      borderBlockStart: `1px solid ${colors?.divider?.primary}`,
       borderBlockEnd: `1px solid ${colors?.divider?.primary}`,
     }),
     col: css({
@@ -56,6 +57,11 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     }),
     errorHint: css({ color: colors?.surface?.backgroundHint }),
     buttons: flexAuto("row", { gap: spacing?.(1) }),
+    footer: flexAuto("row", {
+      alignItems: "center",
+      justifyContent: "center",
+      padding: spacing?.(1),
+    }),
   } as const
 }
 
