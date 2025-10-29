@@ -24,6 +24,7 @@ import {
   usePopupManager,
   useMapViewLifecycle,
   useAbortControllerPool,
+  useDebouncedMapClick,
 } from "../shared/hooks"
 import {
   queryPropertyByPoint,
@@ -475,13 +476,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
   )
 
+  // Debounce map clicks to prevent rapid-fire queries
+  const debouncedMapClick = useDebouncedMapClick(handleMapClick)
+
   const { onActiveViewChange, getCurrentView } = useMapViewLifecycle({
     modules,
     ensureGraphicsLayer,
     destroyGraphicsLayer,
     disablePopup,
     restorePopup,
-    onMapClick: handleMapClick,
+    onMapClick: debouncedMapClick,
   })
 
   hooks.useUnmount(() => {

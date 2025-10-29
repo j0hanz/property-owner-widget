@@ -4,6 +4,7 @@ import type {
   GridRowData,
 } from "../config/types"
 import type { DataSourceManager, FeatureLayerDataSource } from "jimu-core"
+import { loadArcGISJSAPIModules } from "jimu-arcgis"
 import {
   MIN_MASK_LENGTH,
   MAX_MASK_ASTERISKS,
@@ -539,7 +540,12 @@ const processBatchOfProperties = async (params: {
     messages,
   } = params
 
-  const ownerData = await Promise.allSettled(
+  // Use promiseUtils.eachAlways for ArcGIS API-aligned promise handling
+  const [promiseUtils] = await loadArcGISJSAPIModules([
+    "esri/core/promiseUtils",
+  ])
+
+  const ownerData = await promiseUtils.eachAlways(
     batch.map((validated) =>
       fetchOwnerDataForProperty({
         fnr: validated.fnr,
@@ -550,26 +556,10 @@ const processBatchOfProperties = async (params: {
           queryOwnerByFnr: helpers.queryOwnerByFnr,
           isAbortError: helpers.isAbortError,
         },
-      })
-        .then((result) => ({
-          ...result,
-          validated,
-          status: "fulfilled" as const,
-        }))
-        .catch((error) => {
-          // Handle individual query failures gracefully
-          if (helpers.isAbortError(error)) {
-            const errorObj =
-              error instanceof Error ? error : new Error(String(error))
-            throw errorObj // Propagate abort errors
-          }
-          return {
-            validated,
-            ownerFeatures: [],
-            queryFailed: true,
-            status: "rejected" as const,
-          }
-        })
+      }).then((result) => ({
+        ...result,
+        validated,
+      }))
     )
   )
 
@@ -577,9 +567,12 @@ const processBatchOfProperties = async (params: {
   const graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }> = []
 
   for (const result of ownerData) {
-    if (result.status === "rejected") {
+    // Handle eachAlways result structure: { promise, value?, error? }
+    if (result.error) {
       // Skip aborted queries, log other failures
-      console.log("Owner query failed for batch item:", result.reason)
+      if (!helpers.isAbortError(result.error)) {
+        console.log("Owner query failed for batch item:", result.error)
+      }
       continue
     }
 
