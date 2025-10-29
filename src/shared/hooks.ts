@@ -209,7 +209,7 @@ export const useGraphicsLayer = (
 }
 
 export const usePopupManager = () => {
-  const originalPopupEnabledRef = React.useRef<boolean | null>(null)
+  const popupStatesRef = React.useRef<Map<__esri.MapView, boolean>>(new Map())
 
   const restorePopup = hooks.useEventCallback(
     (view: __esri.MapView | undefined) => {
@@ -217,9 +217,10 @@ export const usePopupManager = () => {
       const popup = view.popup as
         | (__esri.Popup & { autoOpenEnabled?: boolean })
         | undefined
-      if (popup && originalPopupEnabledRef.current !== null) {
-        popup.autoOpenEnabled = originalPopupEnabledRef.current
-        originalPopupEnabledRef.current = null
+      const originalState = popupStatesRef.current.get(view)
+      if (popup && originalState !== undefined) {
+        popup.autoOpenEnabled = originalState
+        popupStatesRef.current.delete(view)
       }
     }
   )
@@ -231,8 +232,8 @@ export const usePopupManager = () => {
         | (__esri.Popup & { autoOpenEnabled?: boolean })
         | undefined
       if (popup && typeof popup.autoOpenEnabled === "boolean") {
-        if (originalPopupEnabledRef.current === null) {
-          originalPopupEnabledRef.current = popup.autoOpenEnabled
+        if (!popupStatesRef.current.has(view)) {
+          popupStatesRef.current.set(view, popup.autoOpenEnabled)
         }
         popup.autoOpenEnabled = false
       }

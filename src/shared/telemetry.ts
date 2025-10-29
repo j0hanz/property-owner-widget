@@ -4,10 +4,11 @@ export const isAllowedToTrack = (): boolean => {
   try {
     if (typeof window === "undefined") return false
 
-    // Check Global Privacy Control (GPC) signal first
+    // Check Global Privacy Control (GPC) signal first - always honored
     const gpc = (navigator as any)?.globalPrivacyControl
     if (gpc === true) return false
 
+    // Check Do Not Track signal - always honored
     const dt =
       (navigator as any)?.doNotTrack ||
       (window as any)?.doNotTrack ||
@@ -17,14 +18,14 @@ export const isAllowedToTrack = (): boolean => {
     const cookie = typeof document !== "undefined" ? document.cookie || "" : ""
     if (cookie.includes("esri_disallow_tracking=1")) return false
 
-    // Allow opt-in via localStorage key 'esri_allow_tracking' set to 'true'
+    // Check localStorage opt-in/opt-out (cannot override GPC/DNT)
     const storage = window.localStorage
       ? window.localStorage.getItem("esri_allow_tracking")
       : null
-    if (storage === "true") return true
     if (storage === "false") return false
+    if (storage === "true") return true
 
-    // Default to allowing tracking
+    // Default to NOT tracking (privacy-by-default)
     return false
   } catch (e) {
     return false

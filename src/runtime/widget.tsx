@@ -448,10 +448,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           syncSelectionGraphics(syncParams)
         }
 
-        if (isStaleRequest()) {
-          return
-        }
-
         tracker.success()
         trackEvent({
           category: "Query",

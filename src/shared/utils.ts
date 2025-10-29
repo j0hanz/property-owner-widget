@@ -104,9 +104,9 @@ export const isValidArcGISUrl = (
     // Enforce HTTPS only for security.
     const protocolValid = parsed.protocol === "https:"
     // Validate standard HTTPS port (443) or no explicit port.
-    const portValid = !parsed.port || parsed.port === "443"
+    const portValid = parsed.port === "" || parsed.port === "443"
     // Validate path ends with MapServer or FeatureServer and required layer ID or /query endpoint.
-    const pathValid = /\/(MapServer|FeatureServer)\/\d+(\/(query)?)?$/.test(
+    const pathValid = /\/(MapServer|FeatureServer)\/\d+(\/query)?$/.test(
       parsed.pathname
     )
     // Check host allowlist if provided.

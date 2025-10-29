@@ -36,8 +36,6 @@ const getOrCreateQuery = <T>(
 
   const promise = queryFn()
     .catch((error) => {
-      // Delete cache entry immediately on error to prevent pollution
-      cache.delete(key)
       const normalizedError =
         error instanceof Error ? error : new Error(String(error))
       throw normalizedError
