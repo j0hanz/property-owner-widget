@@ -1,5 +1,4 @@
 export default {
-  _widgetLabel: "Property Owner",
   widgetTitle: "Property Owner",
   description: "Retrieve property ownership information",
   clickMapInstruction: "Click on the map to display property details",

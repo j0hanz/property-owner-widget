@@ -591,9 +591,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       aria-label={translate("widgetTitle")}
     >
       <div css={styles.header}>
-        <div role="heading" aria-level={2} css={styles.heading}>
-          {translate("_widgetLabel")}
-        </div>
         <div id={`${id}-instructions`} aria-live="polite">
           {translate("clickMapInstruction")}
         </div>
