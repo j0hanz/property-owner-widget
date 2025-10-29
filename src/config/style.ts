@@ -57,9 +57,15 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       alignItems: "center",
       justifyContent: "center",
       flex: "1 1 0",
-      padding: spacing?.(2),
-      gap: spacing?.(2),
-      color: colors?.surface?.backgroundHint,
+      gap: spacing?.(4),
+    }),
+    svgState: css({
+      opacity: 0.2,
+    }),
+    messageState: css({
+      ...typo(typography?.label2),
+      textAlign: "center",
+      opacity: 0.8,
     }),
     loadingState: css({
       display: "flex",
@@ -67,8 +73,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       alignItems: "center",
       justifyContent: "center",
       flex: "1 1 0",
-      padding: spacing?.(1.5),
-      gap: spacing?.(2),
+      gap: spacing?.(4),
     }),
     listContainer: flex("column", {
       flex: "1 1 0",
