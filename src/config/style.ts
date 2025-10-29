@@ -38,10 +38,11 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     header: flexAuto("row", {
       alignItems: "center",
       justifyContent: "end",
+      backgroundColor: colors?.surface?.background,
       padding: spacing?.(1),
     }),
     cols: flexAuto("row", {
-      backgroundColor: colors?.surface?.background,
+      borderBlockEnd: `2px solid ${colors?.surface?.background}`,
     }),
     col: css({
       flex: "1 1 0",
@@ -54,7 +55,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     row: flexAuto("row", {
       gap: spacing?.(2),
       padding: spacing?.(1),
-      borderBlockEnd: `2px solid ${colors?.divider?.secondary}`,
+      borderBlockEnd: `2px solid ${colors?.surface?.background}`,
       alignItems: "center",
     }),
     column: css({ flex: "1 1 0", minWidth: 0 }),
