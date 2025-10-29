@@ -38,10 +38,10 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     header: flexAuto("row", {
       alignItems: "center",
       justifyContent: "end",
-      borderBlockEnd: `1px solid ${colors?.surface?.backgroundHint}`,
-      padding: spacing?.(1),
+      paddingInline: spacing?.(1),
     }),
     cols: flexAuto("row", {
+      borderBlockStart: `1px solid ${colors?.surface?.backgroundHint}`,
       borderBlockEnd: `1px solid ${colors?.surface?.backgroundHint}`,
     }),
     col: css({
