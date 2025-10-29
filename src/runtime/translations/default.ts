@@ -7,7 +7,7 @@ export default {
   queryingProperty: "Searching property...",
   queryingOwner: "Retrieving owner information...",
   noResults: "No properties found",
-  propertySelected: "property(ies) selected",
+  propertySelected: "Properties selected:",
   multipleOwnersFound: "Multiple owners found",
   columnFastighet: "Property",
   columnOwner: "Owner & Address",

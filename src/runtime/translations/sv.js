@@ -10,7 +10,7 @@ System.register([], function (e) {
         queryingProperty: "Söker fastighet...",
         queryingOwner: "Hämtar ägarinformation...",
         noResults: "Inga fastigheter hittades",
-        propertySelected: "fastighet(er) vald(a)",
+        propertySelected: "Fastigheter valda:",
         multipleOwnersFound: "Flera ägare hittades",
         columnFastighet: "Fastighet",
         columnOwner: "Ägare & Adress",

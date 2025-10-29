@@ -58,9 +58,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     errorHint: css({ color: colors?.surface?.backgroundHint }),
     buttons: flexAuto("row", { gap: spacing?.(1) }),
     footer: flexAuto("row", {
-      alignItems: "center",
-      justifyContent: "center",
-      padding: spacing?.(1),
+      borderBlockStart: `1px solid ${colors?.divider?.primary}`,
     }),
   } as const
 }

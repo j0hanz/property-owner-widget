@@ -674,9 +674,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       </div>
 
       <div css={styles.footer}>
-        <div role="status" aria-live="polite">
-          {state.selectedProperties.length} {translate("propertySelected")}
-        </div>
+        <div css={styles.col}>{translate("propertySelected")}</div>
+        <div css={styles.col}>{state.selectedProperties.length}</div>
       </div>
 
       {mapWidgetId && (
