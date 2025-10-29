@@ -53,6 +53,10 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       flex: "1 1 0",
       display: "flex",
       justifyContent: "center",
+      borderInlineEnd: border,
+      "&:last-child": {
+        borderInlineEnd: "none",
+      },
       padding: spacing?.(1),
     }),
     body: createFlex("column", { flex: "1 1 0", overflow: "auto" }),
