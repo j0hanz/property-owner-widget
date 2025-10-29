@@ -584,12 +584,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         aria-label={translate("widgetTitle")}
       >
         <div
-          css={styles.loading}
+          css={styles.loadingState}
           role="status"
           aria-live="polite"
           aria-busy="true"
         >
-          <Loading type={LoadingType.Donut} />
+          <Loading type={LoadingType.Donut} width={100} height={100} />
           <div>{translate("loadingModules")}</div>
         </div>
       </div>
@@ -603,7 +603,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         role="region"
         aria-label={translate("widgetTitle")}
       >
-        <div css={styles.error} role="alert" aria-live="assertive">
+        <div css={styles.emptyState} role="alert" aria-live="assertive">
           <Alert
             type="error"
             withIcon
@@ -652,18 +652,18 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       <div css={styles.body} role="main">
         {state.loading && (
           <div
-            css={styles.loading}
+            css={styles.loadingState}
             role="status"
             aria-live="polite"
             aria-busy="true"
           >
-            <Loading type={LoadingType.Donut} />
+            <Loading type={LoadingType.Donut} width={100} height={100} />
             <div>{translate("loadingData")}</div>
           </div>
         )}
 
         {state.error && (
-          <div css={styles.error} role="alert" aria-live="assertive">
+          <div css={styles.emptyState} role="alert" aria-live="assertive">
             <Alert type="error" withIcon text={state.error.message} />
             {state.error.details && <div>{state.error.details}</div>}
           </div>

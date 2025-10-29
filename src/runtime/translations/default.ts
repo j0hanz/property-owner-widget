@@ -9,6 +9,7 @@ export default {
   noResults: "No properties found",
   propertySelected: "Properties selected:",
   multipleOwnersFound: "Multiple owners found",
+  emptyStatePrompt: "Click on property",
   columnFastighet: "Property",
   columnOwner: "Owner & Address",
   actions: "Actions",
