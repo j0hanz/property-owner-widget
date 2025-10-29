@@ -56,7 +56,6 @@ import {
   trackFeatureUsage,
   createPerformanceTracker,
 } from "../shared/telemetry"
-import defaultMessages from "./translations/default"
 import clearIcon from "../assets/clear-selection-general.svg"
 
 const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
@@ -154,7 +153,7 @@ class PropertyWidgetErrorBoundary extends React.Component<
 const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const { config, id, useMapWidgetIds } = props
   const styles = useWidgetStyles()
-  const translate = hooks.useTranslation(defaultMessages)
+  const translate = hooks.useTranslation()
 
   const {
     modules,
@@ -632,7 +631,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
 const Widget = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const styles = useWidgetStyles()
-  const translate = hooks.useTranslation(defaultMessages)
+  const translate = hooks.useTranslation()
   return (
     <PropertyWidgetErrorBoundary styles={styles} translate={translate}>
       <WidgetContent {...props} />

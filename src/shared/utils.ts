@@ -11,36 +11,37 @@ import {
   OWNER_QUERY_CONCURRENCY,
 } from "../config/constants"
 
-const stripHtml = (str: string): string => {
+const sanitizeText = (str: string): string => {
   if (!str) return ""
-  // Use DOMParser to safely parse and extract text content
   const doc = new DOMParser().parseFromString(str, "text/html")
-  return doc.body.textContent || ""
+  const text = doc.body.textContent || ""
+  return text.replace(/[\s\u00A0\u200B]+/g, " ").trim()
+}
+
+const maskText = (text: string, minLength: number): string => {
+  const sanitized = sanitizeText(text)
+  if (sanitized.length < minLength) return "***"
+  return sanitized
 }
 
 export const maskName = (name: string): string => {
-  // Strip HTML first for security
-  const stripped = stripHtml(name)
-  // Normalize whitespace including non-breaking spaces, tabs, zero-width spaces
-  const normalized = stripped?.replace(/[\s\u00A0\u200B]+/g, " ").trim() || ""
-  if (normalized.length < MIN_MASK_LENGTH) return "***"
-  const parts = normalized.split(" ")
-  return parts
-    .map((part) =>
-      part.length > 0
-        ? `${part.charAt(0)}${"*".repeat(Math.min(MAX_MASK_ASTERISKS, part.length - 1))}`
-        : ""
-    )
+  const normalized = maskText(name, MIN_MASK_LENGTH)
+  if (normalized === "***") return normalized
+
+  return normalized
+    .split(" ")
     .filter(Boolean)
+    .map(
+      (part) =>
+        `${part.charAt(0)}${"*".repeat(Math.min(MAX_MASK_ASTERISKS, part.length - 1))}`
+    )
     .join(" ")
 }
 
 export const maskAddress = (address: string): string => {
-  // Strip HTML first for security
-  const stripped = stripHtml(address)
-  const normalized = stripped?.replace(/[\s\u00A0\u200B]+/g, " ").trim() || ""
-  if (normalized.length < MIN_MASK_LENGTH) return "***"
-  // Show only first 2 characters of address for privacy
+  const normalized = maskText(address, MIN_MASK_LENGTH)
+  if (normalized === "***") return normalized
+
   return `${normalized.substring(0, 2)}${"*".repeat(Math.min(5, normalized.length - 2))}`
 }
 
@@ -49,17 +50,17 @@ export const formatOwnerInfo = (
   maskPII: boolean,
   unknownOwnerText: string
 ): string => {
-  const rawName = stripHtml(owner.NAMN?.trim?.() || unknownOwnerText)
+  const rawName = sanitizeText(owner.NAMN || "") || unknownOwnerText
   const namePart =
     maskPII && rawName !== unknownOwnerText ? maskName(rawName) : rawName
-  const rawAddress = stripHtml(owner.BOSTADR?.trim?.() || "")
+
+  const rawAddress = sanitizeText(owner.BOSTADR || "")
   const addressPart =
     maskPII && rawAddress ? maskAddress(rawAddress) : rawAddress
-  const postalCode = stripHtml(owner.POSTNR?.replace(/\s+/g, "") || "")
-  const city = stripHtml(owner.POSTADR?.trim?.() || "")
-  // Organization numbers are public records in Sweden, no masking needed
-  const trimmedOrgNr = stripHtml(owner.ORGNR?.trim?.() || "")
-  const orgNrSuffix = trimmedOrgNr ? ` (${trimmedOrgNr})` : ""
+
+  const postalCode = sanitizeText(owner.POSTNR || "").replace(/\s+/g, "")
+  const city = sanitizeText(owner.POSTADR || "")
+  const orgNr = sanitizeText(owner.ORGNR || "")
 
   const parts = [
     namePart,
@@ -67,19 +68,51 @@ export const formatOwnerInfo = (
     postalCode && city ? `${postalCode} ${city}` : postalCode || city,
   ].filter(Boolean)
 
-  return parts.join(", ") + orgNrSuffix
+  return parts.join(", ") + (orgNr ? ` (${orgNr})` : "")
 }
 
 export const formatPropertyWithShare = (
   property: string,
   share?: string
 ): string => {
-  const trimmedShare = share?.trim?.()
+  const trimmedShare = share?.trim()
   return trimmedShare ? `${property} (${trimmedShare})` : property
 }
 
 export const createRowId = (fnr: string | number, objectId: number): string =>
   `${fnr}_${objectId}`
+
+const isPrivateHost = (hostname: string): boolean => {
+  const lower = hostname.toLowerCase()
+  return (
+    lower === "localhost" ||
+    lower === "127.0.0.1" ||
+    lower === "::1" ||
+    lower === "[::1]" ||
+    /^10\./.test(lower) ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(lower) ||
+    /^192\.168\./.test(lower)
+  )
+}
+
+const isValidHttpsUrl = (parsed: URL): boolean => {
+  return (
+    parsed.protocol === "https:" &&
+    (parsed.port === "" || parsed.port === "443")
+  )
+}
+
+const isValidArcGISPath = (pathname: string): boolean => {
+  return /\/(MapServer|FeatureServer)\/\d+(\/query)?$/.test(pathname)
+}
+
+const isHostAllowed = (
+  hostname: string,
+  allowedHosts?: readonly string[]
+): boolean => {
+  if (!allowedHosts || allowedHosts.length === 0) return true
+  return allowedHosts.some((h) => hostname === h || hostname.endsWith("." + h))
+}
 
 export const isValidArcGISUrl = (
   url: string,
@@ -88,36 +121,12 @@ export const isValidArcGISUrl = (
   try {
     const parsed = new URL(url)
 
-    // Reject localhost and private IP ranges for security
-    const hostname = parsed.hostname.toLowerCase()
-    if (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "::1" ||
-      hostname === "[::1]" ||
-      /^10\./.test(hostname) ||
-      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname) ||
-      /^192\.168\./.test(hostname)
-    ) {
-      return false
-    }
-
-    // Enforce HTTPS only for security.
-    const protocolValid = parsed.protocol === "https:"
-    // Validate standard HTTPS port (443) or no explicit port.
-    const portValid = parsed.port === "" || parsed.port === "443"
-    // Validate path ends with MapServer or FeatureServer and required layer ID or /query endpoint.
-    const pathValid = /\/(MapServer|FeatureServer)\/\d+(\/query)?$/.test(
-      parsed.pathname
+    return (
+      !isPrivateHost(parsed.hostname) &&
+      isValidHttpsUrl(parsed) &&
+      isValidArcGISPath(parsed.pathname) &&
+      isHostAllowed(parsed.hostname, allowedHosts)
     )
-    // Check host allowlist if provided.
-    const hostValid =
-      !allowedHosts ||
-      allowedHosts.length === 0 ||
-      allowedHosts.some(
-        (h) => parsed.hostname === h || parsed.hostname.endsWith("." + h)
-      )
-    return protocolValid && portValid && pathValid && hostValid
   } catch (_error) {
     return false
   }
@@ -133,10 +142,9 @@ export const buildFnrWhereClause = (
     }
     return `FNR = ${fnr}`
   }
-  const sanitized = String(fnr).replace(/'/g, "''")
 
-  // Reject empty or whitespace-only strings
-  if (sanitized.trim().length === 0) {
+  const sanitized = String(fnr).replace(/'/g, "''")
+  if (!sanitized.trim()) {
     throw new Error("Invalid FNR: cannot be empty or whitespace-only")
   }
 
@@ -158,38 +166,20 @@ export const normalizeFnrKey = (
 }
 
 export const isAbortError = (error: any): boolean => {
-  if (!error) return false
-  if (error.name === "AbortError") return true
-  if (
-    typeof error.message === "string" &&
-    error.message.toLowerCase().includes("abort")
-  ) {
-    return true
-  }
-  return false
+  return (
+    error?.name === "AbortError" ||
+    (typeof error?.message === "string" &&
+      error.message.toLowerCase().includes("abort"))
+  )
 }
 
 export const parseArcGISError = (
   error: any,
   defaultMessage: string
 ): string => {
-  if (!error) {
-    return defaultMessage
-  }
-
-  if (typeof error === "string") {
-    return error
-  }
-
-  if (error.details?.message) {
-    return error.details.message
-  }
-
-  if (error.message) {
-    return error.message
-  }
-
-  return defaultMessage
+  if (!error) return defaultMessage
+  if (typeof error === "string") return error
+  return error.details?.message || error.message || defaultMessage
 }
 
 const getDataSourceUrl = (
@@ -197,26 +187,27 @@ const getDataSourceUrl = (
 ): string | null => {
   if (!dataSource) return null
 
-  const layerDefinition = dataSource.getLayerDefinition?.()
-  const definitionUrl =
-    layerDefinition && typeof layerDefinition === "object"
-      ? (layerDefinition as { url?: string }).url
-      : undefined
-  if (typeof definitionUrl === "string" && definitionUrl.length > 0) {
-    return definitionUrl
-  }
+  const layerUrl = (dataSource.getLayerDefinition?.() as any)?.url
+  if (layerUrl) return layerUrl
 
-  const dataSourceJson = dataSource.getDataSourceJson?.()
-  const jsonUrl =
-    dataSourceJson && typeof dataSourceJson === "object"
-      ? (dataSourceJson as { url?: string }).url
-      : undefined
-  if (typeof jsonUrl === "string" && jsonUrl.length > 0) {
-    return jsonUrl
-  }
+  const jsonUrl = (dataSource.getDataSourceJson?.() as any)?.url
+  if (jsonUrl) return jsonUrl
 
-  const sourceUrl = (dataSource as any)?.url || (dataSource as any)?.layer?.url
-  return sourceUrl || null
+  return (dataSource as any)?.url || (dataSource as any)?.layer?.url || null
+}
+
+const createValidationError = (
+  type: "VALIDATION_ERROR" | "QUERY_ERROR",
+  message: string,
+  reason: string
+) => ({
+  valid: false as const,
+  error: { type, message },
+  failureReason: reason,
+})
+
+const isQueryableDataSource = (ds: FeatureLayerDataSource | null): boolean => {
+  return ds !== null && typeof ds.query === "function"
 }
 
 export const validateDataSources = (params: {
@@ -235,25 +226,19 @@ export const validateDataSources = (params: {
   const { propertyDsId, ownerDsId, dsManager, allowedHosts, translate } = params
 
   if (!propertyDsId || !ownerDsId) {
-    return {
-      valid: false,
-      error: {
-        type: "VALIDATION_ERROR" as const,
-        message: translate("errorNoDataAvailable"),
-      },
-      failureReason: "missing_data_sources",
-    }
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorNoDataAvailable"),
+      "missing_data_sources"
+    )
   }
 
   if (!dsManager) {
-    return {
-      valid: false,
-      error: {
-        type: "QUERY_ERROR" as const,
-        message: translate("errorQueryFailed"),
-      },
-      failureReason: "no_data_source_manager",
-    }
+    return createValidationError(
+      "QUERY_ERROR",
+      translate("errorQueryFailed"),
+      "no_data_source_manager"
+    )
   }
 
   const propertyDs = dsManager.getDataSource(
@@ -264,37 +249,27 @@ export const validateDataSources = (params: {
   ) as FeatureLayerDataSource | null
 
   if (!propertyDs || !ownerDs) {
-    return {
-      valid: false,
-      error: {
-        type: "VALIDATION_ERROR" as const,
-        message: translate("errorNoDataAvailable"),
-      },
-      failureReason: "missing_data_source_instance",
-    }
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorNoDataAvailable"),
+      "missing_data_source_instance"
+    )
   }
 
-  // Validate data source type supports querying
-  if (typeof propertyDs.query !== "function") {
-    return {
-      valid: false,
-      error: {
-        type: "VALIDATION_ERROR" as const,
-        message: translate("errorNoDataAvailable"),
-      },
-      failureReason: "property_ds_not_queryable",
-    }
+  if (!isQueryableDataSource(propertyDs)) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorNoDataAvailable"),
+      "property_ds_not_queryable"
+    )
   }
 
-  if (typeof ownerDs.query !== "function") {
-    return {
-      valid: false,
-      error: {
-        type: "VALIDATION_ERROR" as const,
-        message: translate("errorNoDataAvailable"),
-      },
-      failureReason: "owner_ds_not_queryable",
-    }
+  if (!isQueryableDataSource(ownerDs)) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorNoDataAvailable"),
+      "owner_ds_not_queryable"
+    )
   }
 
   const normalizedHosts = allowedHosts
@@ -302,43 +277,21 @@ export const validateDataSources = (params: {
     .filter((host) => host.length > 0)
 
   const propertyUrl = getDataSourceUrl(propertyDs)
-  if (
-    !propertyUrl ||
-    !isValidArcGISUrl(
-      propertyUrl,
-      normalizedHosts && normalizedHosts.length > 0
-        ? normalizedHosts
-        : undefined
+  if (!propertyUrl || !isValidArcGISUrl(propertyUrl, normalizedHosts)) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorHostNotAllowed"),
+      "property_disallowed_host"
     )
-  ) {
-    return {
-      valid: false,
-      error: {
-        type: "VALIDATION_ERROR" as const,
-        message: translate("errorHostNotAllowed"),
-      },
-      failureReason: "property_disallowed_host",
-    }
   }
 
   const ownerUrl = getDataSourceUrl(ownerDs)
-  if (
-    !ownerUrl ||
-    !isValidArcGISUrl(
-      ownerUrl,
-      normalizedHosts && normalizedHosts.length > 0
-        ? normalizedHosts
-        : undefined
+  if (!ownerUrl || !isValidArcGISUrl(ownerUrl, normalizedHosts)) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorHostNotAllowed"),
+      "owner_disallowed_host"
     )
-  ) {
-    return {
-      valid: false,
-      error: {
-        type: "VALIDATION_ERROR" as const,
-        message: translate("errorHostNotAllowed"),
-      },
-      failureReason: "owner_disallowed_host",
-    }
   }
 
   return { valid: true, manager: dsManager }
@@ -371,8 +324,8 @@ export const isDuplicateProperty = (
   fnr: string | number,
   existingProperties: Array<{ FNR: string | number }>
 ): boolean => {
-  const fnrKey = String(fnr)
-  return existingProperties.some((p) => String(p.FNR) === fnrKey)
+  const fnrKey = normalizeFnrKey(fnr)
+  return existingProperties.some((p) => normalizeFnrKey(p.FNR) === fnrKey)
 }
 
 export const shouldToggleRemove = (
@@ -439,24 +392,18 @@ const validatePropertyFeature = (
   propertyResult: any,
   extractFnr: (attrs: any) => string | number | null
 ): { fnr: string | number; attrs: any; graphic: __esri.Graphic } | null => {
-  const propertyGraphic = propertyResult.features?.[0]
-  if (!propertyGraphic?.attributes) return null
+  const graphic = propertyResult.features?.[0]
+  if (!graphic?.attributes || !graphic?.geometry) return null
 
-  // Validate graphic has required geometry
-  if (!propertyGraphic.geometry) return null
-
-  const propertyAttrs = propertyGraphic.attributes
-  const fnr = extractFnr(propertyAttrs)
+  const fnr = extractFnr(graphic.attributes)
   if (!fnr) return null
 
-  return { fnr, attrs: propertyAttrs, graphic: propertyGraphic }
+  return { fnr, attrs: graphic.attributes, graphic }
 }
 
 const fetchOwnerDataForProperty = async (params: {
   fnr: string | number
-  config: {
-    ownerDataSourceId: string
-  }
+  config: { ownerDataSourceId: string }
   dsManager: any
   signal?: AbortSignal
   helpers: {
@@ -470,31 +417,23 @@ const fetchOwnerDataForProperty = async (params: {
   }
 }): Promise<{ ownerFeatures: __esri.Graphic[]; queryFailed: boolean }> => {
   const { fnr, config, dsManager, signal, helpers } = params
-  let ownerFeatures: __esri.Graphic[] = []
-  let queryFailed = false
 
   try {
-    if (signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
-    ownerFeatures = await helpers.queryOwnerByFnr(
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
+
+    const ownerFeatures = await helpers.queryOwnerByFnr(
       fnr,
       config.ownerDataSourceId,
       dsManager,
       { signal }
     )
-  } catch (ownerError) {
-    if (helpers.isAbortError(ownerError)) {
-      throw ownerError instanceof Error
-        ? ownerError
-        : new Error(String(ownerError))
+    return { ownerFeatures, queryFailed: false }
+  } catch (error) {
+    if (helpers.isAbortError(error)) {
+      throw error instanceof Error ? error : new Error(String(error))
     }
-    queryFailed = true
+    return { ownerFeatures: [], queryFailed: true }
   }
-
-  return { ownerFeatures, queryFailed }
 }
 
 const processBatchOfProperties = async (params: {
@@ -606,6 +545,23 @@ const processBatchOfProperties = async (params: {
   return { rows, graphics }
 }
 
+const createGridRow = (params: {
+  fnr: string | number
+  objectId: number
+  uuidFastighet: string
+  fastighet: string
+  bostadr: string
+  graphic: __esri.Graphic
+  createRowId: (fnr: string | number, objectId: number) => string
+}): GridRowData => ({
+  id: params.createRowId(params.fnr, params.objectId),
+  FNR: params.fnr,
+  UUID_FASTIGHET: params.uuidFastighet,
+  FASTIGHET: params.fastighet,
+  BOSTADR: params.bostadr,
+  graphic: params.graphic,
+})
+
 const buildPropertyRows = (params: {
   fnr: string | number
   propertyAttrs: any
@@ -641,36 +597,38 @@ const buildPropertyRows = (params: {
 
   if (ownerFeatures.length > 0) {
     return ownerFeatures.map((ownerFeature) => {
-      const ownerAttrs = ownerFeature.attributes
-      return {
-        id: helpers.createRowId(fnr, ownerAttrs.OBJECTID),
-        FNR: fnr,
-        UUID_FASTIGHET: ownerAttrs.UUID_FASTIGHET,
-        FASTIGHET: helpers.formatPropertyWithShare(
-          ownerAttrs.FASTIGHET,
-          ownerAttrs.ANDEL || ""
+      const attrs = ownerFeature.attributes
+      return createGridRow({
+        fnr,
+        objectId: attrs.OBJECTID,
+        uuidFastighet: attrs.UUID_FASTIGHET,
+        fastighet: helpers.formatPropertyWithShare(
+          attrs.FASTIGHET,
+          attrs.ANDEL || ""
         ),
-        BOSTADR: helpers.formatOwnerInfo(
-          ownerAttrs,
+        bostadr: helpers.formatOwnerInfo(
+          attrs,
           config.enablePIIMasking,
           messages.unknownOwner
         ),
         graphic: propertyGraphic,
-      }
+        createRowId: helpers.createRowId,
+      })
     })
   }
 
   return [
-    {
-      id: helpers.createRowId(fnr, propertyAttrs.OBJECTID),
-      FNR: fnr,
-      UUID_FASTIGHET: propertyAttrs.UUID_FASTIGHET,
-      FASTIGHET: propertyAttrs.FASTIGHET,
-      BOSTADR: queryFailed
+    createGridRow({
+      fnr,
+      objectId: propertyAttrs.OBJECTID,
+      uuidFastighet: propertyAttrs.UUID_FASTIGHET,
+      fastighet: propertyAttrs.FASTIGHET,
+      bostadr: queryFailed
         ? messages.errorOwnerQueryFailed
         : messages.errorNoDataAvailable,
       graphic: propertyGraphic,
-    },
+      createRowId: helpers.createRowId,
+    }),
   ]
 }
 
@@ -798,15 +756,14 @@ export const validateMapClickInputs = (
     }
   }
 
-  const mapPoint = event?.mapPoint
-  if (!mapPoint) {
+  if (!event?.mapPoint) {
     return {
       valid: false,
       error: { type: "GEOMETRY_ERROR", message: translate("errorNoMapPoint") },
     }
   }
 
-  return { valid: true, mapPoint }
+  return { valid: true, mapPoint: event.mapPoint }
 }
 
 export const syncGraphicsWithState = (params: {

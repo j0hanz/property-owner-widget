@@ -14,13 +14,12 @@ import { DataSourceSelector } from "jimu-ui/advanced/data-source-selector"
 import { NumericInput, Switch, TextArea } from "jimu-ui"
 import type { IMConfig } from "../config/types"
 import { useSettingStyles } from "../config/style"
-import defaultMessages from "./translations/default"
 
 const Setting = (
   props: AllWidgetSettingProps<IMConfig>
 ): React.ReactElement => {
   const { config, id, onSettingChange, useDataSources } = props
-  const translate = hooks.useTranslation(defaultMessages)
+  const translate = hooks.useTranslation()
   const styles = useSettingStyles()
 
   const updateConfigField = hooks.useEventCallback(
