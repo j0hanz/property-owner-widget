@@ -12,6 +12,7 @@ System.register([], function (e) {
         noResults: "Inga fastigheter hittades",
         propertySelected: "Fastigheter valda:",
         multipleOwnersFound: "Flera ägare hittades",
+        emptyStatePrompt: "Klicka på fastighet",
         columnFastighet: "Fastighet",
         columnOwner: "Ägare & Adress",
         actions: "Åtgärder",
