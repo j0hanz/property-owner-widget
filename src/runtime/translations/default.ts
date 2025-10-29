@@ -1,7 +1,7 @@
 export default {
   widgetTitle: "Property Owner",
   description: "Retrieve property ownership information",
-  clickMapInstruction: "Click on the map to display property details",
+  clickMapInstruction: "Click on the map",
   loading: "Loading...",
   loadingData: "Retrieving property data...",
   loadingModules: "Loading map modules...",

@@ -4,7 +4,7 @@ System.register([], function (e) {
       e({
         widgetTitle: "Fastighetsägare",
         description: "Hämta fastighetsägarinformation",
-        clickMapInstruction: "Klicka i kartan för att visa fastighetsuppgifter",
+        clickMapInstruction: "Klicka i kartan",
         loading: "Laddar...",
         loadingData: "Hämtar fastighetsdata...",
         loadingModules: "Laddar kartmoduler...",

@@ -21,11 +21,12 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     list: flex("column", { flex: auto }),
     listItem: flex("row", {
       flex: "0 0 auto",
-      gap: spacing?.(1),
+      gap: spacing?.(2),
       padding: spacing?.(1),
       borderBlockEnd: `1px solid ${colors?.divider?.secondary}`,
+      alignItems: "center",
     }),
-    column: flex("column", { flex: auto }),
+    column: css({ flex: "1 1 0", minWidth: 0 }),
     actions: flex("row", { flex: "0 0 auto", alignItems: "center" }),
     empty: flex("column", {
       flex: auto,
