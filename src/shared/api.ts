@@ -56,6 +56,10 @@ const getOrCreateQuery = <T>(
   return promise
 }
 
+const createSignalOptions = (signal?: AbortSignal): any => {
+  return signal ? { signal } : undefined
+}
+
 export const queryPropertyByPoint = async (
   point: __esri.Point,
   dataSourceId: string,
@@ -87,12 +91,15 @@ export const queryPropertyByPoint = async (
           throw new Error("Property data source not found")
         }
 
-        const result = await ds.query({
-          geometry: point as any,
-          returnGeometry: true,
-          outFields: ["*"],
-          spatialRel: "esriSpatialRelIntersects" as any,
-        })
+        const result = await ds.query(
+          {
+            geometry: point as any,
+            returnGeometry: true,
+            outFields: ["*"],
+            spatialRel: "esriSpatialRelIntersects" as any,
+          },
+          createSignalOptions(options?.signal)
+        )
 
         if (options?.signal?.aborted) {
           const abortError = new Error("AbortError")
@@ -151,11 +158,14 @@ export const queryOwnerByFnr = async (
           throw new Error("Owner data source not found")
         }
 
-        const result = await ds.query({
-          where: buildFnrWhereClause(fnr),
-          returnGeometry: false,
-          outFields: ["*"],
-        })
+        const result = await ds.query(
+          {
+            where: buildFnrWhereClause(fnr),
+            returnGeometry: false,
+            outFields: ["*"],
+          },
+          createSignalOptions(options?.signal)
+        )
 
         if (options?.signal?.aborted) {
           const abortError = new Error("AbortError")
@@ -210,11 +220,14 @@ export const queryExtentForProperties = async (
 
     const whereClause = fnrs.map((fnr) => buildFnrWhereClause(fnr)).join(" OR ")
 
-    const result = await ds.query({
-      where: whereClause,
-      returnGeometry: true,
-      outFields: ["FNR"],
-    })
+    const result = await ds.query(
+      {
+        where: whereClause,
+        returnGeometry: true,
+        outFields: ["FNR"],
+      },
+      createSignalOptions(options?.signal)
+    )
 
     if (options?.signal?.aborted) {
       const abortError = new Error("AbortError")
@@ -293,11 +306,14 @@ export const queryOwnersByRelationship = async (
     const objectIds: number[] = []
     const fnrToObjectIdMap = new Map<number, string>()
 
-    const propertyResult = await propertyDs.query({
-      where: propertyFnrs.map((fnr) => buildFnrWhereClause(fnr)).join(" OR "),
-      outFields: ["FNR", "OBJECTID"],
-      returnGeometry: false,
-    })
+    const propertyResult = await propertyDs.query(
+      {
+        where: propertyFnrs.map((fnr) => buildFnrWhereClause(fnr)).join(" OR "),
+        outFields: ["FNR", "OBJECTID"],
+        returnGeometry: false,
+      },
+      createSignalOptions(options?.signal)
+    )
 
     if (options?.signal?.aborted) {
       const abortError = new Error("AbortError")
@@ -321,7 +337,10 @@ export const queryOwnersByRelationship = async (
     relationshipQuery.relationshipId = relationshipId
     relationshipQuery.outFields = ["*"]
 
-    const result = await queryTask.executeRelationshipQuery(relationshipQuery)
+    const result = await queryTask.executeRelationshipQuery(
+      relationshipQuery,
+      createSignalOptions(options?.signal)
+    )
 
     if (options?.signal?.aborted) {
       const abortError = new Error("AbortError")
@@ -393,12 +412,15 @@ export const queryPropertiesInBuffer = async (
       throw new Error("Property data source not found")
     }
 
-    const result = await ds.query({
-      geometry: bufferGeometry,
-      spatialRel: "esriSpatialRelIntersects" as any,
-      returnGeometry: true,
-      outFields: ["*"],
-    })
+    const result = await ds.query(
+      {
+        geometry: bufferGeometry,
+        spatialRel: "esriSpatialRelIntersects" as any,
+        returnGeometry: true,
+        outFields: ["*"],
+      },
+      createSignalOptions(options?.signal)
+    )
 
     if (options?.signal?.aborted) {
       const abortError = new Error("AbortError")

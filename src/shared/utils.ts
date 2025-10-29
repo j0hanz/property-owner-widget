@@ -4,6 +4,7 @@ import type {
   GridRowData,
   ValidationResult,
 } from "../config/types"
+import { isValidationFailure } from "../config/types"
 import type { DataSourceManager, FeatureLayerDataSource } from "jimu-core"
 import { loadArcGISJSAPIModules } from "jimu-arcgis"
 import {
@@ -11,11 +12,6 @@ import {
   MAX_MASK_ASTERISKS,
   OWNER_QUERY_CONCURRENCY,
 } from "../config/constants"
-
-// =============================================================================
-// PII MASKING & FORMATTING
-// Functions for privacy-preserving data display and text formatting
-// =============================================================================
 
 /** Sanitize HTML content and normalize whitespace */
 const sanitizeText = (str: string): string => {
@@ -94,11 +90,6 @@ export const formatPropertyWithShare = (
 /** Create unique row identifier from FNR and OBJECTID */
 export const createRowId = (fnr: string | number, objectId: number): string =>
   `${fnr}_${objectId}`
-
-// =============================================================================
-// VALIDATION & SANITIZATION
-// Security-focused input validation and error handling
-// =============================================================================
 
 /** Check if hostname is private IP or localhost */
 const isPrivateHost = (hostname: string): boolean => {
@@ -272,6 +263,26 @@ export const validateDataSources = (params: {
     ownerDsId
   ) as FeatureLayerDataSource | null
 
+  // Validate both data sources are queryable
+  const propertyDsValidation = validateSingleDataSource(
+    propertyDs,
+    "property",
+    translate
+  )
+  if (isValidationFailure(propertyDsValidation)) {
+    return propertyDsValidation
+  }
+
+  const ownerDsValidation = validateSingleDataSource(
+    ownerDs,
+    "owner",
+    translate
+  )
+  if (isValidationFailure(ownerDsValidation)) {
+    return ownerDsValidation
+  }
+
+  // Type narrowing after successful validation
   if (!propertyDs || !ownerDs) {
     return createValidationError(
       "VALIDATION_ERROR",
@@ -280,51 +291,92 @@ export const validateDataSources = (params: {
     )
   }
 
-  if (!isQueryableDataSource(propertyDs)) {
+  // Validate both URLs against allowed hosts
+  const propertyUrlValidation = validateDataSourceUrl(
+    propertyDs,
+    "property",
+    allowedHosts,
+    translate
+  )
+  if (isValidationFailure(propertyUrlValidation)) {
+    return propertyUrlValidation
+  }
+
+  const ownerUrlValidation = validateDataSourceUrl(
+    ownerDs,
+    "owner",
+    allowedHosts,
+    translate
+  )
+  if (isValidationFailure(ownerUrlValidation)) {
+    return ownerUrlValidation
+  }
+
+  // Type narrowing: both data sources validated as non-null and queryable
+  if (!propertyDs || !ownerDs) {
     return createValidationError(
       "VALIDATION_ERROR",
       translate("errorNoDataAvailable"),
-      "property_ds_not_queryable"
-    )
-  }
-
-  if (!isQueryableDataSource(ownerDs)) {
-    return createValidationError(
-      "VALIDATION_ERROR",
-      translate("errorNoDataAvailable"),
-      "owner_ds_not_queryable"
-    )
-  }
-
-  const normalizedHosts = allowedHosts
-    ?.map((host) => host.trim())
-    .filter((host) => host.length > 0)
-
-  const propertyUrl = getDataSourceUrl(propertyDs)
-  if (!propertyUrl || !isValidArcGISUrl(propertyUrl, normalizedHosts)) {
-    return createValidationError(
-      "VALIDATION_ERROR",
-      translate("errorHostNotAllowed"),
-      "property_disallowed_host"
-    )
-  }
-
-  const ownerUrl = getDataSourceUrl(ownerDs)
-  if (!ownerUrl || !isValidArcGISUrl(ownerUrl, normalizedHosts)) {
-    return createValidationError(
-      "VALIDATION_ERROR",
-      translate("errorHostNotAllowed"),
-      "owner_disallowed_host"
+      "data_source_null_after_validation"
     )
   }
 
   return { valid: true, data: { manager: dsManager } }
 }
 
-// =============================================================================
-// GRAPHICS & MAP INTERACTIONS
-// Functions for managing map graphics and handling map events
-// =============================================================================
+/**
+ * Validate single data source is queryable
+ * Internal helper for validateDataSources
+ */
+const validateSingleDataSource = (
+  ds: FeatureLayerDataSource | null,
+  dsType: "property" | "owner",
+  translate: (key: string) => string
+): ValidationResult<null> => {
+  if (!ds) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorNoDataAvailable"),
+      `${dsType}_ds_not_found`
+    )
+  }
+
+  if (!isQueryableDataSource(ds)) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorNoDataAvailable"),
+      `${dsType}_ds_not_queryable`
+    )
+  }
+
+  return { valid: true, data: null }
+}
+
+/**
+ * Validate data source URL against allowed hosts
+ * Internal helper for validateDataSources
+ */
+const validateDataSourceUrl = (
+  ds: FeatureLayerDataSource,
+  dsType: "property" | "owner",
+  allowedHosts: readonly string[] | undefined,
+  translate: (key: string) => string
+): ValidationResult<null> => {
+  const normalizedHosts = allowedHosts
+    ?.map((host) => host.trim())
+    .filter((host) => host.length > 0)
+
+  const url = getDataSourceUrl(ds)
+  if (!url || !isValidArcGISUrl(url, normalizedHosts)) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorHostNotAllowed"),
+      `${dsType}_disallowed_host`
+    )
+  }
+
+  return { valid: true, data: null }
+}
 
 /** Remove graphics for properties no longer in selection */
 export const cleanupRemovedGraphics = (params: {
@@ -349,11 +401,6 @@ export const cleanupRemovedGraphics = (params: {
     }
   })
 }
-
-// =============================================================================
-// PROPERTY SELECTION LOGIC
-// Business logic for property selection, deduplication, and toggle behavior
-// =============================================================================
 
 /** Check if property already exists in selection (by FNR) */
 export const isDuplicateProperty = (
@@ -437,6 +484,30 @@ const validatePropertyFeature = (
   if (!fnr) return null
 
   return { fnr, attrs: graphic.attributes, graphic }
+}
+
+const validateAndDeduplicateProperties = (
+  propertyResults: any[],
+  extractFnr: (attrs: any) => string | number | null,
+  maxResults?: number
+): Array<{ fnr: string | number; attrs: any; graphic: __esri.Graphic }> => {
+  const processedFnrs = new Set<string | number>()
+  const validatedProperties: Array<{
+    fnr: string | number
+    attrs: any
+    graphic: __esri.Graphic
+  }> = []
+
+  for (const propertyResult of propertyResults) {
+    const validated = validatePropertyFeature(propertyResult, extractFnr)
+    if (validated && !processedFnrs.has(validated.fnr)) {
+      processedFnrs.add(validated.fnr)
+      validatedProperties.push(validated)
+      if (maxResults && validatedProperties.length >= maxResults) break
+    }
+  }
+
+  return validatedProperties
 }
 
 const fetchOwnerDataForProperty = async (params: {
@@ -676,11 +747,6 @@ const buildPropertyRows = (params: {
   ]
 }
 
-// =============================================================================
-// QUERY RESULT PROCESSING
-// Functions for processing property queries and enriching with owner data
-// =============================================================================
-
 /** Process property results using batch relationship query (performance optimized) */
 export const processPropertyResultsWithBatchQuery = async (params: {
   propertyResults: any[]
@@ -733,24 +799,12 @@ export const processPropertyResultsWithBatchQuery = async (params: {
     fnr: string | number
   }> = []
   const rowsToProcess: GridRowData[] = []
-  const processedFnrs = new Set<string | number>()
-  const validatedProperties: Array<{
-    fnr: string | number
-    attrs: any
-    graphic: __esri.Graphic
-  }> = []
 
-  for (const propertyResult of propertyResults) {
-    const validated = validatePropertyFeature(
-      propertyResult,
-      helpers.extractFnr
-    )
-    if (validated && !processedFnrs.has(validated.fnr)) {
-      processedFnrs.add(validated.fnr)
-      validatedProperties.push(validated)
-      if (validatedProperties.length >= maxResults) break
-    }
-  }
+  const validatedProperties = validateAndDeduplicateProperties(
+    propertyResults,
+    helpers.extractFnr,
+    maxResults
+  )
 
   if (validatedProperties.length === 0) {
     return { rowsToProcess: [], graphicsToAdd: [] }
@@ -759,6 +813,7 @@ export const processPropertyResultsWithBatchQuery = async (params: {
   const fnrsToQuery = validatedProperties.map((p) => p.fnr)
 
   let ownersByFnr: Map<string, any[]>
+  const failedFnrs = new Set<string>()
   try {
     ownersByFnr = await helpers.queryOwnersByRelationship(
       fnrsToQuery,
@@ -774,6 +829,7 @@ export const processPropertyResultsWithBatchQuery = async (params: {
     }
     console.error("Batch owner query failed:", error)
     ownersByFnr = new Map()
+    fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)))
   }
 
   for (const { fnr, attrs, graphic } of validatedProperties) {
@@ -804,13 +860,16 @@ export const processPropertyResultsWithBatchQuery = async (params: {
         )
       }
     } else {
+      const fallbackMessage = failedFnrs.has(String(fnr))
+        ? messages.errorOwnerQueryFailed
+        : messages.errorNoDataAvailable
       rowsToProcess.push(
         createGridRow({
           fnr,
           objectId: attrs.OBJECTID,
           uuidFastighet: attrs.UUID_FASTIGHET,
           fastighet: attrs.FASTIGHET,
-          bostadr: messages.errorNoDataAvailable,
+          bostadr: fallbackMessage,
           graphic,
           createRowId: helpers.createRowId,
         })
@@ -871,23 +930,11 @@ export const processPropertyResults = async (params: {
     fnr: string | number
   }> = []
   const rowsToProcess: GridRowData[] = []
-  const processedFnrs = new Set<string | number>()
-  const validatedProperties: Array<{
-    fnr: string | number
-    attrs: any
-    graphic: __esri.Graphic
-  }> = []
 
-  for (const propertyResult of propertyResults) {
-    const validated = validatePropertyFeature(
-      propertyResult,
-      helpers.extractFnr
-    )
-    if (validated && !processedFnrs.has(validated.fnr)) {
-      processedFnrs.add(validated.fnr)
-      validatedProperties.push(validated)
-    }
-  }
+  const validatedProperties = validateAndDeduplicateProperties(
+    propertyResults,
+    helpers.extractFnr
+  )
 
   for (let index = 0; index < validatedProperties.length; ) {
     const remainingSlots = maxResults - rowsToProcess.length
@@ -1014,7 +1061,6 @@ export const syncGraphicsWithState = (params: {
       outlineWidth
     )
   })
-
   return true
 }
 

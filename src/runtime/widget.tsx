@@ -9,6 +9,8 @@ import {
 } from "jimu-core"
 import { JimuMapViewComponent } from "jimu-arcgis"
 import { Alert, Button, Loading, LoadingType, SVG } from "jimu-ui"
+import { PropertyTable } from "./components/table"
+import { createPropertyTableColumns } from "../shared/config"
 import type {
   IMConfig,
   ErrorBoundaryProps,
@@ -49,11 +51,7 @@ import {
   cleanupRemovedGraphics,
   isValidationFailure,
 } from "../shared/utils"
-import {
-  GRID_COLUMN_KEYS,
-  HIGHLIGHT_COLOR_RGBA,
-  OUTLINE_WIDTH,
-} from "../config/constants"
+import { HIGHLIGHT_COLOR_RGBA, OUTLINE_WIDTH } from "../config/constants"
 import {
   trackEvent,
   trackError,
@@ -178,6 +176,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const toggleEnabled = config.enableToggleRemoval
   const piiMaskingEnabled = config.enablePIIMasking
   const mapWidgetId = useMapWidgetIds?.[0]
+
+  const tableColumns = hooks.useEventCallback(() =>
+    createPropertyTableColumns({
+      translate,
+      onRemove: handleRemoveProperty,
+    })
+  )
 
   const handleRemoveProperty = hooks.useEventCallback(
     (fnr: string | number) => {
@@ -457,16 +462,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         let syncParams: SelectionGraphicsParams | null = null
 
-        // Capture stale check result BEFORE setState to ensure consistency
-        const wasStaleBeforeUpdate = isStaleRequest()
-
-        if (wasStaleBeforeUpdate) {
-          return
-        }
+        // Capture requestId snapshot to prevent TOCTOU race condition
+        const requestIdSnapshot = requestIdRef.current
+        const isStaleRequestSnapshot = () => requestId !== requestIdSnapshot
 
         setState((prev) => {
-          // Recheck staleness inside setState to catch concurrent updates
-          if (isStaleRequest()) {
+          // Check staleness using snapshot (atomic check)
+          if (isStaleRequestSnapshot()) {
             return prev
           }
           const { updatedRows, toRemove } = calculatePropertyUpdates(
@@ -515,8 +517,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           }
         })
 
-        // Revalidate staleness before executing side effects
-        if (isStaleRequest()) {
+        // Revalidate staleness before executing side effects using snapshot
+        if (isStaleRequestSnapshot()) {
           releaseController(controller)
           return
         }
@@ -716,38 +718,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           !state.loading &&
           !state.error &&
           state.selectedProperties.length > 0 && (
-            <div
-              css={styles.list}
-              role="list"
-              aria-label={translate("widgetTitle")}
-            >
-              {state.selectedProperties.map((row) => (
-                <div css={styles.row} role="listitem" key={row.id}>
-                  <div
-                    css={styles.column}
-                    data-column={GRID_COLUMN_KEYS.FASTIGHET}
-                  >
-                    {row.FASTIGHET}
-                  </div>
-                  <div
-                    css={styles.column}
-                    data-column={GRID_COLUMN_KEYS.BOSTADR}
-                  >
-                    {row.BOSTADR}
-                  </div>
-                  <div css={styles.actions}>
-                    <Button
-                      type="tertiary"
-                      size="sm"
-                      onClick={() => handleRemoveProperty(row.FNR)}
-                      aria-label={`${translate("removeProperty")} ${row.FASTIGHET}`}
-                    >
-                      {translate("removeProperty")}
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <PropertyTable
+              data={state.selectedProperties}
+              columns={tableColumns()}
+              translate={translate}
+              styles={styles}
+            />
           )}
       </div>
 

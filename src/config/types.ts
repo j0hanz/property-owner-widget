@@ -1,4 +1,5 @@
 import type { ImmutableObject, DataSourceManager } from "jimu-core"
+import type { ColumnDef } from "@tanstack/react-table"
 import type { WidgetStyles } from "./style"
 
 export interface Config {
@@ -218,4 +219,17 @@ export interface StandardQueryConfig {
 export interface BatchQueryConfig extends StandardQueryConfig {
   readonly propertyDataSourceId: string
   readonly relationshipId: number
+}
+
+export type FlexDirection = "row" | "column"
+
+export interface StyleObject {
+  [key: string]: any
+}
+
+export interface PropertyTableProps {
+  data: GridRowData[]
+  columns: Array<ColumnDef<GridRowData, any>>
+  translate: (key: string) => string
+  styles: WidgetStyles
 }
