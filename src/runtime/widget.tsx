@@ -641,7 +641,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             disabled={state.selectedProperties.length === 0 || state.loading}
             aria-label={translate("zoomToResults")}
           >
-            <SVG src={zoomIcon} />
+            <SVG src={zoomIcon} size={20} />
           </Button>
           <Button
             type="tertiary"
@@ -650,7 +650,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             title={translate("clearAll")}
             disabled={state.selectedProperties.length === 0}
           >
-            <SVG src={clearIcon} />
+            <SVG src={clearIcon} size={20} />
           </Button>
         </div>
       </div>
