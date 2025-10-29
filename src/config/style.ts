@@ -1,5 +1,16 @@
-import { css, type IMThemeVariables } from "jimu-core"
+import { css, type IMThemeVariables, type ImmutableObject } from "jimu-core"
 import { useTheme } from "jimu-theme"
+import type { TypographyStyle } from "jimu-theme"
+
+// Internal helpers
+const typo = (variant: ImmutableObject<TypographyStyle>) => ({
+  fontFamily: variant?.fontFamily,
+  fontWeight: variant?.fontWeight?.toString(),
+  fontSize: variant?.fontSize,
+  fontStyle: variant?.fontStyle,
+  lineHeight: variant?.lineHeight,
+  color: variant?.color,
+})
 
 const flex = (dir: "row" | "column", styles: { [key: string]: any } = {}) =>
   css({
@@ -14,6 +25,7 @@ const flexAuto = (dir: "row" | "column", styles: { [key: string]: any } = {}) =>
 export const createWidgetStyles = (theme: IMThemeVariables) => {
   const spacing = theme.sys.spacing
   const colors = theme.sys.color
+  const typography = theme.sys.typography
 
   return {
     parent: flex("column", {
@@ -59,6 +71,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     buttons: flexAuto("row", { gap: spacing?.(1) }),
     footer: flexAuto("row", {
       borderBlockStart: `1px solid ${colors?.divider?.primary}`,
+      ...typo(typography?.label2),
     }),
   } as const
 }
