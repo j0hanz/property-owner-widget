@@ -4,13 +4,11 @@ System.register([], function (e) {
       e({
         widgetTitle: "Fastighetsägare",
         description: "Hämta fastighetsägarinformation",
-        clickMapInstruction: "Klicka i kartan",
         loading: "Laddar...",
         loadingData: "Hämtar fastighetsdata...",
         loadingModules: "Laddar kartmoduler...",
         queryingProperty: "Söker fastighet...",
         queryingOwner: "Hämtar ägarinformation...",
-        noDataMessage: "Klicka i kartan för att visa fastighetsuppgifter",
         noResults: "Inga fastigheter hittades",
         propertySelected: "fastighet(er) vald(a)",
         multipleOwnersFound: "Flera ägare hittades",

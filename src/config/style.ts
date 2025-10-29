@@ -8,48 +8,50 @@ const flex = (dir: "row" | "column", styles: { [key: string]: any } = {}) =>
     ...styles,
   })
 
+const flexAuto = (dir: "row" | "column", styles: { [key: string]: any } = {}) =>
+  flex(dir, { flex: "0 0 auto", ...styles })
+
 export const createWidgetStyles = (theme: IMThemeVariables) => {
   const spacing = theme.sys.spacing
   const colors = theme.sys.color
-  const gap = spacing?.(2)
-  const auto = "1 1 auto"
 
   return {
-    parent: flex("column", { flex: auto, gap, padding: gap }),
-    header: css({ flex: "0 0 auto" }),
-    listContainer: flex("column", { flex: auto, overflow: "auto" }),
-    list: flex("column", { flex: auto }),
-    listItem: flex("row", {
-      flex: "0 0 auto",
+    parent: flex("column", {
+      flex: "1 1 auto",
+      overflowY: "auto",
+      blockSize: "100%",
+      gap: spacing?.(2),
+      padding: spacing?.(1),
+      backgroundColor: colors?.surface?.paper,
+    }),
+    header: flexAuto("row", {
+      alignItems: "center",
+      justifyContent: "space-between",
+    }),
+    cols: flexAuto("row", {
+      padding: spacing?.(1),
+      borderBlockEnd: `1px solid ${colors?.divider?.primary}`,
+    }),
+    col: css({ flex: "1 1 0", minWidth: 0 }),
+    body: flex("column", { flex: "1 1 0", overflow: "auto" }),
+    list: flexAuto("column"),
+    row: flexAuto("row", {
       gap: spacing?.(2),
       padding: spacing?.(1),
       borderBlockEnd: `1px solid ${colors?.divider?.secondary}`,
       alignItems: "center",
     }),
     column: css({ flex: "1 1 0", minWidth: 0 }),
-    actions: flex("row", { flex: "0 0 auto", alignItems: "center" }),
-    empty: flex("column", {
-      flex: auto,
-      placeContent: "center",
-      alignItems: "center",
-      color: colors?.surface?.backgroundHint,
-    }),
+    actions: flexAuto("row", { alignItems: "center" }),
     loading: css({ padding: spacing?.(1.5) }),
     error: css({ padding: spacing?.(1.5) }),
-    errorBoundary: flex("column", {
-      flex: auto,
+    errorWrap: flex("column", {
+      flex: "1 1 auto",
       gap: spacing?.(1),
-      padding: gap,
+      padding: spacing?.(2),
     }),
-    errorDetails: css({
-      color: colors?.surface?.backgroundHint,
-    }),
-    footer: flex("row", {
-      flex: "0 0 auto",
-      alignItems: "center",
-      justifyContent: "space-between",
-    }),
-    footerActions: flex("row", { flex: "0 0 auto", gap: spacing?.(1) }),
+    errorHint: css({ color: colors?.surface?.backgroundHint }),
+    buttons: flexAuto("row", { gap: spacing?.(1) }),
   } as const
 }
 
@@ -66,7 +68,6 @@ export const createSettingStyles = (theme: IMThemeVariables) => {
   const typography = theme.sys.typography
 
   return {
-    row: css({ inlineSize: "100%" }),
     description: css({
       fontSize: typography?.body1?.fontSize,
       color: colors?.surface?.backgroundHint,

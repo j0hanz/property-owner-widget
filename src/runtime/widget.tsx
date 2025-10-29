@@ -132,14 +132,14 @@ class PropertyWidgetErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div css={this.props.styles.errorBoundary}>
+        <div css={this.props.styles.errorWrap}>
           <Alert
             type="error"
             withIcon
             text={this.props.translate("errorBoundaryMessage")}
           />
           {this.state.error && (
-            <div css={this.props.styles.errorDetails}>
+            <div css={this.props.styles.errorHint}>
               {this.state.error.message}
             </div>
           )}
@@ -591,12 +591,34 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       aria-label={translate("widgetTitle")}
     >
       <div css={styles.header}>
-        <div id={`${id}-instructions`} aria-live="polite">
-          {translate("clickMapInstruction")}
+        <div role="status" aria-live="polite">
+          {state.selectedProperties.length} {translate("propertySelected")}
+        </div>
+        <div css={styles.buttons}>
+          {state.undoHistory.length > 0 && (
+            <Button
+              size="sm"
+              type="tertiary"
+              onClick={handleUndo}
+              aria-label={translate("undoLastAction")}
+            >
+              {translate("undo")}
+            </Button>
+          )}
+          {state.selectedProperties.length > 0 && (
+            <Button size="sm" type="secondary" onClick={handleClearAll}>
+              {translate("clearAll")}
+            </Button>
+          )}
         </div>
       </div>
 
-      <div css={styles.listContainer} role="main">
+      <div css={styles.cols}>
+        <div css={styles.col}>{translate("columnFastighet")}</div>
+        <div css={styles.col}>{translate("columnOwner")}</div>
+      </div>
+
+      <div css={styles.body} role="main">
         {state.loading && (
           <div
             css={styles.loading}
@@ -616,73 +638,42 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           </div>
         )}
 
-        {!state.loading && !state.error && (
-          <>
-            {state.selectedProperties.length === 0 && (
-              <div css={styles.empty} role="status" aria-live="polite">
-                {translate("noDataMessage")}
-              </div>
-            )}
-            {state.selectedProperties.length > 0 && (
-              <div
-                css={styles.list}
-                role="list"
-                aria-label={translate("widgetTitle")}
-                aria-describedby={`${id}-instructions`}
-              >
-                {state.selectedProperties.map((row) => (
-                  <div css={styles.listItem} role="listitem" key={row.id}>
-                    <div
-                      css={styles.column}
-                      data-column={GRID_COLUMN_KEYS.FASTIGHET}
-                    >
-                      {row.FASTIGHET}
-                    </div>
-                    <div
-                      css={styles.column}
-                      data-column={GRID_COLUMN_KEYS.BOSTADR}
-                    >
-                      {row.BOSTADR}
-                    </div>
-                    <div css={styles.actions}>
-                      <Button
-                        type="tertiary"
-                        size="sm"
-                        onClick={() => handleRemoveProperty(row.FNR)}
-                        aria-label={`${translate("removeProperty")} ${row.FASTIGHET}`}
-                      >
-                        {translate("removeProperty")}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      <div css={styles.footer}>
-        <div role="status" aria-live="polite">
-          {state.selectedProperties.length} {translate("propertySelected")}
-        </div>
-        <div css={styles.footerActions}>
-          {state.undoHistory.length > 0 && (
-            <Button
-              size="sm"
-              type="tertiary"
-              onClick={handleUndo}
-              aria-label={translate("undoLastAction")}
+        {!state.loading &&
+          !state.error &&
+          state.selectedProperties.length > 0 && (
+            <div
+              css={styles.list}
+              role="list"
+              aria-label={translate("widgetTitle")}
             >
-              {translate("undo")}
-            </Button>
+              {state.selectedProperties.map((row) => (
+                <div css={styles.row} role="listitem" key={row.id}>
+                  <div
+                    css={styles.column}
+                    data-column={GRID_COLUMN_KEYS.FASTIGHET}
+                  >
+                    {row.FASTIGHET}
+                  </div>
+                  <div
+                    css={styles.column}
+                    data-column={GRID_COLUMN_KEYS.BOSTADR}
+                  >
+                    {row.BOSTADR}
+                  </div>
+                  <div css={styles.actions}>
+                    <Button
+                      type="tertiary"
+                      size="sm"
+                      onClick={() => handleRemoveProperty(row.FNR)}
+                      aria-label={`${translate("removeProperty")} ${row.FASTIGHET}`}
+                    >
+                      {translate("removeProperty")}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
-          {state.selectedProperties.length > 0 && (
-            <Button size="sm" type="secondary" onClick={handleClearAll}>
-              {translate("clearAll")}
-            </Button>
-          )}
-        </div>
       </div>
 
       {mapWidgetId && (
