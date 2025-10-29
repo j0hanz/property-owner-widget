@@ -28,6 +28,16 @@ System.register([], function (e) {
         allowedHostsDescription:
           "Lista över tillåtna värdnamn för URL-validering (en per rad). Lämna tomt för att tillåta alla HTTPS ArcGIS-tjänster.",
         allowedHostsPlaceholder: "lund.se\narcgis.com\nesri.com",
+        relationshipTitle: "Relationskonfiguration",
+        enableBatchOwnerQueryLabel: "Aktivera batch-ägarsökningar",
+        enableBatchOwnerQueryDescription:
+          "Använd relationsklass för att hämta alla ägare i en enda fråga istället för enskilda förfrågningar. Kräver relationskonfiguration i ArcGIS-lager.",
+        relationshipIdLabel: "Relations-ID",
+        relationshipIdDescription:
+          "Relationsklassens ID som länkar fastighetsskiften till ägaruppgifter. Hitta detta i ditt lagers REST API-slutpunkt under 'relationships'-arrayen.",
+        relationshipIdPlaceholder: "t.ex. 0, 1, 2",
+        relationshipIdTooltip:
+          "Kontrollera /MapServer/[layerId]?f=json i din fastighetslager-URL för att hitta tillgängliga relationer.",
         errorInvalidUrl: "Ange en giltig ArcGIS REST-tjänst-URL.",
         errorInvalidNumber: "Ange ett heltal större än noll.",
       })

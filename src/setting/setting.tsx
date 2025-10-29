@@ -83,6 +83,17 @@ const Setting = (
     }
   )
 
+  const handleBatchOwnerQueryChange = hooks.useEventCallback(
+    (evt: React.ChangeEvent<HTMLInputElement>) => {
+      updateConfigField("enableBatchOwnerQuery", evt.target.checked)
+    }
+  )
+
+  const handleRelationshipIdChange = hooks.useEventCallback((value: number) => {
+    const validValue = Math.max(0, Math.floor(value))
+    updateConfigField("relationshipId", validValue)
+  })
+
   return (
     <>
       <SettingSection title={translate("dataSourcesTitle")}>
@@ -149,6 +160,45 @@ const Setting = (
             aria-label={translate("allowedHostsLabel")}
           />
         </SettingRow>
+      </SettingSection>
+
+      <SettingSection title={translate("relationshipTitle")}>
+        <SettingRow
+          flow="no-wrap"
+          level={2}
+          label={translate("enableBatchOwnerQueryLabel")}
+        >
+          <Switch
+            checked={config.enableBatchOwnerQuery ?? false}
+            onChange={handleBatchOwnerQueryChange}
+            aria-label={translate("enableBatchOwnerQueryLabel")}
+          />
+        </SettingRow>
+        <div css={styles.description}>
+          {translate("enableBatchOwnerQueryDescription")}
+        </div>
+
+        {config.enableBatchOwnerQuery && (
+          <>
+            <SettingRow
+              flow="wrap"
+              level={2}
+              label={translate("relationshipIdLabel")}
+            >
+              <NumericInput
+                value={config.relationshipId ?? 0}
+                min={0}
+                max={99}
+                onChange={handleRelationshipIdChange}
+                aria-label={translate("relationshipIdLabel")}
+                title={translate("relationshipIdTooltip")}
+              />
+            </SettingRow>
+            <div css={styles.description}>
+              {translate("relationshipIdDescription")}
+            </div>
+          </>
+        )}
       </SettingSection>
     </>
   )

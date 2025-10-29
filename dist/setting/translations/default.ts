@@ -25,6 +25,16 @@ export default {
   allowedHostsDescription:
     "List of allowed hostnames for URL validation (one per line). Leave empty to allow all HTTPS ArcGIS services.",
   allowedHostsPlaceholder: "lund.se\narcgis.com\nesri.com",
+  relationshipTitle: "Relationship configuration",
+  enableBatchOwnerQueryLabel: "Enable batch owner queries",
+  enableBatchOwnerQueryDescription:
+    "Use relationship class to fetch all owners in a single query instead of individual requests. Requires relationship configuration in ArcGIS layer.",
+  relationshipIdLabel: "Relationship ID",
+  relationshipIdDescription:
+    "The relationship class ID that links property parcels to ownership records. Find this in your layer's REST API endpoint under 'relationships' array.",
+  relationshipIdPlaceholder: "e.g., 0, 1, 2",
+  relationshipIdTooltip:
+    "Check /MapServer/[layerId]?f=json in your property layer URL to find available relationships.",
   errorInvalidUrl: "Enter a valid ArcGIS REST service URL.",
   errorInvalidNumber: "Enter a whole number greater than zero.",
 }

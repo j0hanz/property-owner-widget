@@ -10,5 +10,7 @@
 		"lund.se",
 		"arcgis.com",
 		"esri.com"
-	]
+	],
+	"enableBatchOwnerQuery": false,
+	"relationshipId": 0
 }

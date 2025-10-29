@@ -34,11 +34,12 @@ export const useEsriModules = () => {
         const loadedModules = await loadArcGISJSAPIModules(
           ESRI_MODULES_TO_LOAD.slice()
         )
-        const [SimpleFillSymbol, Graphic, GraphicsLayer] = loadedModules
+        const [SimpleFillSymbol, Graphic, GraphicsLayer, Extent] = loadedModules
         setModules({
           SimpleFillSymbol,
           Graphic,
           GraphicsLayer,
+          Extent,
         } as EsriModules)
       } catch (err) {
         setError(err as Error)
@@ -298,6 +299,11 @@ export const useMapViewLifecycle = (params: {
     if (previousView) {
       restorePopup(previousView)
       destroyGraphicsLayer(previousView)
+
+      if (mapClickHandleRef.current) {
+        mapClickHandleRef.current.remove()
+        mapClickHandleRef.current = null
+      }
     }
   })
 

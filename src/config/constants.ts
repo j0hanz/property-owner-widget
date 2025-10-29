@@ -4,6 +4,7 @@ export const ESRI_MODULES_TO_LOAD = [
   "esri/symbols/SimpleFillSymbol",
   "esri/Graphic",
   "esri/layers/GraphicsLayer",
+  "esri/geometry/Extent",
 ] as const
 
 export const GRID_COLUMN_KEYS = {

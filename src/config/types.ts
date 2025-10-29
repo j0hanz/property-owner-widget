@@ -1,4 +1,4 @@
-import type { ImmutableObject } from "jimu-core"
+import type { ImmutableObject, DataSourceManager } from "jimu-core"
 import type { WidgetStyles } from "./style"
 
 export interface Config {
@@ -9,6 +9,8 @@ export interface Config {
   enableToggleRemoval: boolean
   allowedHosts?: readonly string[]
   enablePIIMasking: boolean
+  relationshipId?: number
+  enableBatchOwnerQuery: boolean
 }
 
 export type IMConfig = ImmutableObject<Config>
@@ -102,6 +104,7 @@ export interface EsriModules {
   GraphicsLayer: new (
     properties?: __esri.GraphicsLayerProperties
   ) => __esri.GraphicsLayer
+  Extent: new (properties?: __esri.ExtentProperties) => __esri.Extent
 }
 
 export interface UrlErrors {
@@ -126,4 +129,93 @@ export interface PerformanceMetric {
   duration: number
   success: boolean
   error?: string
+}
+
+// =============================================================================
+// VALIDATION RESULT TYPES
+// Discriminated unions for type-safe validation results
+// =============================================================================
+
+// eslint-disable-next-line @typescript-eslint/consistent-type-definitions
+export type ValidationSuccess<T> = {
+  readonly valid: true
+  readonly data: T
+}
+
+// eslint-disable-next-line @typescript-eslint/consistent-type-definitions
+export type ValidationFailure = {
+  readonly valid: false
+  readonly error: ErrorState
+  readonly failureReason: string
+}
+
+export type ValidationResult<T> = ValidationSuccess<T> | ValidationFailure
+
+/** Type guard for validation success */
+export function isValidationSuccess<T>(
+  result: ValidationResult<T>
+): result is ValidationSuccess<T> {
+  return result.valid
+}
+
+/** Type guard for validation failure */
+export function isValidationFailure<T>(
+  result: ValidationResult<T>
+): result is ValidationFailure {
+  return !result.valid
+}
+
+// =============================================================================
+// QUERY PROCESSING TYPES
+// Interfaces for property query operations and context
+// =============================================================================
+
+export interface PropertyQueryHelpers {
+  extractFnr: (attrs: unknown) => string | number | null
+  queryOwnerByFnr: (
+    fnr: string | number,
+    dataSourceId: string,
+    dsManager: DataSourceManager,
+    options?: { signal?: AbortSignal }
+  ) => Promise<__esri.Graphic[]>
+  queryOwnersByRelationship: (
+    propertyFnrs: Array<string | number>,
+    propertyDataSourceId: string,
+    ownerDataSourceId: string,
+    dsManager: DataSourceManager,
+    relationshipId: number,
+    options?: { signal?: AbortSignal }
+  ) => Promise<Map<string, OwnerAttributes[]>>
+  createRowId: (fnr: string | number, objectId: number) => string
+  formatPropertyWithShare: (property: string, share?: string) => string
+  formatOwnerInfo: (
+    owner: OwnerAttributes,
+    maskPII: boolean,
+    unknownText: string
+  ) => string
+  isAbortError: (error: unknown) => boolean
+}
+
+export interface PropertyQueryMessages {
+  readonly unknownOwner: string
+  readonly errorOwnerQueryFailed: string
+  readonly errorNoDataAvailable: string
+}
+
+export interface PropertyProcessingContext {
+  readonly dsManager: DataSourceManager
+  readonly maxResults: number
+  readonly signal?: AbortSignal
+  readonly helpers: PropertyQueryHelpers
+  readonly messages: PropertyQueryMessages
+}
+
+export interface StandardQueryConfig {
+  readonly ownerDataSourceId: string
+  readonly enablePIIMasking: boolean
+}
+
+export interface BatchQueryConfig extends StandardQueryConfig {
+  readonly propertyDataSourceId: string
+  readonly relationshipId: number
 }
