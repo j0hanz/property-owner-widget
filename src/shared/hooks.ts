@@ -38,18 +38,12 @@ export const useEsriModules = () => {
           SimpleFillSymbol,
           Graphic,
           GraphicsLayer,
-          QueryTask,
-          Query,
-          geometryEngine,
           Extent,
         ] = loadedModules
         setModules({
           SimpleFillSymbol,
           Graphic,
           GraphicsLayer,
-          QueryTask,
-          Query,
-          geometryEngine,
           Extent,
         } as EsriModules)
       } catch (err) {

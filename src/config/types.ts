@@ -104,9 +104,6 @@ export interface EsriModules {
   GraphicsLayer: new (
     properties?: __esri.GraphicsLayerProperties
   ) => __esri.GraphicsLayer
-  QueryTask: any
-  Query: new (properties?: __esri.QueryProperties) => __esri.Query
-  geometryEngine: __esri.geometryEngine
   Extent: new (properties?: __esri.ExtentProperties) => __esri.Extent
 }
 
