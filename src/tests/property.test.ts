@@ -14,6 +14,7 @@ import {
   normalizeFnrKey,
   isDuplicateProperty,
   shouldToggleRemove,
+  calculatePropertyUpdates,
   validateDataSources,
 } from "../shared/utils"
 import type { OwnerAttributes } from "../config/types"
@@ -577,6 +578,31 @@ describe("Property Widget - Utility Helper Functions", () => {
     // Test that processPropertyResults batches owner queries with Promise.all
     // and respects OWNER_QUERY_CONCURRENCY cap
     // TODO: Mock helpers to verify batching and parallel execution
+  })
+
+  it("should retain all owner rows for multi-owner properties", () => {
+    const rowsToProcess = [
+      {
+        id: "123_1",
+        FNR: "123",
+        UUID_FASTIGHET: "uuid-123",
+        FASTIGHET: "Property 1",
+        BOSTADR: "Owner 1",
+      },
+      {
+        id: "123_2",
+        FNR: "123",
+        UUID_FASTIGHET: "uuid-123",
+        FASTIGHET: "Property 1",
+        BOSTADR: "Owner 2",
+      },
+    ]
+
+    const result = calculatePropertyUpdates(rowsToProcess, [], false, 10)
+
+    expect(result.toRemove.size).toBe(0)
+    expect(result.updatedRows).toHaveLength(2)
+    expect(result.updatedRows.map((row) => row.id)).toEqual(["123_1", "123_2"])
   })
 })
 

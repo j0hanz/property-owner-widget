@@ -27,6 +27,7 @@ System.register([], function (e) {
         allowedHostsLabel: "Tillåtna värdar",
         allowedHostsDescription:
           "Lista över tillåtna värdnamn för URL-validering (en per rad). Lämna tomt för att tillåta alla HTTPS ArcGIS-tjänster.",
+        allowedHostsPlaceholder: "lund.se\narcgis.com\nesri.com",
         errorInvalidUrl: "Ange en giltig ArcGIS REST-tjänst-URL.",
         errorInvalidNumber: "Ange ett heltal större än noll.",
       })

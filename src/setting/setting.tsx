@@ -146,7 +146,7 @@ const Setting = (
           <TextArea
             value={(config.allowedHosts || []).join("\n")}
             onChange={handleAllowedHostsChange}
-            placeholder="lund.se&#10;arcgis.com&#10;esri.com"
+            placeholder={translate("allowedHostsPlaceholder")}
             aria-label={translate("allowedHostsLabel")}
           />
         </SettingRow>

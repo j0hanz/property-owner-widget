@@ -24,6 +24,7 @@ export default {
   allowedHostsLabel: "Allowed hosts",
   allowedHostsDescription:
     "List of allowed hostnames for URL validation (one per line). Leave empty to allow all HTTPS ArcGIS services.",
+  allowedHostsPlaceholder: "lund.se\narcgis.com\nesri.com",
   errorInvalidUrl: "Enter a valid ArcGIS REST service URL.",
   errorInvalidNumber: "Enter a whole number greater than zero.",
 }

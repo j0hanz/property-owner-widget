@@ -382,7 +382,12 @@ export const shouldToggleRemove = (
   return toggleEnabled && isDuplicateProperty(fnr, existingProperties)
 }
 
-export const calculatePropertyUpdates = <T extends { FNR: string | number }>(
+export const calculatePropertyUpdates = <
+  T extends {
+    FNR: string | number
+    id: string
+  },
+>(
   rowsToProcess: T[],
   existingProperties: T[],
   toggleEnabled: boolean,
@@ -390,21 +395,31 @@ export const calculatePropertyUpdates = <T extends { FNR: string | number }>(
 ): { toRemove: Set<string>; toAdd: T[]; updatedRows: T[] } => {
   const toRemove = new Set<string>()
   const toAdd: T[] = []
-  const existingKeys = new Set(
+  const existingFnrKeys = new Set(
     existingProperties.map((row) => normalizeFnrKey(row.FNR))
   )
+  const existingRowIds = new Set(existingProperties.map((row) => row.id))
+  const toAddIds = new Set<string>()
+  const toggledFnrs = new Set<string>()
 
   for (const row of rowsToProcess) {
     const fnrKey = normalizeFnrKey(row.FNR)
-    if (toggleEnabled && existingKeys.has(fnrKey)) {
+    if (
+      toggleEnabled &&
+      existingFnrKeys.has(fnrKey) &&
+      !toggledFnrs.has(fnrKey)
+    ) {
       toRemove.add(fnrKey)
-      existingKeys.delete(fnrKey)
+      toggledFnrs.add(fnrKey)
       continue
     }
-    if (!existingKeys.has(fnrKey) && !toRemove.has(fnrKey)) {
-      toAdd.push(row)
-      existingKeys.add(fnrKey)
+
+    if (existingRowIds.has(row.id) || toAddIds.has(row.id)) {
+      continue
     }
+
+    toAdd.push(row)
+    toAddIds.add(row.id)
   }
 
   const afterRemoval = existingProperties.filter(
@@ -783,7 +798,10 @@ export const validateMapClickInputs = (
   if (!modules) {
     return {
       valid: false,
-      error: { type: "VALIDATION_ERROR", message: "Modules not loaded" },
+      error: {
+        type: "VALIDATION_ERROR",
+        message: translate("errorLoadingModules"),
+      },
     }
   }
 

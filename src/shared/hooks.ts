@@ -1,7 +1,10 @@
 import { React, hooks } from "jimu-core"
 import { loadArcGISJSAPIModules } from "jimu-arcgis"
 import type { EsriModules } from "../config/types"
-import { ESRI_MODULES_TO_LOAD } from "../config/constants"
+import {
+  ESRI_MODULES_TO_LOAD,
+  ABORT_CONTROLLER_POOL_SIZE,
+} from "../config/constants"
 
 export const useEsriModules = () => {
   const [modules, setModules] = React.useState<EsriModules | null>(null)
@@ -53,16 +56,25 @@ export const useAbortControllerPool = () => {
   const activeControllersRef = React.useRef<Set<AbortController>>(new Set())
 
   const getController = hooks.useEventCallback(() => {
-    const pooled = poolRef.current.pop()
-    const controller = pooled || new AbortController()
+    let controller = poolRef.current.pop()
+    while (controller && controller.signal.aborted) {
+      controller = poolRef.current.pop()
+    }
 
-    activeControllersRef.current.add(controller)
-    return controller
+    const finalController = controller || new AbortController()
+
+    activeControllersRef.current.add(finalController)
+    return finalController
   })
 
   const releaseController = hooks.useEventCallback(
     (controller: AbortController) => {
       activeControllersRef.current.delete(controller)
+      if (!controller.signal.aborted) {
+        if (poolRef.current.length < ABORT_CONTROLLER_POOL_SIZE) {
+          poolRef.current.push(controller)
+        }
+      }
     }
   )
 
