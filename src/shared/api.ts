@@ -27,12 +27,18 @@ const createQueryKey = (
 const getOrCreateQuery = <T>(
   cache: Map<string, InflightQuery>,
   key: string,
-  queryFn: () => Promise<T>
+  queryFn: () => Promise<T>,
+  signal?: AbortSignal
 ): Promise<T> => {
   const now = Date.now()
   const existing = cache.get(key)
 
   if (existing && now - existing.timestamp < QUERY_DEDUPLICATION_TIMEOUT) {
+    if (signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      return Promise.reject(abortError)
+    }
     return existing.promise as Promise<T>
   }
 
@@ -63,50 +69,57 @@ export const queryPropertyByPoint = async (
     dsId: dataSourceId,
   })
 
-  return getOrCreateQuery(PROPERTY_QUERY_CACHE, queryKey, async () => {
-    try {
-      if (options?.signal?.aborted) {
-        const abortError = new Error("AbortError")
-        abortError.name = "AbortError"
-        throw abortError
-      }
-
-      const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
-      if (!ds) {
-        throw new Error("Property data source not found")
-      }
-
-      const result = await ds.query({
-        geometry: point as any,
-        returnGeometry: true,
-        outFields: ["*"],
-        spatialRel: "esriSpatialRelIntersects" as any,
-      })
-
-      if (options?.signal?.aborted) {
-        const abortError = new Error("AbortError")
-        abortError.name = "AbortError"
-        throw abortError
-      }
-
-      if (!result?.records) {
-        return []
-      }
-
-      return result.records.map((record: FeatureDataRecord) => {
-        const feature = record.getData()
-        return {
-          features: [feature as __esri.Graphic],
-          propertyId: (feature.attributes as PropertyAttributes).FNR,
+  return getOrCreateQuery(
+    PROPERTY_QUERY_CACHE,
+    queryKey,
+    async () => {
+      try {
+        if (options?.signal?.aborted) {
+          const abortError = new Error("AbortError")
+          abortError.name = "AbortError"
+          throw abortError
         }
-      })
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error as Error
+
+        const ds = dsManager.getDataSource(
+          dataSourceId
+        ) as FeatureLayerDataSource
+        if (!ds) {
+          throw new Error("Property data source not found")
+        }
+
+        const result = await ds.query({
+          geometry: point as any,
+          returnGeometry: true,
+          outFields: ["*"],
+          spatialRel: "esriSpatialRelIntersects" as any,
+        })
+
+        if (options?.signal?.aborted) {
+          const abortError = new Error("AbortError")
+          abortError.name = "AbortError"
+          throw abortError
+        }
+
+        if (!result?.records) {
+          return []
+        }
+
+        return result.records.map((record: FeatureDataRecord) => {
+          const feature = record.getData()
+          return {
+            features: [feature as __esri.Graphic],
+            propertyId: (feature.attributes as PropertyAttributes).FNR,
+          }
+        })
+      } catch (error) {
+        if (isAbortError(error)) {
+          throw error as Error
+        }
+        throw new Error(parseArcGISError(error, "Property query failed"))
       }
-      throw new Error(parseArcGISError(error, "Property query failed"))
-    }
-  })
+    },
+    options?.signal
+  )
 }
 
 export const queryOwnerByFnr = async (
@@ -120,45 +133,52 @@ export const queryOwnerByFnr = async (
     dsId: dataSourceId,
   })
 
-  return getOrCreateQuery(OWNER_QUERY_CACHE, queryKey, async () => {
-    try {
-      if (options?.signal?.aborted) {
-        const abortError = new Error("AbortError")
-        abortError.name = "AbortError"
-        throw abortError
-      }
+  return getOrCreateQuery(
+    OWNER_QUERY_CACHE,
+    queryKey,
+    async () => {
+      try {
+        if (options?.signal?.aborted) {
+          const abortError = new Error("AbortError")
+          abortError.name = "AbortError"
+          throw abortError
+        }
 
-      const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
-      if (!ds) {
-        throw new Error("Owner data source not found")
-      }
+        const ds = dsManager.getDataSource(
+          dataSourceId
+        ) as FeatureLayerDataSource
+        if (!ds) {
+          throw new Error("Owner data source not found")
+        }
 
-      const result = await ds.query({
-        where: buildFnrWhereClause(fnr),
-        returnGeometry: false,
-        outFields: ["*"],
-      })
+        const result = await ds.query({
+          where: buildFnrWhereClause(fnr),
+          returnGeometry: false,
+          outFields: ["*"],
+        })
 
-      if (options?.signal?.aborted) {
-        const abortError = new Error("AbortError")
-        abortError.name = "AbortError"
-        throw abortError
-      }
+        if (options?.signal?.aborted) {
+          const abortError = new Error("AbortError")
+          abortError.name = "AbortError"
+          throw abortError
+        }
 
-      if (!result?.records) {
-        return []
-      }
+        if (!result?.records) {
+          return []
+        }
 
-      return result.records.map(
-        (record: FeatureDataRecord) => record.getData() as __esri.Graphic
-      )
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error as Error
+        return result.records.map(
+          (record: FeatureDataRecord) => record.getData() as __esri.Graphic
+        )
+      } catch (error) {
+        if (isAbortError(error)) {
+          throw error as Error
+        }
+        throw new Error(parseArcGISError(error, "Owner query failed"))
       }
-      throw new Error(parseArcGISError(error, "Owner query failed"))
-    }
-  })
+    },
+    options?.signal
+  )
 }
 
 export const clearQueryCache = () => {

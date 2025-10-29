@@ -310,6 +310,11 @@ export const useMapViewLifecycle = (params: {
     if (previousView) {
       restorePopup(previousView)
       destroyGraphicsLayer(previousView)
+
+      if (mapClickHandleRef.current) {
+        mapClickHandleRef.current.remove()
+        mapClickHandleRef.current = null
+      }
     }
   })
 

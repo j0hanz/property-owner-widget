@@ -553,6 +553,12 @@ const processBatchOfProperties = async (params: {
       continue
     }
 
+    // Validate value exists before destructuring
+    if (!result.value) {
+      console.log("Owner query returned no value for batch item")
+      continue
+    }
+
     const { validated, ownerFeatures, queryFailed } = result.value
     if (currentRowCount + rows.length >= maxResults) break
 

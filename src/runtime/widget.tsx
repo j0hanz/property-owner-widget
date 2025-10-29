@@ -263,7 +263,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       }
 
       if (!extent) {
-        setError(ErrorType.QUERY_ERROR, translate("queryingExtent"))
+        setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
         return
       }
 
@@ -512,7 +512,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           }
         })
 
-        // Remove post-setState stale check - cleanup/sync must happen if setState executed
+        // Revalidate staleness before executing side effects
+        if (isStaleRequest()) {
+          releaseController(controller)
+          return
+        }
 
         if (cleanupParams) {
           cleanupRemovedGraphics({
