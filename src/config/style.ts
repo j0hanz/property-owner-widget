@@ -68,7 +68,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       padding: spacing?.(2),
     }),
     errorHint: css({ color: colors?.surface?.backgroundHint }),
-    buttons: flexAuto("row", { gap: spacing?.(1) }),
+    buttons: flexAuto("row", { gap: spacing?.(2) }),
     footer: flexAuto("row", {
       borderBlockStart: `1px solid ${colors?.surface?.backgroundHint}`,
       ...typo(typography?.label2),

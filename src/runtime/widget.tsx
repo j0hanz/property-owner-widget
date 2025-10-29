@@ -61,6 +61,7 @@ import {
   createPerformanceTracker,
 } from "../shared/telemetry"
 import clearIcon from "../assets/clear-selection-general.svg"
+import zoomIcon from "../assets/zoom-in.svg"
 
 const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   const {
@@ -629,10 +630,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             disabled={state.selectedProperties.length === 0 || state.loading}
             aria-label={translate("zoomToResults")}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M15.854 14.146l-3.847-3.847A6.5 6.5 0 1 0 10.3 11.7l3.847 3.847a.5.5 0 0 0 .707-.707zM6.5 11a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z" />
-              <path d="M6.5 8.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 0 1zm2-2v-2a.5.5 0 0 0-1 0v2a.5.5 0 0 0 1 0z" />
-            </svg>
+            <SVG src={zoomIcon} />
           </Button>
           <Button
             type="tertiary"
@@ -641,7 +639,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             title={translate("clearAll")}
             disabled={state.selectedProperties.length === 0}
           >
-            {" "}
             <SVG src={clearIcon} />
           </Button>
         </div>
