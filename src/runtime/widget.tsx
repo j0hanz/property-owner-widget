@@ -30,6 +30,8 @@ import {
   queryPropertyByPoint,
   queryOwnerByFnr,
   clearQueryCache,
+  queryExtentForProperties,
+  queryOwnersByRelationship,
 } from "../shared/api"
 import {
   formatOwnerInfo,
@@ -40,10 +42,12 @@ import {
   normalizeFnrKey,
   calculatePropertyUpdates,
   processPropertyResults,
+  processPropertyResultsWithBatchQuery,
   validateMapClickInputs,
   syncGraphicsWithState,
   validateDataSources,
   cleanupRemovedGraphics,
+  isValidationFailure,
 } from "../shared/utils"
 import {
   GRID_COLUMN_KEYS,
@@ -88,22 +92,6 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   if (!success) {
     console.log("syncSelectionGraphics: failed to sync graphics with state")
   }
-}
-
-const isMapClickValidationFailure = (
-  result: ReturnType<typeof validateMapClickInputs>
-): result is { valid: false; error: { type: any; message: string } } => {
-  return !result.valid
-}
-
-const isDataSourceValidationFailure = (
-  result: ReturnType<typeof validateDataSources>
-): result is {
-  valid: false
-  error: { type: any; message: string }
-  failureReason: string
-} => {
-  return !result.valid
 }
 
 // Error boundaries require class components in React (no functional equivalent)
@@ -240,6 +228,66 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     })
   })
 
+  const handleZoomToResults = hooks.useEventCallback(async () => {
+    const view = getCurrentView()
+    if (!view) {
+      setError(ErrorType.VALIDATION_ERROR, translate("errorNoMapPoint"))
+      return
+    }
+
+    const fnrs = state.selectedProperties.map((prop) => prop.FNR)
+    if (fnrs.length === 0) {
+      setError(ErrorType.VALIDATION_ERROR, translate("noPropertiesSelected"))
+      return
+    }
+
+    if (!config.propertyDataSourceId || !dsManagerRef.current) {
+      setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
+      return
+    }
+
+    setState((prev) => ({ ...prev, loading: true, error: null }))
+
+    const controller = getController()
+    try {
+      const extent = await queryExtentForProperties(
+        fnrs,
+        config.propertyDataSourceId,
+        dsManagerRef.current,
+        { signal: controller.signal }
+      )
+
+      if (controller.signal.aborted) {
+        setState((prev) => ({ ...prev, loading: false }))
+        return
+      }
+
+      if (!extent) {
+        setError(ErrorType.QUERY_ERROR, translate("queryingExtent"))
+        return
+      }
+
+      await view.goTo(extent.expand(1.2), { duration: 1000 })
+
+      setState((prev) => ({ ...prev, loading: false }))
+
+      trackEvent({
+        category: "Navigation",
+        action: "zoom_to_results",
+        value: fnrs.length,
+      })
+    } catch (error) {
+      if (isAbortError(error)) {
+        setState((prev) => ({ ...prev, loading: false }))
+        return
+      }
+      setError(ErrorType.QUERY_ERROR, translate("errorQueryFailed"))
+      trackError("zoom_to_results", error)
+    } finally {
+      releaseController(controller)
+    }
+  })
+
   const setError = hooks.useEventCallback(
     (type: ErrorType, message: string, details?: string) => {
       setState((prev) => ({
@@ -262,14 +310,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         config,
         translate
       )
-      if (isMapClickValidationFailure(validation)) {
+      if (isValidationFailure(validation)) {
         const { error } = validation
         setError(error.type, error.message)
         tracker.failure(error.type)
         trackError("map_click_validation", error.type, error.message)
         return
       }
-      const { mapPoint } = validation
+      const { mapPoint } = validation.data
 
       // Step 2: Validate data sources
       const dsValidation = validateDataSources({
@@ -280,14 +328,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         translate,
       })
 
-      if (isDataSourceValidationFailure(dsValidation)) {
+      if (isValidationFailure(dsValidation)) {
         const { error, failureReason } = dsValidation
         setError(error.type, error.message)
         tracker.failure(failureReason)
         trackError("map_click", failureReason)
         return
       }
-      const { manager } = dsValidation
+      const { manager } = dsValidation.data
 
       const requestId = requestIdRef.current + 1
       requestIdRef.current = requestId
@@ -334,29 +382,60 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         }
 
         // Step 4: Process results and enrich with owner data
-        const { rowsToProcess, graphicsToAdd } = await processPropertyResults({
-          propertyResults,
-          config: {
-            ownerDataSourceId: config.ownerDataSourceId,
-            enablePIIMasking: piiMaskingEnabled,
-          },
-          dsManager: manager,
-          maxResults,
-          signal: controller.signal,
-          helpers: {
-            extractFnr,
-            queryOwnerByFnr,
-            createRowId,
-            formatPropertyWithShare,
-            formatOwnerInfo,
-            isAbortError,
-          },
-          messages: {
-            unknownOwner: translate("unknownOwner"),
-            errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
-            errorNoDataAvailable: translate("errorNoDataAvailable"),
-          },
-        })
+        const useBatchQuery =
+          config.enableBatchOwnerQuery &&
+          config.relationshipId !== undefined &&
+          config.propertyDataSourceId
+
+        const { rowsToProcess, graphicsToAdd } = useBatchQuery
+          ? await processPropertyResultsWithBatchQuery({
+              propertyResults,
+              config: {
+                propertyDataSourceId: config.propertyDataSourceId,
+                ownerDataSourceId: config.ownerDataSourceId,
+                enablePIIMasking: piiMaskingEnabled,
+                relationshipId: config.relationshipId,
+              },
+              dsManager: manager,
+              maxResults,
+              signal: controller.signal,
+              helpers: {
+                extractFnr,
+                queryOwnersByRelationship,
+                createRowId,
+                formatPropertyWithShare,
+                formatOwnerInfo,
+                isAbortError,
+              },
+              messages: {
+                unknownOwner: translate("unknownOwner"),
+                errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
+                errorNoDataAvailable: translate("errorNoDataAvailable"),
+              },
+            })
+          : await processPropertyResults({
+              propertyResults,
+              config: {
+                ownerDataSourceId: config.ownerDataSourceId,
+                enablePIIMasking: piiMaskingEnabled,
+              },
+              dsManager: manager,
+              maxResults,
+              signal: controller.signal,
+              helpers: {
+                extractFnr,
+                queryOwnerByFnr,
+                createRowId,
+                formatPropertyWithShare,
+                formatOwnerInfo,
+                isAbortError,
+              },
+              messages: {
+                unknownOwner: translate("unknownOwner"),
+                errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
+                errorNoDataAvailable: translate("errorNoDataAvailable"),
+              },
+            })
 
         if (controller.signal.aborted || isStaleRequest()) {
           if (isStaleRequest()) {
@@ -538,6 +617,19 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     >
       <div css={styles.header}>
         <div css={styles.buttons}>
+          <Button
+            type="tertiary"
+            icon
+            onClick={handleZoomToResults}
+            title={translate("zoomToResults")}
+            disabled={state.selectedProperties.length === 0 || state.loading}
+            aria-label={translate("zoomToResults")}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M15.854 14.146l-3.847-3.847A6.5 6.5 0 1 0 10.3 11.7l3.847 3.847a.5.5 0 0 0 .707-.707zM6.5 11a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z" />
+              <path d="M6.5 8.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 0 1zm2-2v-2a.5.5 0 0 0-1 0v2a.5.5 0 0 0 1 0z" />
+            </svg>
+          </Button>
           <Button
             type="tertiary"
             icon

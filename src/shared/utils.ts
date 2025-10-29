@@ -2,6 +2,7 @@ import type {
   OwnerAttributes,
   ProcessPropertyResult,
   GridRowData,
+  ValidationResult,
 } from "../config/types"
 import type { DataSourceManager, FeatureLayerDataSource } from "jimu-core"
 import { loadArcGISJSAPIModules } from "jimu-arcgis"
@@ -11,6 +12,12 @@ import {
   OWNER_QUERY_CONCURRENCY,
 } from "../config/constants"
 
+// =============================================================================
+// PII MASKING & FORMATTING
+// Functions for privacy-preserving data display and text formatting
+// =============================================================================
+
+/** Sanitize HTML content and normalize whitespace */
 const sanitizeText = (str: string): string => {
   if (!str) return ""
   const doc = new DOMParser().parseFromString(str, "text/html")
@@ -18,12 +25,14 @@ const sanitizeText = (str: string): string => {
   return text.replace(/[\s\u00A0\u200B]+/g, " ").trim()
 }
 
+/** Mask text with minimum length validation */
 const maskText = (text: string, minLength: number): string => {
   const sanitized = sanitizeText(text)
   if (sanitized.length < minLength) return "***"
   return sanitized
 }
 
+/** Mask personal name (e.g., "John Doe" → "J*** D**") */
 export const maskName = (name: string): string => {
   const normalized = maskText(name, MIN_MASK_LENGTH)
   if (normalized === "***") return normalized
@@ -38,6 +47,7 @@ export const maskName = (name: string): string => {
     .join(" ")
 }
 
+/** Mask street address (e.g., "Main St 123" → "Ma*****") */
 export const maskAddress = (address: string): string => {
   const normalized = maskText(address, MIN_MASK_LENGTH)
   if (normalized === "***") return normalized
@@ -45,6 +55,7 @@ export const maskAddress = (address: string): string => {
   return `${normalized.substring(0, 2)}${"*".repeat(Math.min(5, normalized.length - 2))}`
 }
 
+/** Format owner information with optional PII masking */
 export const formatOwnerInfo = (
   owner: OwnerAttributes,
   maskPII: boolean,
@@ -71,6 +82,7 @@ export const formatOwnerInfo = (
   return parts.join(", ") + (orgNr ? ` (${orgNr})` : "")
 }
 
+/** Format property designation with optional share percentage */
 export const formatPropertyWithShare = (
   property: string,
   share?: string
@@ -79,9 +91,16 @@ export const formatPropertyWithShare = (
   return trimmedShare ? `${property} (${trimmedShare})` : property
 }
 
+/** Create unique row identifier from FNR and OBJECTID */
 export const createRowId = (fnr: string | number, objectId: number): string =>
   `${fnr}_${objectId}`
 
+// =============================================================================
+// VALIDATION & SANITIZATION
+// Security-focused input validation and error handling
+// =============================================================================
+
+/** Check if hostname is private IP or localhost */
 const isPrivateHost = (hostname: string): boolean => {
   const lower = hostname.toLowerCase()
   return (
@@ -95,6 +114,7 @@ const isPrivateHost = (hostname: string): boolean => {
   )
 }
 
+/** Validate HTTPS URL with standard port (443 or default) */
 const isValidHttpsUrl = (parsed: URL): boolean => {
   return (
     parsed.protocol === "https:" &&
@@ -102,10 +122,12 @@ const isValidHttpsUrl = (parsed: URL): boolean => {
   )
 }
 
+/** Check if URL path matches ArcGIS service pattern */
 const isValidArcGISPath = (pathname: string): boolean => {
   return /\/(MapServer|FeatureServer)\/\d+(\/query)?$/.test(pathname)
 }
 
+/** Verify hostname against allowlist (if configured) */
 const isHostAllowed = (
   hostname: string,
   allowedHosts?: readonly string[]
@@ -114,6 +136,7 @@ const isHostAllowed = (
   return allowedHosts.some((h) => hostname === h || hostname.endsWith("." + h))
 }
 
+/** Validate ArcGIS REST service URL with host allowlist enforcement */
 export const isValidArcGISUrl = (
   url: string,
   allowedHosts?: readonly string[]
@@ -132,6 +155,7 @@ export const isValidArcGISUrl = (
   }
 }
 
+/** Build SQL WHERE clause with SQL injection protection (doubles apostrophes) */
 export const buildFnrWhereClause = (
   fnr: string | number,
   errorMessage = "Invalid FNR: must be a safe integer"
@@ -151,6 +175,7 @@ export const buildFnrWhereClause = (
   return `FNR = '${sanitized}'`
 }
 
+/** Extract FNR value from feature attributes */
 export const extractFnr = (
   attributes: { [key: string]: any } | null | undefined
 ): string | number | null => {
@@ -159,12 +184,14 @@ export const extractFnr = (
   return value
 }
 
+/** Normalize FNR to string key for Map lookups */
 export const normalizeFnrKey = (
   fnr: string | number | null | undefined
 ): string => {
   return fnr != null ? String(fnr) : ""
 }
 
+/** Check if error represents an aborted operation */
 export const isAbortError = (error: any): boolean => {
   return (
     error?.name === "AbortError" ||
@@ -173,6 +200,7 @@ export const isAbortError = (error: any): boolean => {
   )
 }
 
+/** Parse ArcGIS error object to user-friendly message */
 export const parseArcGISError = (
   error: any,
   defaultMessage: string
@@ -182,6 +210,7 @@ export const parseArcGISError = (
   return error.details?.message || error.message || defaultMessage
 }
 
+/** Extract data source URL from various possible locations */
 const getDataSourceUrl = (
   dataSource: FeatureLayerDataSource | null | undefined
 ): string | null => {
@@ -210,19 +239,14 @@ const isQueryableDataSource = (ds: FeatureLayerDataSource | null): boolean => {
   return ds !== null && typeof ds.query === "function"
 }
 
+/** Validate data sources are available, queryable, and URLs are secure */
 export const validateDataSources = (params: {
   propertyDsId: string | undefined
   ownerDsId: string | undefined
   dsManager: DataSourceManager | null
   allowedHosts?: readonly string[]
   translate: (key: string) => string
-}):
-  | { valid: true; manager: DataSourceManager }
-  | {
-      valid: false
-      error: { type: any; message: string }
-      failureReason: string
-    } => {
+}): ValidationResult<{ manager: DataSourceManager }> => {
   const { propertyDsId, ownerDsId, dsManager, allowedHosts, translate } = params
 
   if (!propertyDsId || !ownerDsId) {
@@ -294,9 +318,15 @@ export const validateDataSources = (params: {
     )
   }
 
-  return { valid: true, manager: dsManager }
+  return { valid: true, data: { manager: dsManager } }
 }
 
+// =============================================================================
+// GRAPHICS & MAP INTERACTIONS
+// Functions for managing map graphics and handling map events
+// =============================================================================
+
+/** Remove graphics for properties no longer in selection */
 export const cleanupRemovedGraphics = (params: {
   updatedRows: GridRowData[]
   previousRows: GridRowData[]
@@ -320,6 +350,12 @@ export const cleanupRemovedGraphics = (params: {
   })
 }
 
+// =============================================================================
+// PROPERTY SELECTION LOGIC
+// Business logic for property selection, deduplication, and toggle behavior
+// =============================================================================
+
+/** Check if property already exists in selection (by FNR) */
 export const isDuplicateProperty = (
   fnr: string | number,
   existingProperties: Array<{ FNR: string | number }>
@@ -328,6 +364,7 @@ export const isDuplicateProperty = (
   return existingProperties.some((p) => normalizeFnrKey(p.FNR) === fnrKey)
 }
 
+/** Determine if clicking property should remove it (toggle behavior) */
 export const shouldToggleRemove = (
   fnr: string | number,
   existingProperties: Array<{ FNR: string | number }>,
@@ -336,6 +373,7 @@ export const shouldToggleRemove = (
   return toggleEnabled && isDuplicateProperty(fnr, existingProperties)
 }
 
+/** Calculate updated property list with toggle logic and max results enforcement */
 export const calculatePropertyUpdates = <
   T extends {
     FNR: string | number
@@ -632,6 +670,154 @@ const buildPropertyRows = (params: {
   ]
 }
 
+// =============================================================================
+// QUERY RESULT PROCESSING
+// Functions for processing property queries and enriching with owner data
+// =============================================================================
+
+/** Process property results using batch relationship query (performance optimized) */
+export const processPropertyResultsWithBatchQuery = async (params: {
+  propertyResults: any[]
+  config: {
+    propertyDataSourceId: string
+    ownerDataSourceId: string
+    enablePIIMasking: boolean
+    relationshipId: number
+  }
+  dsManager: any
+  maxResults: number
+  signal?: AbortSignal
+  helpers: {
+    extractFnr: (attrs: any) => string | number | null
+    queryOwnersByRelationship: (
+      propertyFnrs: Array<string | number>,
+      propertyDataSourceId: string,
+      ownerDataSourceId: string,
+      dsManager: any,
+      relationshipId: number,
+      options?: { signal?: AbortSignal }
+    ) => Promise<Map<string, any[]>>
+    createRowId: (fnr: string | number, objectId: number) => string
+    formatPropertyWithShare: (property: string, share?: string) => string
+    formatOwnerInfo: (
+      owner: any,
+      maskPII: boolean,
+      unknownOwnerText: string
+    ) => string
+    isAbortError: (error: any) => boolean
+  }
+  messages: {
+    unknownOwner: string
+    errorOwnerQueryFailed: string
+    errorNoDataAvailable: string
+  }
+}): Promise<ProcessPropertyResult> => {
+  const {
+    propertyResults,
+    config,
+    dsManager,
+    maxResults,
+    helpers,
+    messages,
+    signal,
+  } = params
+
+  const graphicsToAdd: Array<{
+    graphic: __esri.Graphic
+    fnr: string | number
+  }> = []
+  const rowsToProcess: GridRowData[] = []
+  const processedFnrs = new Set<string | number>()
+  const validatedProperties: Array<{
+    fnr: string | number
+    attrs: any
+    graphic: __esri.Graphic
+  }> = []
+
+  for (const propertyResult of propertyResults) {
+    const validated = validatePropertyFeature(
+      propertyResult,
+      helpers.extractFnr
+    )
+    if (validated && !processedFnrs.has(validated.fnr)) {
+      processedFnrs.add(validated.fnr)
+      validatedProperties.push(validated)
+      if (validatedProperties.length >= maxResults) break
+    }
+  }
+
+  if (validatedProperties.length === 0) {
+    return { rowsToProcess: [], graphicsToAdd: [] }
+  }
+
+  const fnrsToQuery = validatedProperties.map((p) => p.fnr)
+
+  let ownersByFnr: Map<string, any[]>
+  try {
+    ownersByFnr = await helpers.queryOwnersByRelationship(
+      fnrsToQuery,
+      config.propertyDataSourceId,
+      config.ownerDataSourceId,
+      dsManager,
+      config.relationshipId,
+      { signal }
+    )
+  } catch (error) {
+    if (helpers.isAbortError(error)) {
+      throw error as Error
+    }
+    console.error("Batch owner query failed:", error)
+    ownersByFnr = new Map()
+  }
+
+  for (const { fnr, attrs, graphic } of validatedProperties) {
+    const owners = ownersByFnr.get(String(fnr)) || []
+
+    if (owners.length > 0) {
+      for (const owner of owners) {
+        const formattedOwner = helpers.formatOwnerInfo(
+          owner,
+          config.enablePIIMasking,
+          messages.unknownOwner
+        )
+        const propertyWithShare = helpers.formatPropertyWithShare(
+          attrs.FASTIGHET,
+          owner.ANDEL
+        )
+
+        rowsToProcess.push(
+          createGridRow({
+            fnr,
+            objectId: attrs.OBJECTID,
+            uuidFastighet: attrs.UUID_FASTIGHET,
+            fastighet: propertyWithShare,
+            bostadr: formattedOwner,
+            graphic,
+            createRowId: helpers.createRowId,
+          })
+        )
+      }
+    } else {
+      rowsToProcess.push(
+        createGridRow({
+          fnr,
+          objectId: attrs.OBJECTID,
+          uuidFastighet: attrs.UUID_FASTIGHET,
+          fastighet: attrs.FASTIGHET,
+          bostadr: messages.errorNoDataAvailable,
+          graphic,
+          createRowId: helpers.createRowId,
+        })
+      )
+    }
+
+    graphicsToAdd.push({ graphic, fnr })
+  }
+
+  return { rowsToProcess, graphicsToAdd }
+}
+
+/** Process property results using individual owner queries (fallback method) */
 export const processPropertyResults = async (params: {
   propertyResults: any[]
   config: {
@@ -738,14 +924,13 @@ export const processPropertyResults = async (params: {
   return { rowsToProcess, graphicsToAdd }
 }
 
+/** Validate map click event has required modules and geometry */
 export const validateMapClickInputs = (
   event: any,
   modules: any,
   config: any,
   translate: (key: string) => string
-):
-  | { valid: true; mapPoint: __esri.Point }
-  | { valid: false; error: { type: any; message: string } } => {
+): ValidationResult<{ mapPoint: __esri.Point }> => {
   if (!modules) {
     return {
       valid: false,
@@ -753,6 +938,7 @@ export const validateMapClickInputs = (
         type: "VALIDATION_ERROR",
         message: translate("errorLoadingModules"),
       },
+      failureReason: "modules_not_loaded",
     }
   }
 
@@ -760,12 +946,14 @@ export const validateMapClickInputs = (
     return {
       valid: false,
       error: { type: "GEOMETRY_ERROR", message: translate("errorNoMapPoint") },
+      failureReason: "no_map_point",
     }
   }
 
-  return { valid: true, mapPoint: event.mapPoint }
+  return { valid: true, data: { mapPoint: event.mapPoint } }
 }
 
+/** Synchronize map graphics layer with current selection state */
 export const syncGraphicsWithState = (params: {
   graphicsToAdd: Array<{ graphic: __esri.Graphic; fnr: string | number }>
   selectedRows: Array<{ FNR: string | number }>
@@ -823,3 +1011,6 @@ export const syncGraphicsWithState = (params: {
 
   return true
 }
+
+// Re-export type guards from types module for convenience
+export { isValidationSuccess, isValidationFailure } from "../config/types"

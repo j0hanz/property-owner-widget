@@ -3,8 +3,10 @@ import type {
   FeatureLayerDataSource,
   FeatureDataRecord,
 } from "jimu-core"
+import { loadArcGISJSAPIModules } from "jimu-arcgis"
 import type {
   PropertyAttributes,
+  OwnerAttributes,
   QueryResult,
   InflightQuery,
 } from "../config/types"
@@ -162,4 +164,239 @@ export const queryOwnerByFnr = async (
 export const clearQueryCache = () => {
   PROPERTY_QUERY_CACHE.clear()
   OWNER_QUERY_CACHE.clear()
+}
+
+export const queryExtentForProperties = async (
+  fnrs: Array<string | number>,
+  dataSourceId: string,
+  dsManager: DataSourceManager,
+  options?: { signal?: AbortSignal }
+): Promise<__esri.Extent | null> => {
+  try {
+    if (options?.signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      throw abortError
+    }
+
+    if (!fnrs || fnrs.length === 0) {
+      return null
+    }
+
+    const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
+    if (!ds) {
+      throw new Error("Property data source not found")
+    }
+
+    const whereClause = fnrs.map((fnr) => buildFnrWhereClause(fnr)).join(" OR ")
+
+    const result = await ds.query({
+      where: whereClause,
+      returnGeometry: true,
+      outFields: ["FNR"],
+    })
+
+    if (options?.signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      throw abortError
+    }
+
+    if (!result?.records || result.records.length === 0) {
+      return null
+    }
+
+    let extent: __esri.Extent | null = null
+    result.records.forEach((record: FeatureDataRecord) => {
+      const feature = record.getData()
+      const geom = feature.geometry as __esri.Geometry
+      if (geom && geom.extent) {
+        if (!extent) {
+          extent = geom.extent.clone()
+        } else {
+          extent = extent.union(geom.extent)
+        }
+      }
+    })
+
+    return extent
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error as Error
+    }
+    throw new Error(parseArcGISError(error, "Extent query failed"))
+  }
+}
+
+export const queryOwnersByRelationship = async (
+  propertyFnrs: Array<string | number>,
+  propertyDataSourceId: string,
+  ownerDataSourceId: string,
+  dsManager: DataSourceManager,
+  relationshipId: number,
+  options?: { signal?: AbortSignal }
+): Promise<Map<string, OwnerAttributes[]>> => {
+  try {
+    if (options?.signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      throw abortError
+    }
+
+    if (!propertyFnrs || propertyFnrs.length === 0) {
+      return new Map()
+    }
+
+    const propertyDs = dsManager.getDataSource(
+      propertyDataSourceId
+    ) as FeatureLayerDataSource
+    if (!propertyDs) {
+      throw new Error("Property data source not found")
+    }
+
+    const layerDefinition = propertyDs.getLayerDefinition() as any
+    const layerUrl = layerDefinition?.url
+
+    if (!layerUrl) {
+      throw new Error("Property layer URL not available")
+    }
+
+    const modules = await loadArcGISJSAPIModules([
+      "esri/tasks/QueryTask",
+      "esri/rest/support/RelationshipQuery",
+    ])
+    const [QueryTask, RelationshipQuery] = modules
+
+    const queryTask = new QueryTask({ url: layerUrl })
+    const relationshipQuery = new RelationshipQuery()
+
+    const objectIds: number[] = []
+    const fnrToObjectIdMap = new Map<number, string>()
+
+    const propertyResult = await propertyDs.query({
+      where: propertyFnrs.map((fnr) => buildFnrWhereClause(fnr)).join(" OR "),
+      outFields: ["FNR", "OBJECTID"],
+      returnGeometry: false,
+    })
+
+    if (options?.signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      throw abortError
+    }
+
+    if (!propertyResult?.records || propertyResult.records.length === 0) {
+      return new Map()
+    }
+
+    propertyResult.records.forEach((record: FeatureDataRecord) => {
+      const data = record.getData()
+      const objectId = data.OBJECTID as number
+      const fnr = String(data.FNR)
+      objectIds.push(objectId)
+      fnrToObjectIdMap.set(objectId, fnr)
+    })
+
+    relationshipQuery.objectIds = objectIds
+    relationshipQuery.relationshipId = relationshipId
+    relationshipQuery.outFields = ["*"]
+
+    const result = await queryTask.executeRelationshipQuery(relationshipQuery)
+
+    if (options?.signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      throw abortError
+    }
+
+    const ownersByFnr = new Map<string, OwnerAttributes[]>()
+
+    objectIds.forEach((objectId) => {
+      const relatedRecords = result[objectId]
+      const fnr = fnrToObjectIdMap.get(objectId)
+
+      if (fnr && relatedRecords && relatedRecords.features) {
+        const owners = relatedRecords.features.map(
+          (feature: __esri.Graphic) => feature.attributes as OwnerAttributes
+        )
+        ownersByFnr.set(fnr, owners)
+      }
+    })
+
+    return ownersByFnr
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error as Error
+    }
+    throw new Error(parseArcGISError(error, "Relationship query failed"))
+  }
+}
+
+export const queryPropertiesInBuffer = async (
+  point: __esri.Point,
+  bufferDistance: number,
+  bufferUnit: "meters" | "kilometers" | "feet" | "miles",
+  dataSourceId: string,
+  dsManager: DataSourceManager,
+  options?: { signal?: AbortSignal }
+): Promise<PropertyAttributes[]> => {
+  try {
+    if (options?.signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      throw abortError
+    }
+
+    const modules = await loadArcGISJSAPIModules([
+      "esri/geometry/geometryEngine",
+    ])
+    const [geometryEngine] = modules
+
+    const bufferGeometry = geometryEngine.buffer(
+      point,
+      bufferDistance,
+      bufferUnit
+    ) as __esri.Polygon
+
+    if (!bufferGeometry) {
+      throw new Error("Failed to create buffer geometry")
+    }
+
+    if (options?.signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      throw abortError
+    }
+
+    const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
+    if (!ds) {
+      throw new Error("Property data source not found")
+    }
+
+    const result = await ds.query({
+      geometry: bufferGeometry,
+      spatialRel: "esriSpatialRelIntersects" as any,
+      returnGeometry: true,
+      outFields: ["*"],
+    })
+
+    if (options?.signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      throw abortError
+    }
+
+    if (!result?.records || result.records.length === 0) {
+      return []
+    }
+
+    return result.records.map(
+      (record: FeatureDataRecord) => record.getData() as PropertyAttributes
+    )
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error as Error
+    }
+    throw new Error(parseArcGISError(error, "Buffer query failed"))
+  }
 }

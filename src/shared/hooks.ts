@@ -34,11 +34,23 @@ export const useEsriModules = () => {
         const loadedModules = await loadArcGISJSAPIModules(
           ESRI_MODULES_TO_LOAD.slice()
         )
-        const [SimpleFillSymbol, Graphic, GraphicsLayer] = loadedModules
+        const [
+          SimpleFillSymbol,
+          Graphic,
+          GraphicsLayer,
+          QueryTask,
+          Query,
+          geometryEngine,
+          Extent,
+        ] = loadedModules
         setModules({
           SimpleFillSymbol,
           Graphic,
           GraphicsLayer,
+          QueryTask,
+          Query,
+          geometryEngine,
+          Extent,
         } as EsriModules)
       } catch (err) {
         setError(err as Error)
