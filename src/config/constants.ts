@@ -31,7 +31,6 @@ export const HIGHLIGHT_COLOR_RGBA: [number, number, number, number] = [
 export const OUTLINE_WIDTH = 2 // 2px meets WCAG 1.4.11 non-text contrast 3:1 ratio.
 export const DEFAULT_MAX_RESULTS = 100
 export const OWNER_QUERY_CONCURRENCY = 5
-export const MAX_UNDO_HISTORY = 10
 
 // Request deduplication timeout (ms) - prevents duplicate queries within this window
 export const QUERY_DEDUPLICATION_TIMEOUT = 300

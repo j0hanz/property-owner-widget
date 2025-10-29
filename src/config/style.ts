@@ -37,13 +37,11 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     }),
     header: flexAuto("row", {
       alignItems: "center",
-      justifyContent: "space-between",
+      justifyContent: "end",
       padding: spacing?.(1),
     }),
     cols: flexAuto("row", {
       backgroundColor: colors?.surface?.background,
-      borderBlockStart: `2px solid ${colors?.divider?.primary}`,
-      borderBlockEnd: `2px solid ${colors?.divider?.primary}`,
     }),
     col: css({
       flex: "1 1 0",
@@ -72,7 +70,6 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     buttons: flexAuto("row", { gap: spacing?.(1) }),
     footer: flexAuto("row", {
       backgroundColor: colors?.surface?.background,
-      borderBlockStart: `2px solid ${colors?.divider?.primary}`,
       ...typo(typography?.label2),
     }),
   } as const

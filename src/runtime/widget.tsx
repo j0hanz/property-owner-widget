@@ -8,7 +8,7 @@ import {
   DataSourceManager,
 } from "jimu-core"
 import { JimuMapViewComponent } from "jimu-arcgis"
-import { Alert, Button, Loading, LoadingType } from "jimu-ui"
+import { Alert, Button, Loading, LoadingType, SVG } from "jimu-ui"
 import type {
   IMConfig,
   ErrorBoundaryProps,
@@ -48,7 +48,6 @@ import {
   GRID_COLUMN_KEYS,
   HIGHLIGHT_COLOR_RGBA,
   OUTLINE_WIDTH,
-  MAX_UNDO_HISTORY,
 } from "../config/constants"
 import {
   trackEvent,
@@ -57,6 +56,7 @@ import {
   createPerformanceTracker,
 } from "../shared/telemetry"
 import defaultMessages from "./translations/default"
+import clearIcon from "../assets/clear-selection-general.svg"
 
 const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   const {
@@ -181,7 +181,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     loading: false,
     error: null,
     selectedProperties: [],
-    undoHistory: [],
   })
 
   const maxResults = config.maxResults
@@ -208,15 +207,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           return prev
         }
 
-        const newUndoHistory = [
-          {
-            type: "remove" as const,
-            timestamp: Date.now(),
-            data: removed,
-          },
-          ...prev.undoHistory,
-        ].slice(0, MAX_UNDO_HISTORY)
-
         trackEvent({
           category: "Property",
           action: "remove",
@@ -226,7 +216,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         return {
           ...prev,
           selectedProperties: updated,
-          undoHistory: newUndoHistory,
         }
       })
     }
@@ -237,15 +226,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     clearQueryCache()
     clearGraphics()
     setState((prev) => {
-      const newUndoHistory = [
-        {
-          type: "clear" as const,
-          timestamp: Date.now(),
-          data: prev.selectedProperties,
-        },
-        ...prev.undoHistory,
-      ].slice(0, MAX_UNDO_HISTORY)
-
       trackEvent({
         category: "Property",
         action: "clear_all",
@@ -256,53 +236,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         ...prev,
         selectedProperties: [],
         error: null,
-        undoHistory: newUndoHistory,
-      }
-    })
-  })
-
-  const handleUndo = hooks.useEventCallback(() => {
-    if (state.undoHistory.length === 0) return
-
-    const [lastOperation, ...remainingHistory] = state.undoHistory
-
-    setState((prev) => {
-      let restoredProperties = [...prev.selectedProperties]
-
-      if (lastOperation.type === "remove") {
-        restoredProperties = [...prev.selectedProperties, ...lastOperation.data]
-      } else if (lastOperation.type === "clear") {
-        restoredProperties = lastOperation.data
-      }
-
-      if (lastOperation.data.length > 0) {
-        syncSelectionGraphics({
-          graphicsToAdd: lastOperation.data.map((row) => ({
-            graphic: row.graphic,
-            fnr: row.FNR,
-          })),
-          selectedRows: restoredProperties,
-          getCurrentView,
-          helpers: {
-            addGraphicsToMap,
-            extractFnr,
-            normalizeFnrKey,
-          },
-          highlightColor: HIGHLIGHT_COLOR_RGBA,
-          outlineWidth: OUTLINE_WIDTH,
-        })
-      }
-
-      trackEvent({
-        category: "Property",
-        action: "undo",
-        label: lastOperation.type,
-      })
-
-      return {
-        ...prev,
-        selectedProperties: restoredProperties,
-        undoHistory: remainingHistory,
       }
     })
   })
@@ -454,7 +387,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           if (isStaleRequest()) {
             return prev
           }
-          const { updatedRows } = calculatePropertyUpdates(
+          const { updatedRows, toRemove } = calculatePropertyUpdates(
             rowsToProcess,
             prev.selectedProperties,
             toggleEnabled,
@@ -477,6 +410,20 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             },
             highlightColor: HIGHLIGHT_COLOR_RGBA,
             outlineWidth: OUTLINE_WIDTH,
+          }
+
+          // Track toggle removals
+          if (toRemove.size > 0) {
+            const removedRows = prev.selectedProperties.filter((row) =>
+              toRemove.has(normalizeFnrKey(row.FNR))
+            )
+            if (removedRows.length > 0) {
+              trackEvent({
+                category: "Property",
+                action: "toggle_remove",
+                value: removedRows.length,
+              })
+            }
           }
 
           return {
@@ -592,21 +539,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     >
       <div css={styles.header}>
         <div css={styles.buttons}>
-          {state.undoHistory.length > 0 && (
-            <Button
-              size="sm"
-              type="tertiary"
-              onClick={handleUndo}
-              aria-label={translate("undoLastAction")}
-            >
-              {translate("undo")}
-            </Button>
-          )}
-          {state.selectedProperties.length > 0 && (
-            <Button size="sm" type="secondary" onClick={handleClearAll}>
-              {translate("clearAll")}
-            </Button>
-          )}
+          <Button
+            type="tertiary"
+            icon
+            onClick={handleClearAll}
+            title={translate("clearAll")}
+            disabled={state.selectedProperties.length === 0}
+          >
+            {" "}
+            <SVG src={clearIcon} />
+          </Button>
         </div>
       </div>
 

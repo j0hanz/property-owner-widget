@@ -82,13 +82,6 @@ export interface PropertyWidgetState {
   loading: boolean
   error: ErrorState | null
   selectedProperties: GridRowData[]
-  undoHistory: UndoOperation[]
-}
-
-export interface UndoOperation {
-  type: "remove" | "clear"
-  timestamp: number
-  data: GridRowData[]
 }
 
 export interface QueryResult {
