@@ -62,6 +62,8 @@ import {
 } from "../shared/telemetry"
 import clearIcon from "../assets/clear-selection-general.svg"
 import zoomIcon from "../assets/zoom-in.svg"
+import mapWrong from "../assets/map-wrong.svg"
+import mapSelect from "../assets/map-select.svg"
 
 const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   const {
@@ -576,6 +578,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     clearQueryCache()
   })
 
+  const isConfigured = config.propertyDataSourceId && config.ownerDataSourceId
+
   if (modulesLoading) {
     return (
       <div
@@ -584,13 +588,18 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         aria-label={translate("widgetTitle")}
       >
         <div
-          css={styles.loadingState}
+          css={styles.emptyState}
           role="status"
           aria-live="polite"
           aria-busy="true"
         >
-          <Loading type={LoadingType.Donut} width={100} height={100} />
-          <div>{translate("loadingModules")}</div>
+          <Loading
+            css={styles.loadingState}
+            type={LoadingType.Donut}
+            width={100}
+            height={100}
+          />
+          <div css={styles.messageState}>{translate("loadingModules")}</div>
         </div>
       </div>
     )
@@ -650,26 +659,61 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       </div>
 
       <div css={styles.body} role="main">
-        {state.loading && (
+        {!isConfigured && (
+          <div css={styles.emptyState} role="status" aria-live="polite">
+            <SVG
+              css={styles.svgState}
+              src={mapWrong}
+              width={100}
+              height={100}
+            />
+            <div css={styles.messageState}>
+              {translate("widgetNotConfigured")}
+            </div>
+          </div>
+        )}
+
+        {isConfigured && state.loading && (
           <div
-            css={styles.loadingState}
+            css={styles.emptyState}
             role="status"
             aria-live="polite"
             aria-busy="true"
           >
-            <Loading type={LoadingType.Donut} width={100} height={100} />
-            <div>{translate("loadingData")}</div>
+            <Loading
+              css={styles.loadingState}
+              type={LoadingType.Donut}
+              width={100}
+              height={100}
+            />
+            <div css={styles.messageState}>{translate("loadingData")}</div>
           </div>
         )}
 
-        {state.error && (
+        {isConfigured && state.error && (
           <div css={styles.emptyState} role="alert" aria-live="assertive">
             <Alert type="error" withIcon text={state.error.message} />
             {state.error.details && <div>{state.error.details}</div>}
           </div>
         )}
 
-        {!state.loading &&
+        {isConfigured &&
+          !state.loading &&
+          !state.error &&
+          state.selectedProperties.length === 0 && (
+            <div css={styles.emptyState} role="status" aria-live="polite">
+              <SVG
+                css={styles.svgState}
+                src={mapSelect}
+                width={100}
+                height={100}
+              />
+              <div css={styles.messageState}>{translate("readyToSelect")}</div>
+            </div>
+          )}
+
+        {isConfigured &&
+          !state.loading &&
           !state.error &&
           state.selectedProperties.length > 0 && (
             <div

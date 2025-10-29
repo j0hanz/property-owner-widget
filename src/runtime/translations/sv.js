@@ -13,6 +13,8 @@ System.register([], function (e) {
         propertySelected: "Fastigheter valda:",
         multipleOwnersFound: "Flera ägare hittades",
         emptyStatePrompt: "Klicka på fastighet",
+        widgetNotConfigured: "Konfigurera widgeten för att börja använda den",
+        readyToSelect: "Klicka på kartan för att välja en fastighet",
         columnFastighet: "Fastighet",
         columnOwner: "Ägare & Adress",
         actions: "Åtgärder",
