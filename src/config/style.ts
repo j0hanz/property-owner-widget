@@ -1,48 +1,53 @@
-import { css, type IMThemeVariables, type ImmutableObject } from "jimu-core"
+import { css, type IMThemeVariables } from "jimu-core"
 import { useTheme } from "jimu-theme"
-import type { TypographyStyle } from "jimu-theme"
+import type { FlexDirection, StyleObject } from "./types"
 
-// Internal helpers
-const typo = (variant: ImmutableObject<TypographyStyle>) => ({
-  fontFamily: variant?.fontFamily,
-  fontWeight: variant?.fontWeight?.toString(),
-  fontSize: variant?.fontSize,
-  fontStyle: variant?.fontStyle,
-  lineHeight: variant?.lineHeight,
-  color: variant?.color,
-})
-
-const flex = (dir: "row" | "column", styles: { [key: string]: any } = {}) =>
+const createFlex = (
+  direction: FlexDirection,
+  additionalStyles: StyleObject = {}
+) =>
   css({
     display: "flex",
-    flexFlow: dir === "column" ? "column nowrap" : "row nowrap",
-    ...styles,
+    flexFlow: `${direction} nowrap`,
+    ...additionalStyles,
   })
 
-const flexAuto = (dir: "row" | "column", styles: { [key: string]: any } = {}) =>
-  flex(dir, { flex: "0 0 auto", ...styles })
+const createFlexAuto = (
+  direction: FlexDirection,
+  additionalStyles: StyleObject = {}
+) => createFlex(direction, { flex: "0 0 auto", ...additionalStyles })
+
+const createBorder = (color?: string) => `1px solid ${color}`
 
 export const createWidgetStyles = (theme: IMThemeVariables) => {
-  const spacing = theme.sys.spacing
-  const colors = theme.sys.color
-  const typography = theme.sys.typography
+  const { spacing, color, typography } = theme.sys
+  const borderColor = color?.surface?.backgroundHint
+  const border = createBorder(borderColor)
+
+  const centeredFlex = {
+    display: "flex",
+    flexDirection: "column" as const,
+    alignItems: "center",
+    justifyContent: "center",
+    flex: "1 1 0",
+  }
 
   return {
-    parent: flex("column", {
+    parent: createFlex("column", {
       flex: "1 1 auto",
       overflowY: "auto",
       blockSize: "100%",
       gap: spacing?.(2),
-      backgroundColor: colors?.surface?.paper,
+      backgroundColor: color?.surface?.paper,
     }),
-    header: flexAuto("row", {
+    header: createFlexAuto("row", {
       alignItems: "center",
       justifyContent: "end",
       paddingInline: spacing?.(1),
     }),
-    cols: flexAuto("row", {
-      borderBlockStart: `1px solid ${colors?.surface?.backgroundHint}`,
-      borderBlockEnd: `1px solid ${colors?.surface?.backgroundHint}`,
+    cols: createFlexAuto("row", {
+      borderBlockStart: border,
+      borderBlockEnd: border,
     }),
     col: css({
       flex: "1 1 0",
@@ -50,55 +55,94 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       justifyContent: "center",
       padding: spacing?.(1),
     }),
-    body: flex("column", { flex: "1 1 0", overflow: "auto" }),
-    emptyState: css({
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
+    body: createFlex("column", { flex: "1 1 0", overflow: "auto" }),
+    tableContainer: createFlex("column", {
       flex: "1 1 0",
+      overflow: "hidden",
+    }),
+    table: css({
+      width: "100%",
+      borderCollapse: "collapse",
+      tableLayout: "fixed",
+    }),
+    thead: css({
+      position: "sticky",
+      top: 0,
+      backgroundColor: color?.surface?.paper,
+      zIndex: 1,
+    }),
+    th: css({
+      padding: spacing?.(1),
+      textAlign: "left",
+      borderBlockEnd: border,
+      fontWeight: 600,
+      cursor: "pointer",
+      userSelect: "none",
+      "&:hover": {
+        backgroundColor: borderColor,
+      },
+    }),
+    tbody: css({
+      display: "block",
+      overflowY: "auto",
+      flex: "1 1 0",
+    }),
+    tr: css({
+      display: "table",
+      width: "100%",
+      tableLayout: "fixed",
+      "&:hover": {
+        backgroundColor: borderColor,
+      },
+    }),
+    td: css({
+      padding: spacing?.(1),
+      borderBlockEnd: border,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+    }),
+    sortIndicator: css({
+      marginInlineStart: spacing?.(1),
+      display: "inline-block",
+    }),
+    actionCell: css({
+      display: "flex",
+      justifyContent: "flex-end",
+      alignItems: "center",
+    }),
+    emptyState: css({
+      ...centeredFlex,
       gap: spacing?.(4),
     }),
     svgState: css({
       opacity: 0.2,
     }),
     messageState: css({
-      ...typo(typography?.label2),
+      fontFamily: typography?.label2?.fontFamily,
+      fontSize: typography?.label2?.fontSize,
+      fontWeight: typography?.label2?.fontWeight,
+      lineHeight: typography?.label2?.lineHeight,
       textAlign: "center",
       opacity: 0.8,
     }),
     loadingState: css({
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      flex: "1 1 0",
+      ...centeredFlex,
       gap: spacing?.(4),
     }),
-    listContainer: flex("column", {
-      flex: "1 1 0",
-      overflow: "auto",
-      alignItems: "stretch",
-    }),
-    list: flexAuto("column"),
-    row: flexAuto("row", {
-      gap: spacing?.(2),
-      padding: spacing?.(1),
-      borderBlockEnd: `1px solid ${colors?.surface?.backgroundHint}`,
-      alignItems: "center",
-    }),
-    column: css({ flex: "1 1 0", minWidth: 0 }),
-    actions: flexAuto("row", { alignItems: "center" }),
-    errorWrap: flex("column", {
+    errorWrap: createFlex("column", {
       flex: "1 1 auto",
       gap: spacing?.(1),
       padding: spacing?.(2),
     }),
-    errorHint: css({ color: colors?.surface?.backgroundHint }),
-    buttons: flexAuto("row", { gap: spacing?.(2) }),
-    footer: flexAuto("row", {
-      borderBlockStart: `1px solid ${colors?.surface?.backgroundHint}`,
-      ...typo(typography?.label2),
+    errorHint: css({ color: borderColor }),
+    buttons: createFlexAuto("row", { gap: spacing?.(2) }),
+    footer: createFlexAuto("row", {
+      borderBlockStart: border,
+      fontFamily: typography?.label2?.fontFamily,
+      fontSize: typography?.label2?.fontSize,
+      fontWeight: typography?.label2?.fontWeight,
+      lineHeight: typography?.label2?.lineHeight,
     }),
   } as const
 }
