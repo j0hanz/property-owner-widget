@@ -494,9 +494,18 @@ const validatePropertyFeature = (
     return null
   }
 
+  console.log("validatePropertyFeature attributes:", {
+    attributeKeys: Object.keys(graphic.attributes || {}),
+    attributes: graphic.attributes,
+  })
+
   const fnr = extractFnr(graphic.attributes)
   if (!fnr) {
-    console.log("validatePropertyFeature: FNR extraction failed")
+    console.log("validatePropertyFeature: FNR extraction failed", {
+      hasAttributes: !!graphic.attributes,
+      FNR: graphic.attributes?.FNR,
+      fnr: graphic.attributes?.fnr,
+    })
     return null
   }
 
