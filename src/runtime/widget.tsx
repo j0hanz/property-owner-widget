@@ -6,9 +6,12 @@ import {
   hooks,
   type AllWidgetProps,
   DataSourceManager,
+  DataSourceComponent,
   ReactRedux,
   type IMState,
   WidgetState,
+  type UseDataSource,
+  type ImmutableObject,
 } from "jimu-core"
 import { JimuMapViewComponent } from "jimu-arcgis"
 import { Alert, Button, Loading, LoadingType, SVG } from "jimu-ui"
@@ -162,6 +165,59 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       runtimeState,
     })
   })
+
+  const getUseDataSourceId = (
+    useDataSource: ImmutableObject<UseDataSource> | null | undefined
+  ): string | null => {
+    if (!useDataSource) {
+      return null
+    }
+
+    const getId = (useDataSource as any)?.get
+    if (typeof getId === "function") {
+      return getId.call(useDataSource, "dataSourceId") ?? null
+    }
+
+    return (useDataSource as any)?.dataSourceId ?? null
+  }
+
+  const getUseDataSourceById = (
+    dataSourceId?: string
+  ): ImmutableObject<UseDataSource> | null => {
+    if (!dataSourceId || !props.useDataSources) {
+      return null
+    }
+
+    const collection = props.useDataSources as unknown as {
+      find: (
+        predicate: (candidate: ImmutableObject<UseDataSource>) => boolean
+      ) => ImmutableObject<UseDataSource> | undefined
+    }
+
+    if (typeof collection.find !== "function") {
+      return null
+    }
+
+    const match = collection.find((candidate) => {
+      if (!candidate) {
+        return false
+      }
+
+      const getId = (candidate as any)?.get
+      if (typeof getId === "function") {
+        return getId.call(candidate, "dataSourceId") === dataSourceId
+      }
+
+      return (candidate as any)?.dataSourceId === dataSourceId
+    })
+
+    return match ?? null
+  }
+
+  const propertyUseDataSource = getUseDataSourceById(
+    config.propertyDataSourceId
+  )
+  const ownerUseDataSource = getUseDataSourceById(config.ownerDataSourceId)
 
   const {
     modules,
@@ -359,6 +415,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       }))
     }
   )
+
+  const handlePropertyDataSourceFailed = hooks.useEventCallback(() => {
+    console.error("Property data source creation failed")
+    setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
+  })
+
+  const handleOwnerDataSourceFailed = hooks.useEventCallback(() => {
+    console.error("Owner data source creation failed")
+    setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
+  })
 
   const handleMapClick = hooks.useEventCallback(
     async (event: __esri.ViewClickEvent) => {
@@ -738,6 +804,22 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       role="region"
       aria-label={translate("widgetTitle")}
     >
+      {propertyUseDataSource ? (
+        <DataSourceComponent
+          key={`${id}-property-ds`}
+          useDataSource={propertyUseDataSource}
+          onCreateDataSourceFailed={handlePropertyDataSourceFailed}
+        />
+      ) : null}
+      {ownerUseDataSource &&
+      getUseDataSourceId(ownerUseDataSource) !==
+        getUseDataSourceId(propertyUseDataSource) ? (
+        <DataSourceComponent
+          key={`${id}-owner-ds`}
+          useDataSource={ownerUseDataSource}
+          onCreateDataSourceFailed={handleOwnerDataSourceFailed}
+        />
+      ) : null}
       <div css={styles.header}>
         <div css={styles.buttons}>
           <Button
