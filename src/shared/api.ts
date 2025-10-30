@@ -252,16 +252,22 @@ export const queryOwnerByFnr = async (
 
         return result.records.map((record: FeatureDataRecord) => {
           const data = record.getData()
-          console.log("Owner record getData():", {
-            fnr,
-            data,
-            hasAttributes: !!data?.attributes,
-            attributes: data?.attributes,
-            dataKeys: Object.keys(data || {}),
-          })
           const graphic: any = {
             attributes: data, // The data IS the attributes
           }
+          console.log("Owner record processed:", {
+            fnr,
+            rawData: data,
+            rawDataKeys: Object.keys(data || {}),
+            wrappedGraphic: graphic,
+            hasAttributes: !!graphic.attributes,
+            attributesSample: {
+              OBJECTID: graphic.attributes?.OBJECTID,
+              NAMN: graphic.attributes?.NAMN,
+              BOSTADR: graphic.attributes?.BOSTADR,
+            },
+          })
+
           return graphic as __esri.Graphic
         })
       } catch (error) {
