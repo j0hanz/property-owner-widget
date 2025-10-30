@@ -144,6 +144,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const styles = useWidgetStyles()
   const translate = hooks.useTranslation()
 
+  console.log('Property Widget Config:', {
+    propertyDataSourceId: config.propertyDataSourceId,
+    ownerDataSourceId: config.ownerDataSourceId,
+    mapWidgetId: useMapWidgetIds?.[0],
+    hasDataSources: !!(config.propertyDataSourceId && config.ownerDataSourceId)
+  })
+
   const {
     modules,
     loading: modulesLoading,
