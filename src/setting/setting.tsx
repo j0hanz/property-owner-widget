@@ -22,7 +22,7 @@ import { useSettingStyles } from "../config/style"
 const Setting = (
   props: AllWidgetSettingProps<IMConfig>
 ): React.ReactElement => {
-  const { config, id, onSettingChange, useDataSources } = props
+  const { config, id, onSettingChange } = props
   const translate = hooks.useTranslation()
   const styles = useSettingStyles()
 
@@ -35,43 +35,48 @@ const Setting = (
     }
   )
 
-  const handleDataSourceChange = hooks.useEventCallback(
+  const handlePropertyDataSourceChange = hooks.useEventCallback(
     (useDataSources: UseDataSource[]) => {
-      console.log("handleDataSourceChange called:", {
-        count: useDataSources?.length,
-        dataSources: useDataSources?.map((ds) => ({
-          id: ds?.dataSourceId,
-          rootId: ds?.rootDataSourceId,
-        })),
-      })
-
-      if (!useDataSources || useDataSources.length < 2) {
-        console.log("Both property and owner data sources are required")
+      const propertyDs = useDataSources?.[0]
+      if (!propertyDs?.dataSourceId) {
         return
       }
 
-      const propertyDs = useDataSources[0]
-      const ownerDs = useDataSources[1]
+      const existingOwnerDs = props.useDataSources?.find(
+        (ds) => ds.dataSourceId === config.ownerDataSourceId
+      )
 
-      console.log("Property DS:", propertyDs?.dataSourceId)
-      console.log("Owner DS:", ownerDs?.dataSourceId)
-
-      if (!propertyDs?.dataSourceId || !ownerDs?.dataSourceId) {
-        console.log("Invalid data source selection - both must have IDs")
-        return
-      }
-
-      console.log("Saving config with IDs:", {
-        propertyDataSourceId: propertyDs.dataSourceId,
-        ownerDataSourceId: ownerDs.dataSourceId,
-      })
+      const newUseDataSources = existingOwnerDs
+        ? [propertyDs, existingOwnerDs]
+        : [propertyDs]
 
       onSettingChange({
         id,
-        useDataSources,
-        config: config
-          .set("propertyDataSourceId", propertyDs?.dataSourceId)
-          .set("ownerDataSourceId", ownerDs?.dataSourceId),
+        useDataSources: newUseDataSources,
+        config: config.set("propertyDataSourceId", propertyDs.dataSourceId),
+      })
+    }
+  )
+
+  const handleOwnerDataSourceChange = hooks.useEventCallback(
+    (useDataSources: UseDataSource[]) => {
+      const ownerDs = useDataSources?.[0]
+      if (!ownerDs?.dataSourceId) {
+        return
+      }
+
+      const existingPropertyDs = props.useDataSources?.find(
+        (ds) => ds.dataSourceId === config.propertyDataSourceId
+      )
+
+      const newUseDataSources = existingPropertyDs
+        ? [existingPropertyDs, ownerDs]
+        : [ownerDs]
+
+      onSettingChange({
+        id,
+        useDataSources: newUseDataSources,
+        config: config.set("ownerDataSourceId", ownerDs.dataSourceId),
       })
     }
   )
@@ -136,17 +141,48 @@ const Setting = (
       </SettingSection>
 
       <SettingSection title={translate("dataSourcesTitle")}>
-        <SettingRow flow="wrap" level={2}>
+        <SettingRow
+          flow="wrap"
+          level={2}
+          label={translate("propertyLayerLabel")}
+        >
           <DataSourceSelector
             types={Immutable([DataSourceTypes.FeatureLayer])}
-            useDataSources={useDataSources}
+            useDataSources={
+              config.propertyDataSourceId && props.useDataSources
+                ? Immutable(
+                    props.useDataSources.filter(
+                      (ds) => ds.dataSourceId === config.propertyDataSourceId
+                    )
+                  )
+                : Immutable([])
+            }
             mustUseDataSource
-            onChange={handleDataSourceChange}
+            onChange={handlePropertyDataSourceChange}
             widgetId={id}
-            isMultiple
             hideTypeDropdown
           />
         </SettingRow>
+
+        <SettingRow flow="wrap" level={2} label={translate("ownerLayerLabel")}>
+          <DataSourceSelector
+            types={Immutable([DataSourceTypes.FeatureLayer])}
+            useDataSources={
+              config.ownerDataSourceId && props.useDataSources
+                ? Immutable(
+                    props.useDataSources.filter(
+                      (ds) => ds.dataSourceId === config.ownerDataSourceId
+                    )
+                  )
+                : Immutable([])
+            }
+            mustUseDataSource
+            onChange={handleOwnerDataSourceChange}
+            widgetId={id}
+            hideTypeDropdown
+          />
+        </SettingRow>
+
         <div css={styles.description}>
           {translate("dataSourcesDescription")}
         </div>
