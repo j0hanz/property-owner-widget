@@ -9,7 +9,11 @@ import {
   Immutable,
 } from "jimu-core"
 import type { AllWidgetSettingProps } from "jimu-for-builder"
-import { SettingSection, SettingRow } from "jimu-ui/advanced/setting-components"
+import {
+  SettingSection,
+  SettingRow,
+  MapWidgetSelector,
+} from "jimu-ui/advanced/setting-components"
 import { DataSourceSelector } from "jimu-ui/advanced/data-source-selector"
 import { NumericInput, Switch, TextArea } from "jimu-ui"
 import type { IMConfig } from "../config/types"
@@ -94,8 +98,27 @@ const Setting = (
     updateConfigField("relationshipId", validValue)
   })
 
+  const handleMapWidgetChange = hooks.useEventCallback(
+    (useMapWidgetIds: string[]) => {
+      onSettingChange({
+        id,
+        useMapWidgetIds,
+      })
+    }
+  )
+
   return (
     <>
+      <SettingSection title={translate("mapWidgetTitle")}>
+        <SettingRow flow="wrap" level={2}>
+          <MapWidgetSelector
+            onSelect={handleMapWidgetChange}
+            useMapWidgetIds={props.useMapWidgetIds}
+          />
+        </SettingRow>
+        <div css={styles.description}>{translate("mapWidgetDescription")}</div>
+      </SettingSection>
+
       <SettingSection title={translate("dataSourcesTitle")}>
         <SettingRow flow="wrap" level={2}>
           <DataSourceSelector

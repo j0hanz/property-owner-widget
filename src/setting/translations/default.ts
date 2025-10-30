@@ -1,6 +1,9 @@
 export default {
   configurationInstructions:
     "Configure the widget by providing layer URLs and display preferences.",
+  mapWidgetTitle: "Map connection",
+  mapWidgetDescription:
+    "Select a map widget to enable property querying by clicking on the map. The widget will listen for map clicks and query property information at the clicked location.",
   dataSourcesTitle: "Data sources",
   dataSourcesDescription:
     "Select two feature layers: first for property parcels, second for ownership information. Both layers must use the FNR field to relate properties to owners.",
