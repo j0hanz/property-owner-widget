@@ -255,17 +255,22 @@ export const queryOwnerByFnr = async (
           const graphic: any = {
             attributes: data, // The data IS the attributes
           }
-          console.log("Owner record processed:", {
+          
+          // Log ALL fields with their actual values to debug
+          const allFields: any = {}
+          Object.keys(data || {}).forEach(key => {
+            allFields[key] = data[key]
+          })
+          
+          console.log("Owner record processed - ALL FIELDS:", {
             fnr,
-            rawData: data,
-            rawDataKeys: Object.keys(data || {}),
-            wrappedGraphic: graphic,
-            hasAttributes: !!graphic.attributes,
-            attributesSample: {
-              OBJECTID: graphic.attributes?.OBJECTID,
-              NAMN: graphic.attributes?.NAMN,
-              BOSTADR: graphic.attributes?.BOSTADR,
-            },
+            allFieldsWithValues: allFields,
+            hasNAMN: 'NAMN' in data,
+            hasBOSTADR: 'BOSTADR' in data,
+            hasAGARLISTA: 'AGARLISTA' in data,
+            NAMNvalue: data.NAMN,
+            BOSTADRvalue: data.BOSTADR,
+            AGARLISTAvalue: data.AGARLISTA,
           })
 
           return graphic as __esri.Graphic
