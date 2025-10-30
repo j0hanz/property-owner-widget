@@ -122,7 +122,10 @@ export const queryPropertyByPoint = async (
           spatialRelationship: "intersects",
         })
 
-        const result = await layer.queryFeatures(query, createSignalOptions(options?.signal))
+        const result = await layer.queryFeatures(
+          query,
+          createSignalOptions(options?.signal)
+        )
 
         console.log("Query result:", {
           featureCount: result?.features?.length || 0,

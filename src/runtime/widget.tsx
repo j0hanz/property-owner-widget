@@ -386,6 +386,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           if (isStaleRequest()) {
             return
           }
+          console.log("No property results returned from query")
           setState((prev) => ({ ...prev, loading: false }))
           tracker.success()
           trackEvent({
@@ -395,6 +396,21 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           })
           return
         }
+
+        console.log("Property results received:", {
+          count: propertyResults.length,
+          firstResult: propertyResults[0],
+          firstResultStructure: propertyResults[0]
+            ? {
+                hasFeatures: !!propertyResults[0].features,
+                featuresLength: propertyResults[0].features?.length,
+                firstFeature: propertyResults[0].features?.[0],
+                firstFeatureAttrs: propertyResults[0].features?.[0]?.attributes,
+                firstFeatureGeometry:
+                  !!propertyResults[0].features?.[0]?.geometry,
+              }
+            : null,
+        })
 
         // Step 4: Process results and enrich with owner data
         const useBatchQuery =
@@ -451,6 +467,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
                 errorNoDataAvailable: translate("errorNoDataAvailable"),
               },
             })
+
+        console.log("Processing complete:", {
+          rowsToProcessCount: rowsToProcess.length,
+          graphicsToAddCount: graphicsToAdd.length,
+          firstRow: rowsToProcess[0],
+        })
 
         if (controller.signal.aborted || isStaleRequest()) {
           if (isStaleRequest()) {

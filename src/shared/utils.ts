@@ -477,12 +477,30 @@ const validatePropertyFeature = (
   propertyResult: any,
   extractFnr: (attrs: any) => string | number | null
 ): { fnr: string | number; attrs: any; graphic: __esri.Graphic } | null => {
+  console.log("validatePropertyFeature input:", {
+    hasPropertyResult: !!propertyResult,
+    hasFeatures: !!propertyResult?.features,
+    featuresLength: propertyResult?.features?.length,
+    firstFeature: propertyResult?.features?.[0],
+  })
+
   const graphic = propertyResult.features?.[0]
-  if (!graphic?.attributes || !graphic?.geometry) return null
+  if (!graphic?.attributes || !graphic?.geometry) {
+    console.log("validatePropertyFeature failed:", {
+      hasGraphic: !!graphic,
+      hasAttributes: !!graphic?.attributes,
+      hasGeometry: !!graphic?.geometry,
+    })
+    return null
+  }
 
   const fnr = extractFnr(graphic.attributes)
-  if (!fnr) return null
+  if (!fnr) {
+    console.log("validatePropertyFeature: FNR extraction failed")
+    return null
+  }
 
+  console.log("validatePropertyFeature success:", { fnr })
   return { fnr, attrs: graphic.attributes, graphic }
 }
 
