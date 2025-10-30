@@ -169,7 +169,11 @@ const isHostAllowed = (
   allowedHosts?: readonly string[]
 ): boolean => {
   if (!allowedHosts || allowedHosts.length === 0) return true
-  return allowedHosts.some((h) => hostname === h || hostname.endsWith("." + h))
+  return allowedHosts.some((h) => {
+    if (hostname === h) return true
+    const suffix = "." + h
+    return hostname.endsWith(suffix)
+  })
 }
 
 /** Validate ArcGIS REST service URL with host allowlist enforcement */

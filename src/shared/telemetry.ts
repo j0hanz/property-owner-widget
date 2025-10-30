@@ -15,8 +15,12 @@ export const isAllowedToTrack = (): boolean => {
       (navigator as any)?.msDoNotTrack
     if (dt === "1" || dt === "yes") return false
 
+    // Check cookie opt-out with proper parsing to avoid cross-domain pollution
     const cookie = typeof document !== "undefined" ? document.cookie || "" : ""
-    if (cookie.includes("esri_disallow_tracking=1")) return false
+    const cookiePairs = cookie.split(";").map((c) => c.trim())
+    if (cookiePairs.some((pair) => pair === "esri_disallow_tracking=1")) {
+      return false
+    }
 
     // Check localStorage opt-in/opt-out (cannot override GPC/DNT)
     const storage = window.localStorage
