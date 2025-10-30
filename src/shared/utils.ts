@@ -722,6 +722,7 @@ const processBatchOfProperties = async (params: {
         helpers: {
           createRowId: helpers.createRowId,
           formatPropertyWithShare: helpers.formatPropertyWithShare,
+          formatOwnerInfo: helpers.formatOwnerInfo,
         },
         messages,
       })
@@ -759,6 +760,7 @@ const processBatchOfProperties = async (params: {
       helpers: {
         createRowId: helpers.createRowId,
         formatPropertyWithShare: helpers.formatPropertyWithShare,
+        formatOwnerInfo: helpers.formatOwnerInfo,
       },
       messages,
     })
@@ -802,6 +804,11 @@ const buildPropertyRows = (params: {
   helpers: {
     createRowId: (fnr: string | number, objectId: number) => string
     formatPropertyWithShare: (property: string, share?: string) => string
+    formatOwnerInfo: (
+      owner: any,
+      maskPII: boolean,
+      unknownOwnerText: string
+    ) => string
   }
   messages: {
     unknownOwner: string
@@ -809,7 +816,7 @@ const buildPropertyRows = (params: {
     errorNoDataAvailable: string
   }
 }): GridRowData[] => {
-  const { fnr, propertyAttrs, ownerFeatures, propertyGraphic, helpers } = params
+  const { fnr, propertyAttrs, ownerFeatures, propertyGraphic, config, helpers, messages } = params
 
   if (ownerFeatures.length > 0) {
     return ownerFeatures.map((ownerFeature) => {
@@ -828,7 +835,11 @@ const buildPropertyRows = (params: {
           attrs?.FASTIGHET || "",
           attrs?.ANDEL || ""
         ),
-        bostadr: attrs?.BOSTADR || propertyAttrs?.BOSTADR || "",
+        bostadr: helpers.formatOwnerInfo(
+          attrs,
+          config.enablePIIMasking,
+          messages.unknownOwner
+        ),
         graphic: propertyGraphic,
         createRowId: helpers.createRowId,
       })
