@@ -100,7 +100,10 @@ export const formatOwnerInfo = (
     postalCode && city ? `${postalCode} ${city}` : postalCode || city,
   ].filter(Boolean)
 
-  return parts.join(", ") + (orgNr ? ` (${orgNr})` : "")
+  const result = parts.join(", ") + (orgNr ? ` (${orgNr})` : "")
+
+  // Ensure we never return an empty string
+  return result || unknownOwnerText
 }
 
 /** Format property designation with optional share percentage */
