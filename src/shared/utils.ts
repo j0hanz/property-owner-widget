@@ -644,12 +644,49 @@ const processBatchOfProperties = async (params: {
   const rows: GridRowData[] = []
   const graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }> = []
 
-  for (const result of ownerData) {
+  for (let i = 0; i < ownerData.length; i++) {
+    const result = ownerData[i]
+    const validated = batch[i]
+
     // Handle eachAlways result structure: { promise, value?, error? }
     if (result.error) {
-      // Skip aborted queries, log other failures
-      if (!helpers.isAbortError(result.error)) {
-        console.log("Owner query failed for batch item:", result.error)
+      // Skip aborted queries, but create fallback rows for other failures
+      if (helpers.isAbortError(result.error)) {
+        continue
+      }
+      console.log("Owner query failed for property:", {
+        fnr: validated.fnr,
+        fastighet: validated.attrs?.FASTIGHET,
+        error: result.error,
+        errorMessage:
+          result.error instanceof Error
+            ? result.error.message
+            : String(result.error),
+      })
+
+      if (currentRowCount + rows.length >= maxResults) break
+
+      const propertyRows = buildPropertyRows({
+        fnr: validated.fnr,
+        propertyAttrs: validated.attrs,
+        ownerFeatures: [],
+        queryFailed: true,
+        propertyGraphic: validated.graphic,
+        config: { enablePIIMasking: config.enablePIIMasking },
+        helpers: {
+          createRowId: helpers.createRowId,
+          formatPropertyWithShare: helpers.formatPropertyWithShare,
+          formatOwnerInfo: helpers.formatOwnerInfo,
+        },
+        messages,
+      })
+
+      const remaining = maxResults - (currentRowCount + rows.length)
+      const rowsToAdd = propertyRows.slice(0, remaining)
+      rows.push(...rowsToAdd)
+
+      if (rowsToAdd.length > 0) {
+        graphics.push({ graphic: validated.graphic, fnr: validated.fnr })
       }
       continue
     }
@@ -660,15 +697,19 @@ const processBatchOfProperties = async (params: {
       continue
     }
 
-    const { validated, ownerFeatures, queryFailed } = result.value
+    const {
+      validated: validatedFromValue,
+      ownerFeatures,
+      queryFailed,
+    } = result.value
     if (currentRowCount + rows.length >= maxResults) break
 
     const propertyRows = buildPropertyRows({
-      fnr: validated.fnr,
-      propertyAttrs: validated.attrs,
+      fnr: validatedFromValue.fnr,
+      propertyAttrs: validatedFromValue.attrs,
       ownerFeatures,
       queryFailed,
-      propertyGraphic: validated.graphic,
+      propertyGraphic: validatedFromValue.graphic,
       config: { enablePIIMasking: config.enablePIIMasking },
       helpers: {
         createRowId: helpers.createRowId,
