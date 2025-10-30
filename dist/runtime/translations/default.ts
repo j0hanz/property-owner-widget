@@ -8,6 +8,7 @@ export default {
   queryingOwner: "Retrieving owner information...",
   noResults: "No properties found",
   propertySelected: "Properties selected:",
+  clickMapToSelectProperties: "Click on the map to select properties",
   multipleOwnersFound: "Multiple owners found",
   emptyStatePrompt: "Click on property",
   widgetNotConfigured:
