@@ -1217,3 +1217,54 @@ export const syncGraphicsWithState = (params: {
 
 // Re-export type guards from types module for convenience
 export { isValidationSuccess, isValidationFailure } from "../config/types"
+
+// Manage suppression of popups on MapView instances
+class PopupSuppressionManager {
+  private readonly ownersByView = new WeakMap<__esri.MapView, Set<symbol>>()
+  private readonly originalStateByView = new WeakMap<__esri.MapView, boolean>()
+
+  acquire(ownerId: symbol, view: __esri.MapView | null | undefined): void {
+    if (!view) return
+
+    const popup = view.popup as
+      | (__esri.Popup & { autoOpenEnabled?: boolean })
+      | undefined
+    if (!popup || typeof popup.autoOpenEnabled !== "boolean") return
+
+    let owners = this.ownersByView.get(view)
+    if (!owners) {
+      owners = new Set()
+      this.ownersByView.set(view, owners)
+      this.originalStateByView.set(view, popup.autoOpenEnabled)
+    }
+
+    owners.add(ownerId)
+    popup.autoOpenEnabled = false
+  }
+
+  release(ownerId: symbol, view: __esri.MapView | null | undefined): void {
+    if (!view) return
+
+    const owners = this.ownersByView.get(view)
+    if (!owners || !owners.delete(ownerId)) return
+
+    if (owners.size === 0) {
+      this.restorePopupState(view)
+    }
+  }
+
+  private restorePopupState(view: __esri.MapView): void {
+    const popup = view.popup as
+      | (__esri.Popup & { autoOpenEnabled?: boolean })
+      | undefined
+    const originalState = this.originalStateByView.get(view)
+
+    if (popup && originalState !== undefined) {
+      popup.autoOpenEnabled = originalState
+      this.originalStateByView.delete(view)
+      this.ownersByView.delete(view)
+    }
+  }
+}
+
+export const popupSuppressionManager = new PopupSuppressionManager()

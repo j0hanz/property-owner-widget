@@ -6,6 +6,9 @@ import {
   hooks,
   type AllWidgetProps,
   DataSourceManager,
+  ReactRedux,
+  type IMState,
+  WidgetState,
 } from "jimu-core"
 import { JimuMapViewComponent } from "jimu-arcgis"
 import { Alert, Button, Loading, LoadingType, SVG } from "jimu-ui"
@@ -143,11 +146,17 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const styles = useWidgetStyles()
   const translate = hooks.useTranslation()
 
+  const runtimeState = ReactRedux.useSelector(
+    (state: IMState) => state.widgetsRuntimeInfo?.[id]?.state
+  )
+  const prevRuntimeState = hooks.usePrevious(runtimeState)
+
   console.log("Property Widget Config:", {
     propertyDataSourceId: config.propertyDataSourceId,
     ownerDataSourceId: config.ownerDataSourceId,
     mapWidgetId: useMapWidgetIds?.[0],
     hasDataSources: !!(config.propertyDataSourceId && config.ownerDataSourceId),
+    runtimeState,
   })
 
   const {
@@ -628,14 +637,34 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
   )
 
-  const { onActiveViewChange, getCurrentView } = useMapViewLifecycle({
-    modules,
-    ensureGraphicsLayer,
-    destroyGraphicsLayer,
-    disablePopup,
-    restorePopup,
-    onMapClick: handleMapClick,
-  })
+  const { onActiveViewChange, getCurrentView, reactivateMapView } =
+    useMapViewLifecycle({
+      modules,
+      ensureGraphicsLayer,
+      destroyGraphicsLayer,
+      disablePopup,
+      restorePopup,
+      onMapClick: handleMapClick,
+    })
+
+  hooks.useUpdateEffect(() => {
+    const isOpening =
+      (runtimeState === WidgetState.Opened ||
+        runtimeState === WidgetState.Active) &&
+      (prevRuntimeState === WidgetState.Closed ||
+        prevRuntimeState === WidgetState.Hidden ||
+        typeof prevRuntimeState === "undefined")
+
+    if (isOpening) {
+      console.log("Property Widget: Reactivating on open from controller")
+      reactivateMapView()
+      trackEvent({
+        category: "Property",
+        action: "widget_reopened",
+        label: "from_controller",
+      })
+    }
+  }, [runtimeState, prevRuntimeState, reactivateMapView])
 
   hooks.useUnmount(() => {
     abortAll()

@@ -5,6 +5,7 @@ import {
   ESRI_MODULES_TO_LOAD,
   ABORT_CONTROLLER_POOL_SIZE,
 } from "../config/constants"
+import { popupSuppressionManager } from "./utils"
 
 export const useEsriModules = () => {
   const [modules, setModules] = React.useState<EsriModules | null>(null)
@@ -222,34 +223,19 @@ export const useGraphicsLayer = (
 }
 
 export const usePopupManager = () => {
-  const popupStatesRef = React.useRef<Map<__esri.MapView, boolean>>(new Map())
+  const ownerIdRef = React.useRef(Symbol("property-widget-popup-owner"))
 
   const restorePopup = hooks.useEventCallback(
     (view: __esri.MapView | undefined) => {
       if (!view) return
-      const popup = view.popup as
-        | (__esri.Popup & { autoOpenEnabled?: boolean })
-        | undefined
-      const originalState = popupStatesRef.current.get(view)
-      if (popup && originalState !== undefined) {
-        popup.autoOpenEnabled = originalState
-        popupStatesRef.current.delete(view)
-      }
+      popupSuppressionManager.release(ownerIdRef.current, view)
     }
   )
 
   const disablePopup = hooks.useEventCallback(
     (view: __esri.MapView | undefined) => {
       if (!view) return
-      const popup = view.popup as
-        | (__esri.Popup & { autoOpenEnabled?: boolean })
-        | undefined
-      if (popup && typeof popup.autoOpenEnabled === "boolean") {
-        if (!popupStatesRef.current.has(view)) {
-          popupStatesRef.current.set(view, popup.autoOpenEnabled)
-        }
-        popup.autoOpenEnabled = false
-      }
+      popupSuppressionManager.acquire(ownerIdRef.current, view)
     }
   )
 
@@ -321,6 +307,18 @@ export const useMapViewLifecycle = (params: {
     setupMapView(view)
   })
 
+  const reactivateMapView = hooks.useEventCallback(() => {
+    const currentView = jimuMapViewRef.current?.view
+    if (currentView && modules) {
+      console.log("Property Widget: Reactivating existing map view")
+      disablePopup(currentView)
+      if (mapClickHandleRef.current) {
+        mapClickHandleRef.current.remove()
+      }
+      mapClickHandleRef.current = currentView.on("click", onMapClick)
+    }
+  })
+
   const cleanup = hooks.useEventCallback(() => {
     const currentView = jimuMapViewRef.current?.view
     restorePopup(currentView)
@@ -342,6 +340,7 @@ export const useMapViewLifecycle = (params: {
   return {
     onActiveViewChange,
     getCurrentView: () => jimuMapViewRef.current?.view,
+    reactivateMapView,
     cleanup,
   }
 }
