@@ -162,11 +162,10 @@ export const useWidgetStyles = (): WidgetStyles => {
 
 export const createSettingStyles = (theme: IMThemeVariables) => {
   const spacing = theme.sys.spacing
-  const colors = theme.sys.color
   const typography = theme.sys.typography
 
   return {
-    row: css({ width: "100%" }),
+    row: css({ width: "100%", margin: "16px 0 !important" }),
     fullWidth: createFlex("column", {
       inlineSize: "100%",
       flex: "1 1 auto",
@@ -177,16 +176,12 @@ export const createSettingStyles = (theme: IMThemeVariables) => {
       gap: spacing?.(1),
     }),
     tooltipTrigger: css({
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      cursor: "pointer",
-      marginInlineStart: spacing?.(1),
-      inlineSize: spacing?.(4),
-      blockSize: spacing?.(4),
-      minInlineSize: spacing?.(3),
-      minBlockSize: spacing?.(3),
-      padding: 0,
+      margin: "0 !important",
+      padding: "0 !important",
+      opacity: 0.6,
+      "&:hover": {
+        opacity: 1,
+      },
     }),
     description: css({
       fontSize: typography?.body2?.fontSize,
@@ -194,7 +189,6 @@ export const createSettingStyles = (theme: IMThemeVariables) => {
     }),
     sliderWrap: createFlex("column", {
       inlineSize: "100%",
-      gap: spacing?.(1),
     }),
     sliderTrack: createFlex("row", {
       alignItems: "center",
@@ -206,10 +200,8 @@ export const createSettingStyles = (theme: IMThemeVariables) => {
       inlineSize: "100%",
     }),
     sliderValue: css({
-      minInlineSize: spacing?.(6),
       textAlign: "right",
       fontSize: typography?.label2?.fontSize,
-      color: colors?.surface?.backgroundHint,
     }),
     allowedHostInputRow: createFlex("row", {
       inlineSize: "100%",
@@ -222,6 +214,20 @@ export const createSettingStyles = (theme: IMThemeVariables) => {
     }),
     allowedHostList: createFlex("column", {
       inlineSize: "100%",
+      ".input-wrapper": {
+        background: "transparent !important",
+        borderColor: "rgb(106, 106, 106) !important",
+      },
+      "&.disabled .input-wrapper, &.readonly .input-wrapper": {
+        background: "transparent !important",
+        borderColor: "rgb(106, 106, 106) !important",
+        opacity: 1,
+        color: "rgb(168, 168, 168)",
+        WebkitTextFillColor: "rgb(168, 168, 168)",
+      },
+    }),
+    addAllowedHostButton: css({
+      border: "none !important",
     }),
     allowedHostListRow: createFlex("row", {
       inlineSize: "100%",

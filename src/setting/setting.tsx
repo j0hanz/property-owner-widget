@@ -113,11 +113,10 @@ const Setting = (
           <Button
             type="tertiary"
             icon
-            size="sm"
             aria-label={descriptionText}
             css={styles.tooltipTrigger}
           >
-            <SVG src={infoIcon} size={16} />
+            <SVG src={infoIcon} />
           </Button>
         </Tooltip>
       </div>
@@ -592,7 +591,8 @@ const Setting = (
       <SettingSection>
         <SettingRow
           flow="wrap"
-          level={2}
+          level={1}
+          css={styles.row}
           label={renderLabelWithTooltip(
             "mapWidgetTitle",
             "mapWidgetDescription"
@@ -609,7 +609,8 @@ const Setting = (
           <>
             <SettingRow
               flow="wrap"
-              level={2}
+              level={1}
+              css={styles.row}
               label={renderLabelWithTooltip(
                 "propertyDataSourceLabel",
                 "propertyDataSourceDescription"
@@ -627,7 +628,8 @@ const Setting = (
 
             <SettingRow
               flow="wrap"
-              level={2}
+              level={1}
+              css={styles.row}
               label={renderLabelWithTooltip(
                 "ownerDataSourceLabel",
                 "ownerDataSourceDescription"
@@ -644,7 +646,7 @@ const Setting = (
             </SettingRow>
 
             {!hasRequiredDataSources && (
-              <SettingRow flow="wrap" level={2} css={styles.row}>
+              <SettingRow flow="wrap" level={1} css={styles.row}>
                 <Alert
                   css={styles.fullWidth}
                   type="warning"
@@ -669,7 +671,8 @@ const Setting = (
             >
               <SettingRow
                 flow="wrap"
-                level={2}
+                level={1}
+                css={styles.row}
                 label={renderLabelWithTooltip(
                   "maxResultsLabel",
                   "maxResultsDescription"
@@ -687,7 +690,7 @@ const Setting = (
                 />
               </SettingRow>
               {fieldErrors.maxResults && (
-                <SettingRow flow="wrap" level={2} css={styles.row}>
+                <SettingRow flow="wrap" level={1} css={styles.row}>
                   <Alert
                     css={styles.fullWidth}
                     type="error"
@@ -699,7 +702,8 @@ const Setting = (
 
               <SettingRow
                 flow="no-wrap"
-                level={2}
+                level={1}
+                css={styles.row}
                 label={renderLabelWithTooltip(
                   "enableToggleRemovalLabel",
                   "enableToggleRemovalDescription"
@@ -714,7 +718,8 @@ const Setting = (
 
               <SettingRow
                 flow="no-wrap"
-                level={2}
+                level={1}
+                css={styles.row}
                 label={renderLabelWithTooltip(
                   "enablePIIMaskingLabel",
                   "enablePIIMaskingDescription"
@@ -729,7 +734,8 @@ const Setting = (
 
               <SettingRow
                 flow="no-wrap"
-                level={2}
+                level={1}
+                css={styles.row}
                 label={renderLabelWithTooltip(
                   "autoZoomOnSelectionLabel",
                   "autoZoomOnSelectionDescription"
@@ -744,7 +750,8 @@ const Setting = (
 
               <SettingRow
                 flow="wrap"
-                level={2}
+                level={1}
+                css={styles.row}
                 label={renderLabelWithTooltip(
                   "allowedHostsLabel",
                   "allowedHostsDescription"
@@ -761,23 +768,20 @@ const Setting = (
                     spellCheck={false}
                   />
                   <Button
-                    type="tertiary"
+                    type="default"
                     icon
                     onClick={handleAddAllowedHost}
                     title={translate("addAllowedHostLabel")}
                     aria-label={translate("addAllowedHostLabel")}
                     disabled={!canAddAllowedHost}
+                    css={styles.addAllowedHostButton}
                   >
                     <SVG src={addIcon} size={16} />
                   </Button>
                 </div>
               </SettingRow>
 
-              <SettingRow
-                flow="wrap"
-                level={2}
-                label={translate("allowedHostsListLabel")}
-              >
+              <SettingRow flow="wrap" level={1} css={styles.row}>
                 <div css={styles.allowedHostList}>
                   {localAllowedHostsList.length > 0 ? (
                     localAllowedHostsList.map((host) => (
@@ -787,6 +791,7 @@ const Setting = (
                           value={host}
                           readOnly
                           borderless
+                          disabled
                           spellCheck={false}
                           aria-label={`${translate("allowedHostsListLabel")}: ${host}`}
                         />
@@ -816,10 +821,7 @@ const Setting = (
           </SettingSection>
           <SettingSection>
             <CollapsablePanel
-              label={renderLabelWithTooltip(
-                "panelHighlightSettings",
-                "highlightOptionsDescription"
-              )}
+              label={translate("panelHighlightSettings")}
               type="default"
               level={1}
               role="group"
@@ -827,8 +829,12 @@ const Setting = (
             >
               <SettingRow
                 flow="wrap"
-                level={2}
-                label={translate("highlightColorLabel")}
+                level={1}
+                css={styles.row}
+                label={renderLabelWithTooltip(
+                  "highlightColorLabel",
+                  "highlightColorLabelTooltip"
+                )}
               >
                 <ColorPicker
                   css={styles.fullWidth}
@@ -840,8 +846,12 @@ const Setting = (
 
               <SettingRow
                 flow="wrap"
-                level={2}
-                label={translate("highlightOpacityLabel")}
+                level={1}
+                css={styles.row}
+                label={renderLabelWithTooltip(
+                  "highlightOpacityLabel",
+                  "highlightOpacityLabelTooltip"
+                )}
               >
                 <div css={styles.sliderWrap}>
                   <div css={styles.sliderTrack}>
@@ -869,8 +879,12 @@ const Setting = (
 
               <SettingRow
                 flow="wrap"
-                level={2}
-                label={translate("highlightOutlineWidthLabel")}
+                level={1}
+                css={styles.row}
+                label={renderLabelWithTooltip(
+                  "highlightOutlineWidthLabel",
+                  "highlightOutlineWidthLabelTooltip"
+                )}
               >
                 <div css={styles.sliderWrap}>
                   <div css={styles.sliderTrack}>
@@ -912,7 +926,8 @@ const Setting = (
             >
               <SettingRow
                 flow="no-wrap"
-                level={2}
+                level={1}
+                css={styles.row}
                 label={renderLabelWithTooltip(
                   "enableBatchOwnerQueryLabel",
                   "enableBatchOwnerQueryDescription"
@@ -929,7 +944,8 @@ const Setting = (
                 <>
                   <SettingRow
                     flow="wrap"
-                    level={2}
+                    level={1}
+                    css={styles.row}
                     label={renderLabelWithTooltip(
                       "relationshipIdLabel",
                       "relationshipIdDescription"
@@ -948,7 +964,7 @@ const Setting = (
                     />
                   </SettingRow>
                   {fieldErrors.relationshipId && (
-                    <SettingRow flow="wrap" level={2} css={styles.row}>
+                    <SettingRow flow="wrap" level={1} css={styles.row}>
                       <Alert
                         css={styles.fullWidth}
                         type="error"

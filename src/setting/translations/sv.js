@@ -18,22 +18,28 @@ System.register([], function (e) {
         panelDisplaySettings: "Visningsbeteende",
         advancedSettingsTitle: "Avancerade inställningar",
         panelHighlightSettings: "Markeringsstil",
+        highlightColorLabelTooltip:
+          "Välj färg för att markera valda fastigheter.",
+        highlightOpacityLabelTooltip:
+          "Ange fyllnadsopacitet för markerade fastigheter.",
         maxResultsLabel: "Maximalt antal resultat",
         maxResultsDescription:
           "Maximalt antal fastigheter som ska returneras per fråga.",
         resetMaxResults: "Återställ standardvärde",
-        enableToggleRemovalLabel: "Aktivera växlingsborttagning",
+        enableToggleRemovalLabel: "Växlingsborttagning",
         enableToggleRemovalDescription:
           "Tillåt ett nytt klick för att avmarkera fastigheten.",
-        enablePIIMaskingLabel: "Aktivera PII-maskning",
+        enablePIIMaskingLabel: "PII-maskning",
         enablePIIMaskingDescription: "Maskera namn och adresser i widgeten.",
-        autoZoomOnSelectionLabel: "Zooma automatiskt till resultat",
+        autoZoomOnSelectionLabel: "Zooma till resultat",
         autoZoomOnSelectionDescription: "Zomma till markerade fastigheter.",
         highlightOptionsDescription:
           "Styr hur markerade fastigheter visas på kartan.",
         highlightColorLabel: "Markeringsfärg",
         highlightOpacityLabel: "Fyllnadsopacitet",
         highlightOutlineWidthLabel: "Linjebredd",
+        highlightOutlineWidthLabelTooltip:
+          "Ange linjebredden för markerade fastigheter.",
         allowedHostsLabel: "Tillåtna värdar",
         allowedHostsDescription:
           "Tillåtna HTTPS-värdar som ska användas för tjänster.",
@@ -42,7 +48,7 @@ System.register([], function (e) {
         allowedHostsListLabel: "Tillåtna värdposter",
         allowedHostsEmptyHint: "Inga värdar tillåtna ännu.",
         removeAllowedHostLabel: "Ta bort tillåten värd",
-        enableBatchOwnerQueryLabel: "Aktivera batch-ägarsökningar",
+        enableBatchOwnerQueryLabel: "Batch-ägarförfrågan",
         enableBatchOwnerQueryDescription:
           "Aktivera relation för att hämta alla ägare i en förfrågan.",
         relationshipIdLabel: "Relations-ID",
