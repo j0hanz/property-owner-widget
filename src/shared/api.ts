@@ -124,6 +124,12 @@ export const queryPropertyByPoint = async (
 
         const result = await layer.queryFeatures(query, createSignalOptions(options?.signal))
 
+        console.log("Query result:", {
+          featureCount: result?.features?.length || 0,
+          hasFeatures: !!(result?.features && result.features.length > 0),
+          firstFeature: result?.features?.[0]?.attributes,
+        })
+
         if (options?.signal?.aborted) {
           const abortError = new Error("AbortError")
           abortError.name = "AbortError"
@@ -131,15 +137,23 @@ export const queryPropertyByPoint = async (
         }
 
         if (!result?.features || result.features.length === 0) {
+          console.log("No features found at this location")
           return []
         }
 
-        return result.features.map((feature: __esri.Graphic) => {
+        const mappedResults = result.features.map((feature: __esri.Graphic) => {
           return {
             features: [feature],
             propertyId: (feature.attributes as PropertyAttributes).FNR,
           }
         })
+
+        console.log("Mapped results:", {
+          count: mappedResults.length,
+          propertyIds: mappedResults.map((r) => r.propertyId),
+        })
+
+        return mappedResults
       } catch (error) {
         if (isAbortError(error)) {
           throw error as Error
