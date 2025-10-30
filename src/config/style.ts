@@ -21,7 +21,7 @@ const createBorder = (color?: string) => `1px solid ${color}`
 
 export const createWidgetStyles = (theme: IMThemeVariables) => {
   const { spacing, color, typography } = theme.sys
-  const borderColor = color?.surface?.backgroundHint
+  const borderColor = color?.surface?.background
   const border = createBorder(borderColor)
 
   const centeredFlex = {
