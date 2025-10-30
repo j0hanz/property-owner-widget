@@ -259,7 +259,10 @@ export const queryOwnerByFnr = async (
             attributes: data?.attributes,
             dataKeys: Object.keys(data || {}),
           })
-          return data as __esri.Graphic
+          const graphic: any = {
+            attributes: data, // The data IS the attributes
+          }
+          return graphic as __esri.Graphic
         })
       } catch (error) {
         if (isAbortError(error)) {
