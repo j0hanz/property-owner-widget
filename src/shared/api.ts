@@ -91,9 +91,29 @@ export const queryPropertyByPoint = async (
           throw new Error("Property data source not found")
         }
 
+        // Wait for data source to be ready
+        if (ds.getStatus && ds.getStatus() !== ("loaded" as any)) {
+          if (ds.ready) {
+            await ds.ready()
+          }
+        }
+
+        console.log("Data source info:", {
+          id: ds.id,
+          url: ds.url,
+          type: ds.type,
+          status: ds.getStatus?.(),
+          hasLayer: !!ds.layer,
+          dsKeys: Object.keys(ds).slice(0, 20),
+        })
+
         // Get the underlying FeatureLayer
         const layer = ds.layer
-        if (!layer || !layer.queryFeatures) {
+        if (!layer || typeof layer.queryFeatures !== "function") {
+          console.error("Layer not available:", {
+            hasLayer: !!ds.layer,
+            layerType: layer?.type,
+          })
           throw new Error("Property layer not available or not queryable")
         }
 
