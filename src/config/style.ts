@@ -172,9 +172,27 @@ export const createSettingStyles = (theme: IMThemeVariables) => {
       minInlineSize: 0,
     }),
     description: css({
-      fontSize: typography?.body1?.fontSize,
+      fontSize: typography?.label2?.fontSize,
       color: colors?.surface?.backgroundHint,
-      marginBlockStart: spacing?.(1),
+    }),
+    sliderWrap: createFlex("column", {
+      inlineSize: "100%",
+      gap: spacing?.(1),
+    }),
+    sliderTrack: createFlex("row", {
+      alignItems: "center",
+      inlineSize: "100%",
+      gap: spacing?.(2),
+    }),
+    sliderControl: css({
+      flex: "1 1 auto",
+      inlineSize: "100%",
+    }),
+    sliderValue: css({
+      minInlineSize: spacing?.(6),
+      textAlign: "right",
+      fontSize: typography?.label2?.fontSize,
+      color: colors?.surface?.backgroundHint,
     }),
   } as const
 }

@@ -14,6 +14,7 @@ import {
   Switch,
   TextArea,
   Alert,
+  Slider,
   defaultMessages as jimuUIMessages,
 } from "jimu-ui"
 import { ColorPicker } from "jimu-ui/basic/color-picker"
@@ -40,6 +41,44 @@ import {
 
 interface FieldErrors {
   [key: string]: string | undefined
+}
+
+const clampNumber = (value: number, min: number, max: number): number => {
+  if (!Number.isFinite(value)) {
+    return min
+  }
+  if (value < min) {
+    return min
+  }
+  if (value > max) {
+    return max
+  }
+  return value
+}
+
+const toOpacityPercent = (value: number): number =>
+  Math.round(clampNumber(value, 0, 1) * 100)
+
+const fromOpacityPercent = (percent: number): number =>
+  clampNumber(percent, 0, 100) / 100
+
+const formatOpacityPercent = (percent: number): string => {
+  const normalized = clampNumber(Math.round(percent), 0, 100)
+  return `${normalized}%`
+}
+
+const normalizeOutlineWidth = (value: number): number => {
+  const clamped = clampNumber(value, 0.5, 10)
+  return Math.round(clamped * 2) / 2
+}
+
+const formatOutlineWidthDisplay = (value: number): string => {
+  const normalized = normalizeOutlineWidth(value)
+  const rounded = Math.round(normalized)
+  if (Math.abs(normalized - rounded) < 0.0001) {
+    return String(rounded)
+  }
+  return normalized.toFixed(1)
 }
 
 const Setting = (
@@ -111,15 +150,21 @@ const Setting = (
     config.highlightColor || DEFAULT_HIGHLIGHT_COLOR
   )
   const [localHighlightOpacity, setLocalHighlightOpacity] = React.useState(
-    typeof config.highlightOpacity === "number"
-      ? config.highlightOpacity
-      : HIGHLIGHT_SYMBOL_ALPHA
+    () => {
+      const baseValue =
+        typeof config.highlightOpacity === "number"
+          ? config.highlightOpacity
+          : HIGHLIGHT_SYMBOL_ALPHA
+      return clampNumber(baseValue, 0, 1)
+    }
   )
-  const [localOutlineWidth, setLocalOutlineWidth] = React.useState(
-    typeof config.outlineWidth === "number"
-      ? config.outlineWidth
-      : OUTLINE_WIDTH
-  )
+  const [localOutlineWidth, setLocalOutlineWidth] = React.useState(() => {
+    const baseValue =
+      typeof config.outlineWidth === "number"
+        ? config.outlineWidth
+        : OUTLINE_WIDTH
+    return normalizeOutlineWidth(baseValue)
+  })
 
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
 
@@ -234,20 +279,35 @@ const Setting = (
   })
 
   const handleHighlightOpacityChange = hooks.useEventCallback(
-    (value: number) => {
-      const nextValue = Number.isFinite(value) ? value : HIGHLIGHT_SYMBOL_ALPHA
-      const clamped = Math.min(Math.max(nextValue, 0), 1)
-      setLocalHighlightOpacity(clamped)
-      updateConfig("highlightOpacity", clamped)
+    (evt: React.ChangeEvent<HTMLInputElement>) => {
+      const rawValue = Number.parseFloat(evt?.target?.value ?? "")
+      if (!Number.isFinite(rawValue)) {
+        return
+      }
+      const normalizedPercent = clampNumber(Math.round(rawValue), 0, 100)
+      const nextOpacity = fromOpacityPercent(normalizedPercent)
+      if (Math.abs(localHighlightOpacity - nextOpacity) < 0.0001) {
+        return
+      }
+      setLocalHighlightOpacity(nextOpacity)
+      updateConfig("highlightOpacity", nextOpacity)
     }
   )
 
-  const handleOutlineWidthChange = hooks.useEventCallback((value: number) => {
-    const nextValue = Number.isFinite(value) ? value : OUTLINE_WIDTH
-    const clamped = Math.min(Math.max(nextValue, 0.5), 10)
-    setLocalOutlineWidth(clamped)
-    updateConfig("outlineWidth", clamped)
-  })
+  const handleOutlineWidthChange = hooks.useEventCallback(
+    (evt: React.ChangeEvent<HTMLInputElement>) => {
+      const rawValue = Number.parseFloat(evt?.target?.value ?? "")
+      if (!Number.isFinite(rawValue)) {
+        return
+      }
+      const nextWidth = normalizeOutlineWidth(rawValue)
+      if (Math.abs(localOutlineWidth - nextWidth) < 0.0001) {
+        return
+      }
+      setLocalOutlineWidth(nextWidth)
+      updateConfig("outlineWidth", nextWidth)
+    }
+  )
 
   const handlePropertyDataSourceChange = hooks.useEventCallback(
     (useDataSources: UseDataSource[]) => {
@@ -375,19 +435,19 @@ const Setting = (
   }, [config.highlightColor])
 
   hooks.useUpdateEffect(() => {
-    setLocalHighlightOpacity(
+    const baseValue =
       typeof config.highlightOpacity === "number"
         ? config.highlightOpacity
         : HIGHLIGHT_SYMBOL_ALPHA
-    )
+    setLocalHighlightOpacity(clampNumber(baseValue, 0, 1))
   }, [config.highlightOpacity])
 
   hooks.useUpdateEffect(() => {
-    setLocalOutlineWidth(
+    const baseValue =
       typeof config.outlineWidth === "number"
         ? config.outlineWidth
         : OUTLINE_WIDTH
-    )
+    setLocalOutlineWidth(normalizeOutlineWidth(baseValue))
   }, [config.outlineWidth])
 
   hooks.useEffectOnce(() => {
@@ -395,6 +455,11 @@ const Setting = (
       console.log("Property Widget: Map configured on mount", useMapWidgetIds)
     }
   })
+
+  const highlightOpacityPercent = toOpacityPercent(localHighlightOpacity)
+  const highlightOpacityLabel = formatOpacityPercent(highlightOpacityPercent)
+  const outlineWidthValue = normalizeOutlineWidth(localOutlineWidth)
+  const outlineWidthLabel = formatOutlineWidthDisplay(localOutlineWidth)
 
   const propertySelectorValue = buildSelectorValue(config.propertyDataSourceId)
   const ownerSelectorValue = buildSelectorValue(config.ownerDataSourceId)
@@ -543,15 +608,24 @@ const Setting = (
           level={2}
           label={translate("highlightOpacityLabel")}
         >
-          <NumericInput
-            css={styles.fullWidth}
-            value={localHighlightOpacity}
-            min={0}
-            max={1}
-            step={0.05}
-            onChange={handleHighlightOpacityChange}
-            aria-label={translate("highlightOpacityLabel")}
-          />
+          <div css={styles.sliderWrap}>
+            <div css={styles.sliderTrack}>
+              <Slider
+                value={highlightOpacityPercent}
+                min={0}
+                max={100}
+                step={5}
+                tooltip
+                formatter={formatOpacityPercent}
+                aria-label={translate("highlightOpacityLabel")}
+                onChange={handleHighlightOpacityChange}
+                css={styles.sliderControl}
+              />
+              <div css={styles.sliderValue} role="status" aria-live="polite">
+                {highlightOpacityLabel}
+              </div>
+            </div>
+          </div>
         </SettingRow>
 
         <SettingRow
@@ -559,15 +633,24 @@ const Setting = (
           level={2}
           label={translate("highlightOutlineWidthLabel")}
         >
-          <NumericInput
-            css={styles.fullWidth}
-            value={localOutlineWidth}
-            min={0.5}
-            max={10}
-            step={0.5}
-            onChange={handleOutlineWidthChange}
-            aria-label={translate("highlightOutlineWidthLabel")}
-          />
+          <div css={styles.sliderWrap}>
+            <div css={styles.sliderTrack}>
+              <Slider
+                value={outlineWidthValue}
+                min={0.5}
+                max={10}
+                step={0.5}
+                tooltip
+                formatter={formatOutlineWidthDisplay}
+                aria-label={translate("highlightOutlineWidthLabel")}
+                onChange={handleOutlineWidthChange}
+                css={styles.sliderControl}
+              />
+              <div css={styles.sliderValue} role="status" aria-live="polite">
+                {outlineWidthLabel}
+              </div>
+            </div>
+          </div>
         </SettingRow>
 
         <SettingRow
