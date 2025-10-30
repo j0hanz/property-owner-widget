@@ -561,6 +561,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           tracker.failure("aborted")
           return
         }
+        console.error("Property query error:", error)
+        console.error("Error details:", {
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          propertyDsId: config.propertyDataSourceId,
+          ownerDsId: config.ownerDataSourceId,
+        })
         setError(ErrorType.QUERY_ERROR, translate("errorQueryFailed"))
         tracker.failure("query_error")
         trackError("property_query", error)
