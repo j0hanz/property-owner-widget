@@ -151,12 +151,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   )
   const prevRuntimeState = hooks.usePrevious(runtimeState)
 
-  console.log("Property Widget Config:", {
-    propertyDataSourceId: config.propertyDataSourceId,
-    ownerDataSourceId: config.ownerDataSourceId,
-    mapWidgetId: useMapWidgetIds?.[0],
-    hasDataSources: !!(config.propertyDataSourceId && config.ownerDataSourceId),
-    runtimeState,
+  hooks.useEffectOnce(() => {
+    console.log("Property Widget: Initial mount", {
+      propertyDataSourceId: config.propertyDataSourceId,
+      ownerDataSourceId: config.ownerDataSourceId,
+      mapWidgetId: useMapWidgetIds?.[0],
+      hasDataSources: !!(
+        config.propertyDataSourceId && config.ownerDataSourceId
+      ),
+      runtimeState,
+    })
   })
 
   const {
@@ -655,16 +659,29 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         prevRuntimeState === WidgetState.Hidden ||
         typeof prevRuntimeState === "undefined")
 
-    if (isOpening) {
+    if (isOpening && modules) {
       console.log("Property Widget: Reactivating on open from controller")
-      reactivateMapView()
-      trackEvent({
-        category: "Property",
-        action: "widget_reopened",
-        label: "from_controller",
-      })
+      const currentView = getCurrentView()
+      if (currentView) {
+        reactivateMapView()
+        trackEvent({
+          category: "Property",
+          action: "widget_reopened",
+          label: "from_controller",
+        })
+      } else {
+        console.log(
+          "Property Widget: Map view not ready yet, will activate on next view change"
+        )
+      }
     }
-  }, [runtimeState, prevRuntimeState, reactivateMapView])
+  }, [
+    runtimeState,
+    prevRuntimeState,
+    modules,
+    reactivateMapView,
+    getCurrentView,
+  ])
 
   hooks.useUnmount(() => {
     abortAll()

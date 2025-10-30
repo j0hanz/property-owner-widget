@@ -271,6 +271,7 @@ export const useMapViewLifecycle = (params: {
   const mapClickHandleRef = React.useRef<__esri.Handle | null>(null)
 
   const setupMapView = hooks.useEventCallback((view: __esri.MapView) => {
+    console.log("Property Widget: Setting up map view with click handler")
     disablePopup(view)
     ensureGraphicsLayer(view)
 
@@ -294,12 +295,21 @@ export const useMapViewLifecycle = (params: {
   })
 
   const onActiveViewChange = hooks.useEventCallback((jimuMapView: any) => {
-    if (!modules) return
+    if (!modules) {
+      console.log(
+        "Property Widget: Modules not ready, deferring map view setup"
+      )
+      return
+    }
     const view = jimuMapView?.view
-    if (!view) return
+    if (!view) {
+      console.log("Property Widget: No view in jimuMapView")
+      return
+    }
 
     const previousView = jimuMapViewRef.current?.view
     if (previousView && previousView !== view) {
+      console.log("Property Widget: Cleaning up previous view")
       cleanupPreviousView()
     }
 
