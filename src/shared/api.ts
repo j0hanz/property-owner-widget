@@ -92,45 +92,32 @@ export const queryPropertyByPoint = async (
         }
 
         const layerUrl = ds.url
-        if (!layerUrl) {
-          throw new Error("Data source URL not available")
-        }
+        const layerDef = (ds as any).getLayerDefinition?.()
 
-        console.log("Querying layer:", {
+        console.log("Querying property layer:", {
           dataSourceId,
           url: layerUrl,
           pointX: point.x,
           pointY: point.y,
           wkid: point.spatialReference?.wkid,
+          layerName: layerDef?.name || "unknown",
+          layerFields: layerDef?.fields?.map((f: any) => f.name) || [],
         })
 
-        // Load FeatureLayer and Query classes
-        const [FeatureLayer, Query] = await loadArcGISJSAPIModules([
-          "esri/layers/FeatureLayer",
-          "esri/rest/support/Query",
-        ])
-
-        // Create a temporary FeatureLayer from the URL
-        const layer = new FeatureLayer({
-          url: layerUrl,
-        })
-
-        const query = new Query({
-          geometry: point,
-          returnGeometry: true,
-          outFields: ["*"],
-          spatialRelationship: "intersects",
-        })
-
-        const result = await layer.queryFeatures(
-          query,
+        const result = await ds.query(
+          {
+            geometry: point,
+            returnGeometry: true,
+            outFields: ["*"],
+            spatialRel: "esriSpatialRelIntersects" as any,
+          },
           createSignalOptions(options?.signal)
         )
 
-        console.log("Query result:", {
-          featureCount: result?.features?.length || 0,
-          hasFeatures: !!(result?.features && result.features.length > 0),
-          firstFeature: result?.features?.[0]?.attributes,
+        console.log("Property query result:", {
+          recordCount: result?.records?.length || 0,
+          hasRecords: !!(result?.records && result.records.length > 0),
+          firstRecord: result?.records?.[0]?.getData(),
         })
 
         if (options?.signal?.aborted) {
@@ -139,17 +126,31 @@ export const queryPropertyByPoint = async (
           throw abortError
         }
 
-        if (!result?.features || result.features.length === 0) {
+        if (!result?.records || result.records.length === 0) {
           console.log("No features found at this location")
           return []
         }
 
-        const mappedResults = result.features.map((feature: __esri.Graphic) => {
-          return {
-            features: [feature],
-            propertyId: (feature.attributes as PropertyAttributes).FNR,
+        // Load Graphic class to create proper graphic objects
+        const [Graphic] = await loadArcGISJSAPIModules(["esri/Graphic"])
+
+        const mappedResults = result.records.map(
+          (record: FeatureDataRecord) => {
+            const data = record.getData()
+            const feature = record.feature
+
+            // Create a proper Graphic object
+            const graphic = new Graphic({
+              attributes: data,
+              geometry: feature?.geometry || data.geometry,
+            })
+
+            return {
+              features: [graphic],
+              propertyId: (data as PropertyAttributes).FNR,
+            }
           }
-        })
+        )
 
         console.log("Mapped results:", {
           count: mappedResults.length,
