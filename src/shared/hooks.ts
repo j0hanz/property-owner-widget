@@ -295,12 +295,6 @@ export const useMapViewLifecycle = (params: {
   })
 
   const onActiveViewChange = hooks.useEventCallback((jimuMapView: any) => {
-    if (!modules) {
-      console.log(
-        "Property Widget: Modules not ready, deferring map view setup"
-      )
-      return
-    }
     const view = jimuMapView?.view
     if (!view) {
       console.log("Property Widget: No view in jimuMapView")
@@ -313,8 +307,15 @@ export const useMapViewLifecycle = (params: {
       cleanupPreviousView()
     }
 
+    console.log("Property Widget: Storing jimuMapView reference")
     jimuMapViewRef.current = jimuMapView
-    setupMapView(view)
+
+    // If modules are ready, setup immediately. Otherwise, wait for modules.
+    if (modules) {
+      setupMapView(view)
+    } else {
+      console.log("Property Widget: Map view ready, waiting for modules")
+    }
   })
 
   const reactivateMapView = hooks.useEventCallback(() => {
@@ -346,6 +347,16 @@ export const useMapViewLifecycle = (params: {
   hooks.useUnmount(() => {
     cleanup()
   })
+
+  // Setup map view when modules become ready (if map view is already available)
+  hooks.useUpdateEffect(() => {
+    if (modules && jimuMapViewRef.current?.view && !mapClickHandleRef.current) {
+      console.log(
+        "Property Widget: Modules loaded, setting up deferred map view"
+      )
+      setupMapView(jimuMapViewRef.current.view)
+    }
+  }, [modules, setupMapView])
 
   return {
     onActiveViewChange,
