@@ -5,6 +5,7 @@ import {
   hooks,
   jsx,
   type UseDataSource,
+  type ImmutableObject,
   DataSourceTypes,
   Immutable,
 } from "jimu-core"
@@ -15,6 +16,7 @@ import {
   Alert,
   defaultMessages as jimuUIMessages,
 } from "jimu-ui"
+import { ColorPicker } from "jimu-ui/basic/color-picker"
 import type { AllWidgetSettingProps } from "jimu-for-builder"
 import {
   SettingSection,
@@ -30,6 +32,11 @@ import {
   useUpdateConfig,
   useDebounce,
 } from "../shared/hooks"
+import {
+  DEFAULT_HIGHLIGHT_COLOR,
+  HIGHLIGHT_SYMBOL_ALPHA,
+  OUTLINE_WIDTH,
+} from "../config/constants"
 
 interface FieldErrors {
   [key: string]: string | undefined
@@ -41,6 +48,40 @@ const Setting = (
   const { config, id, onSettingChange, useMapWidgetIds } = props
   const translate = hooks.useTranslation(jimuUIMessages, defaultMessages)
   const styles = useSettingStyles()
+
+  const toMutableUseDataSource = (
+    source: ImmutableObject<UseDataSource> | UseDataSource | null
+  ): UseDataSource | null => {
+    if (!source) {
+      return null
+    }
+    const asMutable = (source as any).asMutable
+    if (typeof asMutable === "function") {
+      return asMutable.call(source, { deep: true }) as UseDataSource
+    }
+    return source as unknown as UseDataSource
+  }
+
+  const buildSelectorValue = (dataSourceId?: string) => {
+    if (!dataSourceId || !props.useDataSources) {
+      return Immutable([])
+    }
+
+    const collection = props.useDataSources as any
+    const matches =
+      typeof collection.filter === "function"
+        ? collection.filter(
+            (ds: UseDataSource) => ds?.dataSourceId === dataSourceId
+          )
+        : []
+
+    const mutableMatches: UseDataSource[] =
+      typeof matches?.asMutable === "function"
+        ? matches.asMutable({ deep: true })
+        : matches
+
+    return Immutable(mutableMatches)
+  }
 
   const getBooleanConfig = useBooleanConfigValue(config)
   const updateConfig = useUpdateConfig(id, config, onSettingChange)
@@ -62,6 +103,22 @@ const Setting = (
   )
   const [localAllowedHosts, setLocalAllowedHosts] = React.useState(() =>
     (config.allowedHosts || []).join("\n")
+  )
+  const [localAutoZoom, setLocalAutoZoom] = React.useState(() =>
+    getBooleanConfig("autoZoomOnSelection", false)
+  )
+  const [localHighlightColor, setLocalHighlightColor] = React.useState(
+    config.highlightColor || DEFAULT_HIGHLIGHT_COLOR
+  )
+  const [localHighlightOpacity, setLocalHighlightOpacity] = React.useState(
+    typeof config.highlightOpacity === "number"
+      ? config.highlightOpacity
+      : HIGHLIGHT_SYMBOL_ALPHA
+  )
+  const [localOutlineWidth, setLocalOutlineWidth] = React.useState(
+    typeof config.outlineWidth === "number"
+      ? config.outlineWidth
+      : OUTLINE_WIDTH
   )
 
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
@@ -162,19 +219,116 @@ const Setting = (
     updateConfig("allowedHosts", hosts)
   })
 
-  const handleDataSourceChange = hooks.useEventCallback(
+  const handleAutoZoomChange = hooks.useEventCallback(
+    (evt: React.ChangeEvent<HTMLInputElement>) => {
+      const checked = evt.target.checked
+      setLocalAutoZoom(checked)
+      updateConfig("autoZoomOnSelection", checked)
+    }
+  )
+
+  const handleHighlightColorChange = hooks.useEventCallback((color: string) => {
+    const nextColor = color || DEFAULT_HIGHLIGHT_COLOR
+    setLocalHighlightColor(nextColor)
+    updateConfig("highlightColor", nextColor)
+  })
+
+  const handleHighlightOpacityChange = hooks.useEventCallback(
+    (value: number) => {
+      const nextValue = Number.isFinite(value) ? value : HIGHLIGHT_SYMBOL_ALPHA
+      const clamped = Math.min(Math.max(nextValue, 0), 1)
+      setLocalHighlightOpacity(clamped)
+      updateConfig("highlightOpacity", clamped)
+    }
+  )
+
+  const handleOutlineWidthChange = hooks.useEventCallback((value: number) => {
+    const nextValue = Number.isFinite(value) ? value : OUTLINE_WIDTH
+    const clamped = Math.min(Math.max(nextValue, 0.5), 10)
+    setLocalOutlineWidth(clamped)
+    updateConfig("outlineWidth", clamped)
+  })
+
+  const handlePropertyDataSourceChange = hooks.useEventCallback(
     (useDataSources: UseDataSource[]) => {
-      const selectedDs = useDataSources?.[0]
-      if (!selectedDs?.dataSourceId) {
-        return
+      const selectedDs = useDataSources?.[0] ?? null
+      const propertyId = selectedDs?.dataSourceId ?? ""
+      const ownerSource =
+        ((props.useDataSources as any)?.find?.(
+          (ds: UseDataSource) => ds?.dataSourceId === config.ownerDataSourceId
+        ) as ImmutableObject<UseDataSource> | UseDataSource | undefined) ?? null
+      const ownerMutable = toMutableUseDataSource(ownerSource)
+      const shouldSyncOwner =
+        (!!propertyId && !config.ownerDataSourceId) ||
+        (!!propertyId &&
+          config.ownerDataSourceId &&
+          config.ownerDataSourceId === config.propertyDataSourceId)
+
+      const updatedUseDataSources: UseDataSource[] = []
+      if (selectedDs) {
+        updatedUseDataSources.push(selectedDs)
       }
+      if (
+        ownerMutable &&
+        ownerMutable.dataSourceId &&
+        ownerMutable.dataSourceId !== propertyId &&
+        !shouldSyncOwner
+      ) {
+        updatedUseDataSources.push(ownerMutable)
+      }
+
+      const nextConfig = shouldSyncOwner
+        ? config
+            .set("propertyDataSourceId", propertyId)
+            .set("ownerDataSourceId", propertyId)
+        : config.set("propertyDataSourceId", propertyId)
 
       onSettingChange({
         id,
-        useDataSources: [selectedDs],
-        config: config
-          .set("propertyDataSourceId", selectedDs.dataSourceId)
-          .set("ownerDataSourceId", selectedDs.dataSourceId),
+        useDataSources: updatedUseDataSources,
+        config: nextConfig,
+      })
+    }
+  )
+
+  const handleOwnerDataSourceChange = hooks.useEventCallback(
+    (useDataSources: UseDataSource[]) => {
+      const selectedOwner = useDataSources?.[0] ?? null
+      const ownerId = selectedOwner?.dataSourceId ?? ""
+
+      const propertySource =
+        ((props.useDataSources as any)?.find?.(
+          (ds: UseDataSource) =>
+            ds?.dataSourceId === config.propertyDataSourceId
+        ) as ImmutableObject<UseDataSource> | UseDataSource | undefined) ?? null
+
+      let propertyMutable = toMutableUseDataSource(propertySource)
+      if (!propertyMutable && config.propertyDataSourceId) {
+        propertyMutable = {
+          dataSourceId: config.propertyDataSourceId,
+          mainDataSourceId: config.propertyDataSourceId,
+          rootDataSourceId: config.propertyDataSourceId,
+        } as UseDataSource
+      }
+
+      const updatedUseDataSources: UseDataSource[] = []
+      if (propertyMutable) {
+        updatedUseDataSources.push(propertyMutable)
+      }
+      if (
+        selectedOwner &&
+        (!propertyMutable ||
+          propertyMutable.dataSourceId !== selectedOwner.dataSourceId)
+      ) {
+        updatedUseDataSources.push(selectedOwner)
+      }
+
+      const nextConfig = config.set("ownerDataSourceId", ownerId)
+
+      onSettingChange({
+        id,
+        useDataSources: updatedUseDataSources,
+        config: nextConfig,
       })
     }
   )
@@ -212,11 +366,38 @@ const Setting = (
     setLocalAllowedHosts((config.allowedHosts || []).join("\n"))
   }, [config.allowedHosts])
 
+  hooks.useUpdateEffect(() => {
+    setLocalAutoZoom(getBooleanConfig("autoZoomOnSelection", false))
+  }, [config.autoZoomOnSelection])
+
+  hooks.useUpdateEffect(() => {
+    setLocalHighlightColor(config.highlightColor || DEFAULT_HIGHLIGHT_COLOR)
+  }, [config.highlightColor])
+
+  hooks.useUpdateEffect(() => {
+    setLocalHighlightOpacity(
+      typeof config.highlightOpacity === "number"
+        ? config.highlightOpacity
+        : HIGHLIGHT_SYMBOL_ALPHA
+    )
+  }, [config.highlightOpacity])
+
+  hooks.useUpdateEffect(() => {
+    setLocalOutlineWidth(
+      typeof config.outlineWidth === "number"
+        ? config.outlineWidth
+        : OUTLINE_WIDTH
+    )
+  }, [config.outlineWidth])
+
   hooks.useEffectOnce(() => {
     if (useMapWidgetIds && useMapWidgetIds.length > 0) {
       console.log("Property Widget: Map configured on mount", useMapWidgetIds)
     }
   })
+
+  const propertySelectorValue = buildSelectorValue(config.propertyDataSourceId)
+  const ownerSelectorValue = buildSelectorValue(config.ownerDataSourceId)
 
   return (
     <>
@@ -231,24 +412,43 @@ const Setting = (
       </SettingSection>
 
       <SettingSection title={translate("dataSourcesTitle")}>
-        <SettingRow flow="wrap" level={2} label={translate("dataSourceLabel")}>
+        <SettingRow
+          flow="wrap"
+          level={2}
+          label={translate("propertyDataSourceLabel")}
+        >
           <DataSourceSelector
             types={Immutable([DataSourceTypes.FeatureLayer])}
-            useDataSources={
-              config.propertyDataSourceId && props.useDataSources
-                ? Immutable(
-                    props.useDataSources.filter(
-                      (ds) => ds.dataSourceId === config.propertyDataSourceId
-                    )
-                  )
-                : Immutable([])
-            }
+            useDataSources={propertySelectorValue}
             mustUseDataSource
-            onChange={handleDataSourceChange}
+            onChange={handlePropertyDataSourceChange}
             widgetId={id}
             hideTypeDropdown
           />
         </SettingRow>
+
+        <div css={styles.description}>
+          {translate("propertyDataSourceDescription")}
+        </div>
+
+        <SettingRow
+          flow="wrap"
+          level={2}
+          label={translate("ownerDataSourceLabel")}
+        >
+          <DataSourceSelector
+            types={Immutable([DataSourceTypes.FeatureLayer])}
+            useDataSources={ownerSelectorValue}
+            mustUseDataSource
+            onChange={handleOwnerDataSourceChange}
+            widgetId={id}
+            hideTypeDropdown
+          />
+        </SettingRow>
+
+        <div css={styles.description}>
+          {translate("ownerDataSourceDescription")}
+        </div>
 
         <div css={styles.description}>
           {translate("dataSourcesDescription")}
@@ -258,6 +458,7 @@ const Setting = (
       <SettingSection title={translate("displayOptionsTitle")}>
         <SettingRow flow="wrap" level={2} label={translate("maxResultsLabel")}>
           <NumericInput
+            css={styles.fullWidth}
             value={parseInt(localMaxResults, 10)}
             min={1}
             max={1000}
@@ -270,6 +471,7 @@ const Setting = (
         {fieldErrors.maxResults && (
           <SettingRow flow="wrap" level={2}>
             <Alert
+              css={styles.fullWidth}
               type="error"
               text={fieldErrors.maxResults}
               closable={false}
@@ -283,6 +485,7 @@ const Setting = (
           label={translate("enableToggleRemovalLabel")}
         >
           <Switch
+            css={styles.fullWidth}
             checked={localToggleRemoval}
             onChange={handleToggleRemovalChange}
             aria-label={translate("enableToggleRemovalLabel")}
@@ -295,9 +498,75 @@ const Setting = (
           label={translate("enablePIIMaskingLabel")}
         >
           <Switch
+            css={styles.fullWidth}
             checked={localPIIMasking}
             onChange={handlePIIMaskingChange}
             aria-label={translate("enablePIIMaskingLabel")}
+          />
+        </SettingRow>
+
+        <SettingRow
+          flow="no-wrap"
+          level={2}
+          label={translate("autoZoomOnSelectionLabel")}
+        >
+          <Switch
+            css={styles.fullWidth}
+            checked={localAutoZoom}
+            onChange={handleAutoZoomChange}
+            aria-label={translate("autoZoomOnSelectionLabel")}
+          />
+        </SettingRow>
+        <div css={styles.description}>
+          {translate("autoZoomOnSelectionDescription")}
+        </div>
+
+        <div css={styles.description}>
+          {translate("highlightOptionsDescription")}
+        </div>
+
+        <SettingRow
+          flow="wrap"
+          level={2}
+          label={translate("highlightColorLabel")}
+        >
+          <ColorPicker
+            css={styles.fullWidth}
+            color={localHighlightColor}
+            onChange={handleHighlightColorChange}
+            aria-label={translate("highlightColorLabel")}
+          />
+        </SettingRow>
+
+        <SettingRow
+          flow="wrap"
+          level={2}
+          label={translate("highlightOpacityLabel")}
+        >
+          <NumericInput
+            css={styles.fullWidth}
+            value={localHighlightOpacity}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={handleHighlightOpacityChange}
+            aria-label={translate("highlightOpacityLabel")}
+          />
+        </SettingRow>
+
+        <SettingRow
+          flow="wrap"
+          level={2}
+          label={translate("highlightOutlineWidthLabel")}
+        >
+          <NumericInput
+            css={styles.fullWidth}
+            value={localOutlineWidth}
+            min={0.5}
+            max={10}
+            step={0.5}
+            onChange={handleOutlineWidthChange}
+            aria-label={translate("highlightOutlineWidthLabel")}
           />
         </SettingRow>
 
@@ -307,6 +576,7 @@ const Setting = (
           label={translate("allowedHostsLabel")}
         >
           <TextArea
+            css={styles.fullWidth}
             value={localAllowedHosts}
             onChange={handleAllowedHostsChange}
             onBlur={handleAllowedHostsBlur}
@@ -323,6 +593,7 @@ const Setting = (
           label={translate("enableBatchOwnerQueryLabel")}
         >
           <Switch
+            css={styles.fullWidth}
             checked={localBatchOwnerQuery}
             onChange={handleBatchOwnerQueryChange}
             aria-label={translate("enableBatchOwnerQueryLabel")}
@@ -340,6 +611,7 @@ const Setting = (
               label={translate("relationshipIdLabel")}
             >
               <NumericInput
+                css={styles.fullWidth}
                 value={parseInt(localRelationshipId, 10)}
                 min={0}
                 max={99}
@@ -353,6 +625,7 @@ const Setting = (
             {fieldErrors.relationshipId && (
               <SettingRow flow="wrap" level={2}>
                 <Alert
+                  css={styles.fullWidth}
                   type="error"
                   text={fieldErrors.relationshipId}
                   closable={false}

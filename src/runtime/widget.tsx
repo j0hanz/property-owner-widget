@@ -65,9 +65,9 @@ import {
   validateDataSources,
   cleanupRemovedGraphics,
   isValidationFailure,
+  buildHighlightColor,
 } from "../shared/utils"
 import {
-  HIGHLIGHT_COLOR_RGBA,
   OUTLINE_WIDTH,
   LOADING_VISIBILITY_DEBOUNCE_MS,
 } from "../config/constants"
@@ -326,6 +326,20 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const toggleEnabled = config.enableToggleRemoval
   const piiMaskingEnabled = config.enablePIIMasking
   const mapWidgetId = useMapWidgetIds?.[0]
+  const autoZoomEnabled = !!config.autoZoomOnSelection
+  const highlightColorRgba = buildHighlightColor(
+    config.highlightColor,
+    config.highlightOpacity
+  )
+  const highlightOutlineWidth = (() => {
+    const width = config.outlineWidth
+    if (typeof width !== "number" || !Number.isFinite(width)) {
+      return OUTLINE_WIDTH
+    }
+    if (width < 0.5) return 0.5
+    if (width > 10) return 10
+    return width
+  })()
 
   hooks.useUpdateEffect(() => {
     setState((prev) => {
@@ -712,8 +726,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
               extractFnr,
               normalizeFnrKey,
             },
-            highlightColor: HIGHLIGHT_COLOR_RGBA,
-            outlineWidth: OUTLINE_WIDTH,
+            highlightColor: highlightColorRgba,
+            outlineWidth: highlightOutlineWidth,
           }
 
           // Track toggle removals
@@ -754,6 +768,56 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         if (syncParams) {
           syncSelectionGraphics(syncParams)
+        }
+
+        if (
+          autoZoomEnabled &&
+          syncParams &&
+          syncParams.selectedRows.length > 0 &&
+          config.propertyDataSourceId
+        ) {
+          const view = getCurrentView()
+          if (view) {
+            const fnrsForZoom = Array.from(
+              new Set(
+                syncParams.selectedRows.map((row) =>
+                  row.FNR != null ? String(row.FNR) : null
+                )
+              )
+            ).filter((fnr): fnr is string => !!fnr)
+
+            if (fnrsForZoom.length > 0) {
+              const zoomController = getController()
+              try {
+                const extent = await queryExtentForProperties(
+                  fnrsForZoom,
+                  config.propertyDataSourceId,
+                  manager,
+                  { signal: zoomController.signal }
+                )
+
+                if (
+                  extent &&
+                  !zoomController.signal.aborted &&
+                  !isStaleRequestSnapshot()
+                ) {
+                  await view.goTo(extent.expand(1.2), { duration: 1000 })
+                  trackEvent({
+                    category: "Navigation",
+                    action: "auto_zoom_to_results",
+                    value: fnrsForZoom.length,
+                  })
+                }
+              } catch (error) {
+                if (!isAbortError(error)) {
+                  console.error("Auto zoom failed", error)
+                  trackError("auto_zoom", error)
+                }
+              } finally {
+                releaseController(zoomController)
+              }
+            }
+          }
         }
 
         tracker.success()
@@ -804,6 +868,38 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       restorePopup,
       onMapClick: handleMapClick,
     })
+
+  hooks.useUpdateEffect(() => {
+    if (state.selectedProperties.length === 0) {
+      return
+    }
+
+    const graphicsToAdd = state.selectedProperties
+      .map((row) =>
+        row.graphic ? { graphic: row.graphic, fnr: row.FNR } : null
+      )
+      .filter(Boolean) as Array<{
+      graphic: __esri.Graphic
+      fnr: string | number
+    }>
+
+    if (graphicsToAdd.length === 0) {
+      return
+    }
+
+    syncSelectionGraphics({
+      graphicsToAdd,
+      selectedRows: state.selectedProperties,
+      getCurrentView,
+      helpers: {
+        addGraphicsToMap,
+        extractFnr,
+        normalizeFnrKey,
+      },
+      highlightColor: highlightColorRgba,
+      outlineWidth: highlightOutlineWidth,
+    })
+  }, [config.highlightColor, config.highlightOpacity, config.outlineWidth])
 
   hooks.useUpdateEffect(() => {
     const isOpening =

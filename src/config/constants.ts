@@ -24,12 +24,6 @@ export const MIN_MASK_LENGTH = 3
 export const MAX_MASK_ASTERISKS = 3
 export const DEFAULT_HIGHLIGHT_COLOR = "#00B4D8"
 export const HIGHLIGHT_SYMBOL_ALPHA = 0.4 // 40% opacity ensures underlying features visible.
-export const HIGHLIGHT_COLOR_RGBA: [number, number, number, number] = [
-  0,
-  180,
-  216,
-  HIGHLIGHT_SYMBOL_ALPHA,
-]
 export const OUTLINE_WIDTH = 2 // 2px meets WCAG 1.4.11 non-text contrast 3:1 ratio.
 export const DEFAULT_MAX_RESULTS = 100
 export const OWNER_QUERY_CONCURRENCY = 5

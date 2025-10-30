@@ -6,10 +6,13 @@ export default {
     "Select a map widget to enable property querying by clicking on the map. The widget will listen for map clicks and query property information at the clicked location.",
   dataSourcesTitle: "Data sources",
   dataSourcesDescription:
-    "Select a feature layer containing property and owner information. The layer must have FNR field to identify properties and owner attributes (NAMN, BOSTADR, etc.).",
-  dataSourceLabel: "Feature layer",
-  dataSourceTooltip:
-    "Portal item or service URL that exposes property and owner information.",
+    "Validate that both property and owner layers expose matching FNR values and required attributes before publishing the widget.",
+  propertyDataSourceLabel: "Property layer",
+  propertyDataSourceDescription:
+    "Feature layer that stores parcel geometries and FNR identifiers used for selection and highlighting.",
+  ownerDataSourceLabel: "Owner layer",
+  ownerDataSourceDescription:
+    "Feature layer or table containing ownership details (NAMN, BOSTADR, ORGNR, etc.). Can be the same layer as the property source when attributes are combined.",
   displayOptionsTitle: "Display options",
   maxResultsLabel: "Maximum results",
   maxResultsDescription:
@@ -21,6 +24,14 @@ export default {
   enablePIIMaskingLabel: "Enable PII masking",
   enablePIIMaskingDescription:
     "Mask personally identifiable information (names, addresses) for privacy protection.",
+  autoZoomOnSelectionLabel: "Auto zoom to results",
+  autoZoomOnSelectionDescription:
+    "Automatically zoom the map to the extent of the current selection after each successful query.",
+  highlightOptionsDescription:
+    "Customize how selected properties are emphasized on the map.",
+  highlightColorLabel: "Highlight color",
+  highlightOpacityLabel: "Fill opacity",
+  highlightOutlineWidthLabel: "Outline width",
   allowedHostsLabel: "Allowed hosts",
   allowedHostsDescription:
     "List of allowed hostnames for URL validation (one per line). Leave empty to allow all HTTPS ArcGIS services.",

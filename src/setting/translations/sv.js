@@ -9,10 +9,13 @@ System.register([], function (e) {
           "Välj en kartwidget för att aktivera fastighetsfrågor genom att klicka på kartan. Widgeten kommer att lyssna efter kartklick och hämta fastighetsinformation vid den klickade platsen.",
         dataSourcesTitle: "Datakällor",
         dataSourcesDescription:
-          "Välj ett objektlager som innehåller fastighets- och ägarinformation. Lagret måste ha FNR-fält för att identifiera fastigheter och ägarattribut (NAMN, BOSTADR, etc.).",
-        dataSourceLabel: "Objektlager",
-        dataSourceTooltip:
-          "Portal- eller tjänst-URL som innehåller fastighets- och ägarinformation.",
+          "Kontrollera att både fastighets- och ägarlager delar FNR-värden och nödvändiga attribut innan widgeten publiceras.",
+        propertyDataSourceLabel: "Fastighetslager",
+        propertyDataSourceDescription:
+          "Objektlager som innehåller fastighetsgeometrier och FNR som används för urval och highlighting.",
+        ownerDataSourceLabel: "Ägarlager",
+        ownerDataSourceDescription:
+          "Objektlager eller tabell som innehåller ägaruppgifter (NAMN, BOSTADR, ORGNR, etc.). Kan vara samma lager som fastighetskällan när attributen är sammanslagna.",
         displayOptionsTitle: "Visningsalternativ",
         maxResultsLabel: "Maximalt antal resultat",
         maxResultsDescription:
@@ -24,6 +27,14 @@ System.register([], function (e) {
         enablePIIMaskingLabel: "Aktivera PII-maskning",
         enablePIIMaskingDescription:
           "Maskera personligt identifierbar information (namn, adresser) för integritetsskydd.",
+        autoZoomOnSelectionLabel: "Zooma automatiskt till resultat",
+        autoZoomOnSelectionDescription:
+          "Zooma automatiskt kartan till omfånget för den aktuella markeringen efter varje lyckad sökning.",
+        highlightOptionsDescription:
+          "Anpassa hur markerade fastigheter visas på kartan.",
+        highlightColorLabel: "Markeringsfärg",
+        highlightOpacityLabel: "Fyllnadsopacitet",
+        highlightOutlineWidthLabel: "Linjebredd",
         allowedHostsLabel: "Tillåtna värdar",
         allowedHostsDescription:
           "Lista över tillåtna värdnamn för URL-validering (en per rad). Lämna tomt för att tillåta alla HTTPS ArcGIS-tjänster.",

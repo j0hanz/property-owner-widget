@@ -166,6 +166,11 @@ export const createSettingStyles = (theme: IMThemeVariables) => {
   const typography = theme.sys.typography
 
   return {
+    fullWidth: createFlex("column", {
+      inlineSize: "100%",
+      flex: "1 1 auto",
+      minInlineSize: 0,
+    }),
     description: css({
       fontSize: typography?.body1?.fontSize,
       color: colors?.surface?.backgroundHint,

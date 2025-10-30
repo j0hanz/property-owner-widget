@@ -16,6 +16,7 @@ import {
   shouldToggleRemove,
   calculatePropertyUpdates,
   validateDataSources,
+  buildHighlightColor,
 } from "../shared/utils"
 import type { OwnerAttributes } from "../config/types"
 
@@ -179,6 +180,18 @@ describe("Property Widget - PII Masking", () => {
 
     const result = formatOwnerInfo(owner, true, "Unknown owner")
     expect(result).toContain("Unknown owner")
+  })
+})
+
+describe("Property Widget - Highlight Styling", () => {
+  it("should convert hex color and opacity to RGBA array", () => {
+    const rgba = buildHighlightColor("#336699", 0.5)
+    expect(rgba).toEqual([51, 102, 153, 0.5])
+  })
+
+  it("should clamp opacity and fall back to default color when invalid inputs provided", () => {
+    const rgba = buildHighlightColor("not-a-color", 5)
+    expect(rgba).toEqual([0, 180, 216, 1])
   })
 })
 

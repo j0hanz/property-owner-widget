@@ -12,6 +12,10 @@ export interface Config {
   enablePIIMasking: boolean
   relationshipId?: number
   enableBatchOwnerQuery: boolean
+  autoZoomOnSelection?: boolean
+  highlightColor?: string
+  highlightOpacity?: number
+  outlineWidth?: number
 }
 
 export type IMConfig = ImmutableObject<Config>
