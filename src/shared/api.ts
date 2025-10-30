@@ -198,11 +198,14 @@ export const queryOwnerByFnr = async (
         }
 
         const layerUrl = ds.url
+        const layerDef = (ds as any).getLayerDefinition?.()
         console.log("Querying owner layer:", {
           dataSourceId,
           url: layerUrl,
           fnr,
           whereClause: buildFnrWhereClause(fnr),
+          layerName: layerDef?.name || "unknown",
+          layerFields: layerDef?.fields?.map((f: any) => f.name) || [],
         })
 
         const result = await ds.query(
@@ -228,7 +231,23 @@ export const queryOwnerByFnr = async (
         }
 
         if (!result?.records) {
+          console.log("⚠️ Owner query returned no records:", {
+            fnr,
+            dataSourceId,
+            url: layerUrl,
+            possibleCause:
+              "FNR not found in owner layer or wrong layer configured",
+          })
           return []
+        }
+
+        if (result.records.length === 0) {
+          console.log("⚠️ Owner query returned empty records array:", {
+            fnr,
+            dataSourceId,
+            url: layerUrl,
+            possibleCause: "No owner data for this FNR or querying wrong layer",
+          })
         }
 
         return result.records.map(

@@ -321,6 +321,27 @@ export const validateDataSources = (params: {
     )
   }
 
+  // Check if property and owner layers are from the same service (recommended)
+  const propertyUrl = getDataSourceUrl(propertyDs)
+  const ownerUrl = getDataSourceUrl(ownerDs)
+  if (propertyUrl && ownerUrl) {
+    const propertyService = propertyUrl.split("/MapServer/")[0]
+    const ownerService = ownerUrl.split("/MapServer/")[0]
+    if (propertyService !== ownerService) {
+      console.warn(
+        "⚠️ Configuration Warning: Property and owner layers use different MapServer services",
+        {
+          propertyService,
+          ownerService,
+          propertyUrl,
+          ownerUrl,
+          recommendation:
+            "Both should typically use the same MapServer service with different layer indexes (e.g., layer 0 for properties, layer 1 for owners)",
+        }
+      )
+    }
+  }
+
   return { valid: true, data: { manager: dsManager } }
 }
 
