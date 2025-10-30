@@ -15,6 +15,7 @@ import {
   CollapsablePanel,
   NumericInput,
   Slider,
+  Tooltip,
   Switch,
   TextInput,
   SVG,
@@ -44,6 +45,7 @@ import {
 } from "../config/constants"
 import addIcon from "../assets/plus.svg"
 import removeIcon from "../assets/close.svg"
+import infoIcon from "../assets/info.svg"
 
 interface FieldErrors {
   [key: string]: string | undefined
@@ -96,6 +98,31 @@ const Setting = (
   const { config, id, onSettingChange, useMapWidgetIds } = props
   const translate = hooks.useTranslation(jimuUIMessages, defaultMessages)
   const styles = useSettingStyles()
+
+  const renderLabelWithTooltip = (
+    labelKey: string,
+    descriptionKey: string
+  ): React.ReactNode => {
+    const labelText = translate(labelKey)
+    const descriptionText = translate(descriptionKey)
+
+    return (
+      <div css={styles.labelWithTooltip}>
+        <span>{labelText}</span>
+        <Tooltip title={descriptionText} placement="top" showArrow>
+          <Button
+            type="tertiary"
+            icon
+            size="sm"
+            aria-label={descriptionText}
+            css={styles.tooltipTrigger}
+          >
+            <SVG src={infoIcon} size={16} />
+          </Button>
+        </Tooltip>
+      </div>
+    )
+  }
 
   const toMutableUseDataSource = (
     source: ImmutableObject<UseDataSource> | UseDataSource | null
@@ -562,362 +589,379 @@ const Setting = (
 
   return (
     <>
-      <SettingSection title={translate("mapWidgetTitle")}>
-        <SettingRow flow="wrap" level={2}>
+      <SettingSection>
+        <SettingRow
+          flow="wrap"
+          level={2}
+          label={renderLabelWithTooltip(
+            "mapWidgetTitle",
+            "mapWidgetDescription"
+          )}
+        >
           <MapWidgetSelector
             onSelect={handleMapWidgetChange}
             useMapWidgetIds={useMapWidgetIds}
           />
         </SettingRow>
-        <div css={styles.description}>{translate("mapWidgetDescription")}</div>
       </SettingSection>
-
-      {hasMapSelection && (
-        <SettingSection title={translate("dataSourcesTitle")}>
-          <SettingRow
-            flow="wrap"
-            level={2}
-            label={translate("propertyDataSourceLabel")}
-          >
-            <DataSourceSelector
-              types={Immutable([DataSourceTypes.FeatureLayer])}
-              useDataSources={propertySelectorValue}
-              mustUseDataSource
-              onChange={handlePropertyDataSourceChange}
-              widgetId={id}
-              hideTypeDropdown
-            />
-          </SettingRow>
-
-          <div css={styles.description}>
-            {translate("propertyDataSourceDescription")}
-          </div>
-
-          <SettingRow
-            flow="wrap"
-            level={2}
-            label={translate("ownerDataSourceLabel")}
-          >
-            <DataSourceSelector
-              types={Immutable([DataSourceTypes.FeatureLayer])}
-              useDataSources={ownerSelectorValue}
-              mustUseDataSource
-              onChange={handleOwnerDataSourceChange}
-              widgetId={id}
-              hideTypeDropdown
-            />
-          </SettingRow>
-
-          <div css={styles.description}>
-            {translate("ownerDataSourceDescription")}
-          </div>
-
-          {hasRequiredDataSources ? (
-            <div css={styles.description}>
-              {translate("dataSourcesDescription")}
-            </div>
-          ) : (
-            <SettingRow flow="wrap" level={2}>
-              <Alert
-                css={styles.fullWidth}
-                type="warning"
-                text={translate("dataSourcesDescription")}
-                closable={false}
-              />
-            </SettingRow>
-          )}
-        </SettingSection>
-      )}
-
-      {canShowDisplayOptions && (
-        <SettingSection title={translate("displayOptionsTitle")}>
-          <CollapsablePanel
-            label={translate("panelDisplaySettings")}
-            type="default"
-            level={1}
-            role="group"
-            aria-label={translate("panelDisplaySettings")}
-          >
+      <SettingSection>
+        {hasMapSelection && (
+          <>
             <SettingRow
               flow="wrap"
               level={2}
-              label={translate("maxResultsLabel")}
+              label={renderLabelWithTooltip(
+                "propertyDataSourceLabel",
+                "propertyDataSourceDescription"
+              )}
             >
-              <NumericInput
-                css={styles.fullWidth}
-                value={parseInt(localMaxResults, 10)}
-                min={1}
-                max={1000}
-                onChange={handleMaxResultsChange}
-                onBlur={handleMaxResultsBlur}
-                aria-label={translate("maxResultsLabel")}
-                aria-invalid={!!fieldErrors.maxResults}
+              <DataSourceSelector
+                types={Immutable([DataSourceTypes.FeatureLayer])}
+                useDataSources={propertySelectorValue}
+                mustUseDataSource
+                onChange={handlePropertyDataSourceChange}
+                widgetId={id}
+                hideTypeDropdown
               />
             </SettingRow>
-            {fieldErrors.maxResults && (
-              <SettingRow flow="wrap" level={2}>
+
+            <SettingRow
+              flow="wrap"
+              level={2}
+              label={renderLabelWithTooltip(
+                "ownerDataSourceLabel",
+                "ownerDataSourceDescription"
+              )}
+            >
+              <DataSourceSelector
+                types={Immutable([DataSourceTypes.FeatureLayer])}
+                useDataSources={ownerSelectorValue}
+                mustUseDataSource
+                onChange={handleOwnerDataSourceChange}
+                widgetId={id}
+                hideTypeDropdown
+              />
+            </SettingRow>
+
+            {!hasRequiredDataSources && (
+              <SettingRow flow="wrap" level={2} css={styles.row}>
                 <Alert
                   css={styles.fullWidth}
-                  type="error"
-                  text={fieldErrors.maxResults}
+                  type="warning"
+                  text={translate("dataSourcesDescription")}
                   closable={false}
                 />
               </SettingRow>
             )}
+          </>
+        )}
+      </SettingSection>
 
-            <SettingRow
-              flow="no-wrap"
-              level={2}
-              label={translate("enableToggleRemovalLabel")}
+      {canShowDisplayOptions && (
+        <>
+          <SettingSection>
+            <CollapsablePanel
+              label={translate("panelDisplaySettings")}
+              type="default"
+              level={1}
+              role="group"
+              aria-label={translate("panelDisplaySettings")}
             >
-              <Switch
-                css={styles.fullWidth}
-                checked={localToggleRemoval}
-                onChange={handleToggleRemovalChange}
-                aria-label={translate("enableToggleRemovalLabel")}
-              />
-            </SettingRow>
-
-            <SettingRow
-              flow="no-wrap"
-              level={2}
-              label={translate("enablePIIMaskingLabel")}
-            >
-              <Switch
-                css={styles.fullWidth}
-                checked={localPIIMasking}
-                onChange={handlePIIMaskingChange}
-                aria-label={translate("enablePIIMaskingLabel")}
-              />
-            </SettingRow>
-
-            <SettingRow
-              flow="no-wrap"
-              level={2}
-              label={translate("autoZoomOnSelectionLabel")}
-            >
-              <Switch
-                css={styles.fullWidth}
-                checked={localAutoZoom}
-                onChange={handleAutoZoomChange}
-                aria-label={translate("autoZoomOnSelectionLabel")}
-              />
-            </SettingRow>
-            <div css={styles.description}>
-              {translate("autoZoomOnSelectionDescription")}
-            </div>
-
-            <div css={styles.description}>
-              {translate("allowedHostsDescription")}
-            </div>
-
-            <SettingRow
-              flow="wrap"
-              level={2}
-              label={translate("allowedHostsLabel")}
-            >
-              <div css={styles.allowedHostInputRow}>
-                <TextInput
-                  css={styles.allowedHostInput}
-                  value={localAllowedHostInput}
-                  onChange={handleAllowedHostInputChange}
-                  onKeyDown={handleAllowedHostInputKeyDown}
-                  placeholder={translate("allowedHostsPlaceholder")}
-                  aria-label={translate("allowedHostsLabel")}
-                  spellCheck={false}
-                />
-                <Button
-                  type="tertiary"
-                  icon
-                  onClick={handleAddAllowedHost}
-                  title={translate("addAllowedHostLabel")}
-                  aria-label={translate("addAllowedHostLabel")}
-                  disabled={!canAddAllowedHost}
-                >
-                  <SVG src={addIcon} size={16} />
-                </Button>
-              </div>
-            </SettingRow>
-
-            <SettingRow
-              flow="wrap"
-              level={2}
-              label={translate("allowedHostsListLabel")}
-            >
-              <div css={styles.allowedHostList}>
-                {localAllowedHostsList.length > 0 ? (
-                  localAllowedHostsList.map((host) => (
-                    <div css={styles.allowedHostListRow} key={host}>
-                      <TextInput
-                        css={styles.allowedHostListInput}
-                        value={host}
-                        readOnly
-                        borderless
-                        spellCheck={false}
-                        aria-label={`${translate("allowedHostsListLabel")}: ${host}`}
-                      />
-                      <Button
-                        type="tertiary"
-                        icon
-                        onClick={() => handleRemoveAllowedHost(host)}
-                        title={translate("removeAllowedHostLabel")}
-                        aria-label={translate("removeAllowedHostLabel")}
-                      >
-                        <SVG src={removeIcon} size={16} />
-                      </Button>
-                    </div>
-                  ))
-                ) : (
-                  <div
-                    css={styles.description}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {translate("allowedHostsEmptyHint")}
-                  </div>
-                )}
-              </div>
-            </SettingRow>
-          </CollapsablePanel>
-
-          <CollapsablePanel
-            label={translate("panelHighlightSettings")}
-            type="default"
-            level={1}
-            role="group"
-            aria-label={translate("panelHighlightSettings")}
-          >
-            <div css={styles.description}>
-              {translate("highlightOptionsDescription")}
-            </div>
-
-            <SettingRow
-              flow="wrap"
-              level={2}
-              label={translate("highlightColorLabel")}
-            >
-              <ColorPicker
-                css={styles.fullWidth}
-                color={localHighlightColor}
-                onChange={handleHighlightColorChange}
-                aria-label={translate("highlightColorLabel")}
-              />
-            </SettingRow>
-
-            <SettingRow
-              flow="wrap"
-              level={2}
-              label={translate("highlightOpacityLabel")}
-            >
-              <div css={styles.sliderWrap}>
-                <div css={styles.sliderTrack}>
-                  <Slider
-                    value={highlightOpacityPercent}
-                    min={0}
-                    max={100}
-                    step={5}
-                    tooltip
-                    formatter={formatOpacityPercent}
-                    aria-label={translate("highlightOpacityLabel")}
-                    onChange={handleHighlightOpacityChange}
-                    css={styles.sliderControl}
-                  />
-                  <div
-                    css={styles.sliderValue}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {highlightOpacityLabel}
-                  </div>
-                </div>
-              </div>
-            </SettingRow>
-
-            <SettingRow
-              flow="wrap"
-              level={2}
-              label={translate("highlightOutlineWidthLabel")}
-            >
-              <div css={styles.sliderWrap}>
-                <div css={styles.sliderTrack}>
-                  <Slider
-                    value={outlineWidthValue}
-                    min={0.5}
-                    max={10}
-                    step={0.5}
-                    tooltip
-                    formatter={formatOutlineWidthDisplay}
-                    aria-label={translate("highlightOutlineWidthLabel")}
-                    onChange={handleOutlineWidthChange}
-                    css={styles.sliderControl}
-                  />
-                  <div
-                    css={styles.sliderValue}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {outlineWidthLabel}
-                  </div>
-                </div>
-              </div>
-            </SettingRow>
-          </CollapsablePanel>
-        </SettingSection>
-      )}
-
-      {canShowRelationshipSettings && (
-        <SettingSection title={translate("relationshipTitle")}>
-          <SettingRow
-            flow="no-wrap"
-            level={2}
-            label={translate("enableBatchOwnerQueryLabel")}
-          >
-            <Switch
-              css={styles.fullWidth}
-              checked={localBatchOwnerQuery}
-              onChange={handleBatchOwnerQueryChange}
-              aria-label={translate("enableBatchOwnerQueryLabel")}
-            />
-          </SettingRow>
-          <div css={styles.description}>
-            {translate("enableBatchOwnerQueryDescription")}
-          </div>
-
-          {localBatchOwnerQuery && (
-            <>
               <SettingRow
                 flow="wrap"
                 level={2}
-                label={translate("relationshipIdLabel")}
+                label={renderLabelWithTooltip(
+                  "maxResultsLabel",
+                  "maxResultsDescription"
+                )}
               >
                 <NumericInput
                   css={styles.fullWidth}
-                  value={parseInt(localRelationshipId, 10)}
-                  min={0}
-                  max={99}
-                  onChange={handleRelationshipIdChange}
-                  onBlur={handleRelationshipIdBlur}
-                  aria-label={translate("relationshipIdLabel")}
-                  title={translate("relationshipIdTooltip")}
-                  aria-invalid={!!fieldErrors.relationshipId}
+                  value={parseInt(localMaxResults, 10)}
+                  min={1}
+                  max={1000}
+                  onChange={handleMaxResultsChange}
+                  onBlur={handleMaxResultsBlur}
+                  aria-label={translate("maxResultsLabel")}
+                  aria-invalid={!!fieldErrors.maxResults}
                 />
               </SettingRow>
-              {fieldErrors.relationshipId && (
-                <SettingRow flow="wrap" level={2}>
+              {fieldErrors.maxResults && (
+                <SettingRow flow="wrap" level={2} css={styles.row}>
                   <Alert
                     css={styles.fullWidth}
                     type="error"
-                    text={fieldErrors.relationshipId}
+                    text={fieldErrors.maxResults}
                     closable={false}
                   />
                 </SettingRow>
               )}
-              <div css={styles.description}>
-                {translate("relationshipIdDescription")}
-              </div>
-            </>
-          )}
-        </SettingSection>
+
+              <SettingRow
+                flow="no-wrap"
+                level={2}
+                label={renderLabelWithTooltip(
+                  "enableToggleRemovalLabel",
+                  "enableToggleRemovalDescription"
+                )}
+              >
+                <Switch
+                  checked={localToggleRemoval}
+                  onChange={handleToggleRemovalChange}
+                  aria-label={translate("enableToggleRemovalLabel")}
+                />
+              </SettingRow>
+
+              <SettingRow
+                flow="no-wrap"
+                level={2}
+                label={renderLabelWithTooltip(
+                  "enablePIIMaskingLabel",
+                  "enablePIIMaskingDescription"
+                )}
+              >
+                <Switch
+                  checked={localPIIMasking}
+                  onChange={handlePIIMaskingChange}
+                  aria-label={translate("enablePIIMaskingLabel")}
+                />
+              </SettingRow>
+
+              <SettingRow
+                flow="no-wrap"
+                level={2}
+                label={renderLabelWithTooltip(
+                  "autoZoomOnSelectionLabel",
+                  "autoZoomOnSelectionDescription"
+                )}
+              >
+                <Switch
+                  checked={localAutoZoom}
+                  onChange={handleAutoZoomChange}
+                  aria-label={translate("autoZoomOnSelectionLabel")}
+                />
+              </SettingRow>
+
+              <SettingRow
+                flow="wrap"
+                level={2}
+                label={renderLabelWithTooltip(
+                  "allowedHostsLabel",
+                  "allowedHostsDescription"
+                )}
+              >
+                <div css={styles.allowedHostInputRow}>
+                  <TextInput
+                    css={styles.allowedHostInput}
+                    value={localAllowedHostInput}
+                    onChange={handleAllowedHostInputChange}
+                    onKeyDown={handleAllowedHostInputKeyDown}
+                    placeholder={translate("allowedHostsPlaceholder")}
+                    aria-label={translate("allowedHostsLabel")}
+                    spellCheck={false}
+                  />
+                  <Button
+                    type="tertiary"
+                    icon
+                    onClick={handleAddAllowedHost}
+                    title={translate("addAllowedHostLabel")}
+                    aria-label={translate("addAllowedHostLabel")}
+                    disabled={!canAddAllowedHost}
+                  >
+                    <SVG src={addIcon} size={16} />
+                  </Button>
+                </div>
+              </SettingRow>
+
+              <SettingRow
+                flow="wrap"
+                level={2}
+                label={translate("allowedHostsListLabel")}
+              >
+                <div css={styles.allowedHostList}>
+                  {localAllowedHostsList.length > 0 ? (
+                    localAllowedHostsList.map((host) => (
+                      <div css={styles.allowedHostListRow} key={host}>
+                        <TextInput
+                          css={styles.allowedHostListInput}
+                          value={host}
+                          readOnly
+                          borderless
+                          spellCheck={false}
+                          aria-label={`${translate("allowedHostsListLabel")}: ${host}`}
+                        />
+                        <Button
+                          type="tertiary"
+                          icon
+                          onClick={() => handleRemoveAllowedHost(host)}
+                          title={translate("removeAllowedHostLabel")}
+                          aria-label={translate("removeAllowedHostLabel")}
+                        >
+                          <SVG src={removeIcon} size={16} />
+                        </Button>
+                      </div>
+                    ))
+                  ) : (
+                    <div
+                      css={styles.description}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {translate("allowedHostsEmptyHint")}
+                    </div>
+                  )}
+                </div>
+              </SettingRow>
+            </CollapsablePanel>
+          </SettingSection>
+          <SettingSection>
+            <CollapsablePanel
+              label={renderLabelWithTooltip(
+                "panelHighlightSettings",
+                "highlightOptionsDescription"
+              )}
+              type="default"
+              level={1}
+              role="group"
+              aria-label={translate("panelHighlightSettings")}
+            >
+              <SettingRow
+                flow="wrap"
+                level={2}
+                label={translate("highlightColorLabel")}
+              >
+                <ColorPicker
+                  css={styles.fullWidth}
+                  color={localHighlightColor}
+                  onChange={handleHighlightColorChange}
+                  aria-label={translate("highlightColorLabel")}
+                />
+              </SettingRow>
+
+              <SettingRow
+                flow="wrap"
+                level={2}
+                label={translate("highlightOpacityLabel")}
+              >
+                <div css={styles.sliderWrap}>
+                  <div css={styles.sliderTrack}>
+                    <Slider
+                      value={highlightOpacityPercent}
+                      min={0}
+                      max={100}
+                      step={5}
+                      tooltip
+                      formatter={formatOpacityPercent}
+                      aria-label={translate("highlightOpacityLabel")}
+                      onChange={handleHighlightOpacityChange}
+                      css={styles.sliderControl}
+                    />
+                    <div
+                      css={styles.sliderValue}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {highlightOpacityLabel}
+                    </div>
+                  </div>
+                </div>
+              </SettingRow>
+
+              <SettingRow
+                flow="wrap"
+                level={2}
+                label={translate("highlightOutlineWidthLabel")}
+              >
+                <div css={styles.sliderWrap}>
+                  <div css={styles.sliderTrack}>
+                    <Slider
+                      value={outlineWidthValue}
+                      min={0.5}
+                      max={10}
+                      step={0.5}
+                      tooltip
+                      formatter={formatOutlineWidthDisplay}
+                      aria-label={translate("highlightOutlineWidthLabel")}
+                      onChange={handleOutlineWidthChange}
+                      css={styles.sliderControl}
+                    />
+                    <div
+                      css={styles.sliderValue}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {outlineWidthLabel}
+                    </div>
+                  </div>
+                </div>
+              </SettingRow>
+            </CollapsablePanel>
+          </SettingSection>
+        </>
+      )}
+
+      {canShowRelationshipSettings && (
+        <>
+          <SettingSection>
+            <CollapsablePanel
+              label={translate("advancedSettingsTitle")}
+              type="default"
+              level={1}
+              role="group"
+              aria-label={translate("advancedSettingsTitle")}
+            >
+              <SettingRow
+                flow="no-wrap"
+                level={2}
+                label={renderLabelWithTooltip(
+                  "enableBatchOwnerQueryLabel",
+                  "enableBatchOwnerQueryDescription"
+                )}
+              >
+                <Switch
+                  checked={localBatchOwnerQuery}
+                  onChange={handleBatchOwnerQueryChange}
+                  aria-label={translate("enableBatchOwnerQueryLabel")}
+                />
+              </SettingRow>
+
+              {localBatchOwnerQuery && (
+                <>
+                  <SettingRow
+                    flow="wrap"
+                    level={2}
+                    label={renderLabelWithTooltip(
+                      "relationshipIdLabel",
+                      "relationshipIdDescription"
+                    )}
+                  >
+                    <NumericInput
+                      css={styles.fullWidth}
+                      value={parseInt(localRelationshipId, 10)}
+                      min={0}
+                      max={99}
+                      onChange={handleRelationshipIdChange}
+                      onBlur={handleRelationshipIdBlur}
+                      aria-label={translate("relationshipIdLabel")}
+                      title={translate("relationshipIdTooltip")}
+                      aria-invalid={!!fieldErrors.relationshipId}
+                    />
+                  </SettingRow>
+                  {fieldErrors.relationshipId && (
+                    <SettingRow flow="wrap" level={2} css={styles.row}>
+                      <Alert
+                        css={styles.fullWidth}
+                        type="error"
+                        text={fieldErrors.relationshipId}
+                        closable={false}
+                      />
+                    </SettingRow>
+                  )}
+                </>
+              )}
+            </CollapsablePanel>
+          </SettingSection>
+        </>
       )}
     </>
   )

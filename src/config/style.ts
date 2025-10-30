@@ -166,14 +166,30 @@ export const createSettingStyles = (theme: IMThemeVariables) => {
   const typography = theme.sys.typography
 
   return {
+    row: css({ width: "100%" }),
     fullWidth: createFlex("column", {
       inlineSize: "100%",
       flex: "1 1 auto",
       minInlineSize: 0,
     }),
+    labelWithTooltip: createFlex("row", {
+      alignItems: "center",
+      gap: spacing?.(1),
+    }),
+    tooltipTrigger: css({
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      cursor: "pointer",
+      marginInlineStart: spacing?.(1),
+      inlineSize: spacing?.(4),
+      blockSize: spacing?.(4),
+      minInlineSize: spacing?.(3),
+      minBlockSize: spacing?.(3),
+      padding: 0,
+    }),
     description: css({
-      fontSize: typography?.label2?.fontSize,
-      color: colors?.surface?.backgroundHint,
+      fontSize: typography?.body2?.fontSize,
       marginBlockStart: spacing?.(1),
     }),
     sliderWrap: createFlex("column", {
