@@ -8,6 +8,7 @@ export const ESRI_MODULES_TO_LOAD = [
 ] as const
 
 export const GRID_COLUMN_KEYS = {
+  SELECT: "select",
   FASTIGHET: "FASTIGHET",
   BOSTADR: "BOSTADR",
 } as const

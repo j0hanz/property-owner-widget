@@ -14,9 +14,17 @@ import {
   type ImmutableObject,
 } from "jimu-core"
 import { JimuMapViewComponent } from "jimu-arcgis"
-import { Alert, Button, Loading, LoadingType, SVG } from "jimu-ui"
+import {
+  Alert,
+  Button,
+  Loading,
+  LoadingType,
+  SVG,
+  defaultMessages as jimuUIMessages,
+} from "jimu-ui"
 import { PropertyTable } from "./components/table"
 import { createPropertyTableColumns } from "../shared/config"
+import defaultMessages from "./translations/default"
 import type {
   IMConfig,
   ErrorBoundaryProps,
@@ -147,7 +155,7 @@ class PropertyWidgetErrorBoundary extends React.Component<
 const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const { config, id, useMapWidgetIds } = props
   const styles = useWidgetStyles()
-  const translate = hooks.useTranslation()
+  const translate = hooks.useTranslation(jimuUIMessages, defaultMessages)
 
   const runtimeState = ReactRedux.useSelector(
     (state: IMState) => state.widgetsRuntimeInfo?.[id]?.state
@@ -910,7 +918,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
 const Widget = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const styles = useWidgetStyles()
-  const translate = hooks.useTranslation()
+  const translate = hooks.useTranslation(jimuUIMessages, defaultMessages)
   return (
     <PropertyWidgetErrorBoundary styles={styles} translate={translate}>
       <WidgetContent {...props} />

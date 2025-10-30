@@ -8,6 +8,13 @@ import {
   DataSourceTypes,
   Immutable,
 } from "jimu-core"
+import {
+  NumericInput,
+  Switch,
+  TextArea,
+  Alert,
+  defaultMessages as jimuUIMessages,
+} from "jimu-ui"
 import type { AllWidgetSettingProps } from "jimu-for-builder"
 import {
   SettingSection,
@@ -15,7 +22,7 @@ import {
   MapWidgetSelector,
 } from "jimu-ui/advanced/setting-components"
 import { DataSourceSelector } from "jimu-ui/advanced/data-source-selector"
-import { NumericInput, Switch, TextArea, Alert } from "jimu-ui"
+import defaultMessages from "./translations/default"
 import type { IMConfig } from "../config/types"
 import { useSettingStyles } from "../config/style"
 import {
@@ -32,7 +39,7 @@ const Setting = (
   props: AllWidgetSettingProps<IMConfig>
 ): React.ReactElement => {
   const { config, id, onSettingChange, useMapWidgetIds } = props
-  const translate = hooks.useTranslation()
+  const translate = hooks.useTranslation(jimuUIMessages, defaultMessages)
   const styles = useSettingStyles()
 
   const getBooleanConfig = useBooleanConfigValue(config)
