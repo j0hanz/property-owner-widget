@@ -106,7 +106,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       gap: spacing?.(4),
     }),
     svgState: css({
-      opacity: 0.2,
+      opacity: 0.1,
     }),
     messageState: css({
       fontFamily: typography?.label2?.fontFamily,
@@ -114,7 +114,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       fontWeight: typography?.label2?.fontWeight,
       lineHeight: typography?.label2?.lineHeight,
       textAlign: "center",
-      opacity: 0.8,
+      opacity: 0.7,
     }),
     loadingState: css({
       ...centeredFlex,

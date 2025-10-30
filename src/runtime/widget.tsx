@@ -59,7 +59,7 @@ import {
 } from "../shared/telemetry"
 import clearIcon from "../assets/clear-selection-general.svg"
 import zoomIcon from "../assets/zoom-in.svg"
-import mapWrong from "../assets/map-wrong.svg"
+import setupIcon from "../assets/config-missing.svg"
 import mapSelect from "../assets/map-select.svg"
 
 const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
@@ -646,8 +646,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           <Loading
             css={styles.loadingState}
             type={LoadingType.Donut}
-            width={100}
-            height={100}
+            width={125}
+            height={125}
           />
         </div>
       </div>
@@ -706,9 +706,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           <div css={styles.emptyState} role="status" aria-live="polite">
             <SVG
               css={styles.svgState}
-              src={mapWrong}
-              width={100}
-              height={100}
+              src={setupIcon}
+              width={125}
+              height={125}
             />
             <div css={styles.messageState}>
               {translate("widgetNotConfigured")}
@@ -730,10 +730,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
               <SVG
                 css={styles.svgState}
                 src={mapSelect}
-                width={100}
-                height={100}
+                width={125}
+                height={125}
               />
-              /* Lines 770-771 omitted */
+              <div css={styles.messageState}>
+                {translate("clickMapToSelectProperties")}
+              </div>
             </div>
           )}
 
