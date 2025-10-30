@@ -880,7 +880,11 @@ const buildPropertyRows = (params: {
       objectId: propertyAttrs.OBJECTID,
       uuidFastighet: propertyAttrs.UUID_FASTIGHET,
       fastighet: propertyAttrs.FASTIGHET,
-      bostadr: propertyAttrs?.BOSTADR || "",
+      bostadr: helpers.formatOwnerInfo(
+        propertyAttrs as OwnerAttributes,
+        config.enablePIIMasking,
+        messages.unknownOwner
+      ),
       graphic: propertyGraphic,
       createRowId: helpers.createRowId,
       rawOwner: propertyAttrs as OwnerAttributes,
