@@ -7,7 +7,7 @@
 	],
 	"maxResults": 100,
 	"enableToggleRemoval": true,
-	"enablePIIMasking": true,
+	"enablePIIMasking": false,
 	"allowedHosts": [
 		"lund.se",
 		"arcgis.com",
