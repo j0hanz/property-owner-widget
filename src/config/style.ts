@@ -67,7 +67,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     table: css({
       width: "100%",
       borderCollapse: "collapse",
-      tableLayout: "fixed",
+      tableLayout: "auto",
     }),
     thead: css({
       position: "sticky",
@@ -78,6 +78,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     th: css({
       padding: spacing?.(1),
       textAlign: "left",
+      verticalAlign: "top",
       borderBlockEnd: border,
       fontWeight: 600,
       cursor: "pointer",
@@ -102,9 +103,14 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     td: css({
       padding: spacing?.(1),
       borderBlockEnd: border,
+      verticalAlign: "top",
+      wordBreak: "break-word",
       overflow: "hidden",
-      textOverflow: "ellipsis",
-      whiteSpace: "nowrap",
+      display: "-webkit-box",
+      WebkitLineClamp: 3,
+      WebkitBoxOrient: "vertical",
+      maxHeight: "4.5em",
+      lineHeight: "1.5em",
     }),
     sortIndicator: css({
       marginInlineStart: spacing?.(1),
