@@ -649,7 +649,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             width={100}
             height={100}
           />
-          <div css={styles.messageState}>{translate("loadingModules")}</div>
         </div>
       </div>
     )
