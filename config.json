@@ -1,4 +1,6 @@
 {
+	"propertyDataSourceId": "",
+	"ownerDataSourceId": "",
 	"displayColumns": [
 		"FASTIGHET",
 		"BOSTADR"
