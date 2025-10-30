@@ -197,6 +197,14 @@ export const queryOwnerByFnr = async (
           throw new Error("Owner data source not found")
         }
 
+        const layerUrl = ds.url
+        console.log("Querying owner layer:", {
+          dataSourceId,
+          url: layerUrl,
+          fnr,
+          whereClause: buildFnrWhereClause(fnr),
+        })
+
         const result = await ds.query(
           {
             where: buildFnrWhereClause(fnr),
@@ -205,6 +213,13 @@ export const queryOwnerByFnr = async (
           },
           createSignalOptions(options?.signal)
         )
+
+        console.log("Owner query result:", {
+          fnr,
+          recordCount: result?.records?.length || 0,
+          hasRecords: !!(result?.records && result.records.length > 0),
+          firstRecord: result?.records?.[0]?.getData(),
+        })
 
         if (options?.signal?.aborted) {
           const abortError = new Error("AbortError")
