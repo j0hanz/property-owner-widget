@@ -250,9 +250,17 @@ export const queryOwnerByFnr = async (
           })
         }
 
-        return result.records.map(
-          (record: FeatureDataRecord) => record.getData() as __esri.Graphic
-        )
+        return result.records.map((record: FeatureDataRecord) => {
+          const data = record.getData()
+          console.log("Owner record getData():", {
+            fnr,
+            data,
+            hasAttributes: !!data?.attributes,
+            attributes: data?.attributes,
+            dataKeys: Object.keys(data || {}),
+          })
+          return data as __esri.Graphic
+        })
       } catch (error) {
         if (isAbortError(error)) {
           throw error as Error

@@ -804,17 +804,23 @@ const buildPropertyRows = (params: {
 
   if (ownerFeatures.length > 0) {
     return ownerFeatures.map((ownerFeature) => {
-      const attrs = ownerFeature.attributes
+      const attrs = ownerFeature.attributes || ownerFeature
+      if (!attrs) {
+        console.error("Owner feature has no attributes:", {
+          ownerFeature,
+          featureKeys: Object.keys(ownerFeature || {}),
+        })
+      }
       return createGridRow({
         fnr,
-        objectId: attrs.OBJECTID,
-        uuidFastighet: attrs.UUID_FASTIGHET,
+        objectId: attrs?.OBJECTID || 0,
+        uuidFastighet: attrs?.UUID_FASTIGHET || "",
         fastighet: helpers.formatPropertyWithShare(
-          attrs.FASTIGHET,
-          attrs.ANDEL || ""
+          attrs?.FASTIGHET || "",
+          attrs?.ANDEL || ""
         ),
         bostadr: helpers.formatOwnerInfo(
-          attrs,
+          attrs || {},
           config.enablePIIMasking,
           messages.unknownOwner
         ),
