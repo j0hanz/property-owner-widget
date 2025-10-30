@@ -91,6 +91,13 @@ export const queryPropertyByPoint = async (
           throw new Error("Property data source not found")
         }
 
+        console.log("Query parameters:", {
+          geometry: point,
+          spatialRef: point.spatialReference,
+          dataSourceId,
+          dataSourceUrl: ds.url,
+        })
+
         const result = await ds.query(
           {
             geometry: point as any,
