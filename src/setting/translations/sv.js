@@ -4,6 +4,9 @@ System.register([], function (e) {
       e({
         configurationInstructions:
           "Konfigurera widgeten genom att ange lager-URL:er och visningsinställningar.",
+        mapWidgetTitle: "Kartkoppling",
+        mapWidgetDescription:
+          "Välj en kartwidget för att aktivera fastighetsfrågor genom att klicka på kartan. Widgeten kommer att lyssna efter kartklick och hämta fastighetsinformation vid den klickade platsen.",
         dataSourcesTitle: "Datakällor",
         dataSourcesDescription:
           "Välj två objektlager: först för fastighetstomter, därefter för ägarinformation. Båda lagren måste använda FNR-fältet för att koppla fastigheter till ägare.",
