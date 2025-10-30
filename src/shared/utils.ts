@@ -839,6 +839,7 @@ const buildPropertyRows = (params: {
     fnr,
     propertyAttrs,
     ownerFeatures,
+    queryFailed,
     propertyGraphic,
     config,
     helpers,
@@ -874,20 +875,30 @@ const buildPropertyRows = (params: {
     })
   }
 
+  // When no owner features found, show appropriate message based on whether query failed
+  const fallbackMessage = queryFailed
+    ? messages.errorOwnerQueryFailed
+    : messages.unknownOwner
+
+  const fallbackOwner = {
+    NAMN: fallbackMessage,
+    BOSTADR: "",
+    POSTNR: "",
+    POSTADR: "",
+    ORGNR: "",
+    FNR: fnr,
+  } as OwnerAttributes
+
   return [
     createGridRow({
       fnr,
       objectId: propertyAttrs.OBJECTID,
       uuidFastighet: propertyAttrs.UUID_FASTIGHET,
       fastighet: propertyAttrs.FASTIGHET,
-      bostadr: helpers.formatOwnerInfo(
-        propertyAttrs as OwnerAttributes,
-        config.enablePIIMasking,
-        messages.unknownOwner
-      ),
+      bostadr: fallbackMessage,
       graphic: propertyGraphic,
       createRowId: helpers.createRowId,
-      rawOwner: propertyAttrs as OwnerAttributes,
+      rawOwner: fallbackOwner,
     }),
   ]
 }
@@ -1008,7 +1019,7 @@ export const processPropertyResultsWithBatchQuery = async (params: {
     } else {
       const fallbackMessage = failedFnrs.has(String(fnr))
         ? messages.errorOwnerQueryFailed
-        : messages.errorNoDataAvailable
+        : messages.unknownOwner
       const fallbackOwner = {
         NAMN: fallbackMessage,
         BOSTADR: "",
