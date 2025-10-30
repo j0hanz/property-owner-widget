@@ -91,6 +91,12 @@ export const queryPropertyByPoint = async (
           throw new Error("Property data source not found")
         }
 
+        // Get the underlying FeatureLayer
+        const layer = ds.layer
+        if (!layer || !layer.queryFeatures) {
+          throw new Error("Property layer not available or not queryable")
+        }
+
         console.log("Query parameters:", {
           geometry: {
             x: point.x,
@@ -102,18 +108,23 @@ export const queryPropertyByPoint = async (
             wkt: point.spatialReference?.wkt,
           },
           dataSourceId,
-          dataSourceUrl: ds.url,
+          layerId: layer.id,
+          layerUrl: layer.url,
         })
 
-        const result = await ds.query(
-          {
-            geometry: point as any,
-            returnGeometry: true,
-            outFields: ["*"],
-            spatialRel: "esriSpatialRelIntersects" as any,
-          },
-          createSignalOptions(options?.signal)
-        )
+        // Use the layer's native queryFeatures instead of data source query
+        const [Query] = await loadArcGISJSAPIModules([
+          "esri/rest/support/Query",
+        ])
+
+        const query = new Query({
+          geometry: point,
+          returnGeometry: true,
+          outFields: ["*"],
+          spatialRelationship: "intersects",
+        })
+
+        const result = await layer.queryFeatures(query, createSignalOptions(options?.signal))
 
         if (options?.signal?.aborted) {
           const abortError = new Error("AbortError")
@@ -121,14 +132,13 @@ export const queryPropertyByPoint = async (
           throw abortError
         }
 
-        if (!result?.records) {
+        if (!result?.features || result.features.length === 0) {
           return []
         }
 
-        return result.records.map((record: FeatureDataRecord) => {
-          const feature = record.getData()
+        return result.features.map((feature: __esri.Graphic) => {
           return {
-            features: [feature as __esri.Graphic],
+            features: [feature],
             propertyId: (feature.attributes as PropertyAttributes).FNR,
           }
         })
