@@ -91,51 +91,29 @@ export const queryPropertyByPoint = async (
           throw new Error("Property data source not found")
         }
 
-        // Wait for data source to be ready
-        if (ds.getStatus && ds.getStatus() !== ("loaded" as any)) {
-          if (ds.ready) {
-            await ds.ready()
-          }
+        const layerUrl = ds.url
+        if (!layerUrl) {
+          throw new Error("Data source URL not available")
         }
 
-        console.log("Data source info:", {
-          id: ds.id,
-          url: ds.url,
-          type: ds.type,
-          status: ds.getStatus?.(),
-          hasLayer: !!ds.layer,
-          dsKeys: Object.keys(ds).slice(0, 20),
-        })
-
-        // Get the underlying FeatureLayer
-        const layer = ds.layer
-        if (!layer || typeof layer.queryFeatures !== "function") {
-          console.error("Layer not available:", {
-            hasLayer: !!ds.layer,
-            layerType: layer?.type,
-          })
-          throw new Error("Property layer not available or not queryable")
-        }
-
-        console.log("Query parameters:", {
-          geometry: {
-            x: point.x,
-            y: point.y,
-            type: point.type,
-          },
-          spatialRef: {
-            wkid: point.spatialReference?.wkid,
-            wkt: point.spatialReference?.wkt,
-          },
+        console.log("Querying layer:", {
           dataSourceId,
-          layerId: layer.id,
-          layerUrl: layer.url,
+          url: layerUrl,
+          pointX: point.x,
+          pointY: point.y,
+          wkid: point.spatialReference?.wkid,
         })
 
-        // Use the layer's native queryFeatures instead of data source query
-        const [Query] = await loadArcGISJSAPIModules([
+        // Load FeatureLayer and Query classes
+        const [FeatureLayer, Query] = await loadArcGISJSAPIModules([
+          "esri/layers/FeatureLayer",
           "esri/rest/support/Query",
         ])
+
+        // Create a temporary FeatureLayer from the URL
+        const layer = new FeatureLayer({
+          url: layerUrl,
+        })
 
         const query = new Query({
           geometry: point,
