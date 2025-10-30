@@ -217,7 +217,7 @@ const Setting = (
         <SettingRow flow="wrap" level={2}>
           <MapWidgetSelector
             onSelect={handleMapWidgetChange}
-            useMapWidgetIds={props.useMapWidgetIds}
+            useMapWidgetIds={useMapWidgetIds}
           />
         </SettingRow>
         <div css={styles.description}>{translate("mapWidgetDescription")}</div>
