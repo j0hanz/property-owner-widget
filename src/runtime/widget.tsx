@@ -190,39 +190,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     })
   )
 
-  const handleRemoveProperty = hooks.useEventCallback(
-    (fnr: string | number) => {
-      removeGraphicsForFnr(fnr, normalizeFnrKey)
-      setState((prev) => {
-        const removed: typeof prev.selectedProperties = []
-        const updated: typeof prev.selectedProperties = []
-
-        prev.selectedProperties.forEach((row) => {
-          if (row.FNR === fnr) {
-            removed.push(row)
-            return
-          }
-          updated.push(row)
-        })
-
-        if (removed.length === 0) {
-          return prev
-        }
-
-        trackEvent({
-          category: "Property",
-          action: "remove",
-          value: removed.length,
-        })
-
-        return {
-          ...prev,
-          selectedProperties: updated,
-        }
-      })
-    }
-  )
-
   const handleClearAll = hooks.useEventCallback(() => {
     abortAll()
     clearQueryCache()
@@ -689,12 +656,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           </Button>
         </div>
       </div>
-
-      <div css={styles.cols}>
-        <div css={styles.col}>{translate("columnFastighet")}</div>
-        <div css={styles.col}>{translate("columnOwner")}</div>
-      </div>
-
       <div css={styles.body} role="main">
         {!isConfigured && (
           <div css={styles.emptyState} role="status" aria-live="polite">
