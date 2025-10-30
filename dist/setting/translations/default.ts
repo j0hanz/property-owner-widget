@@ -14,6 +14,8 @@ export default {
   ownerDataSourceDescription:
     "Feature layer or table containing ownership details (NAMN, BOSTADR, ORGNR, etc.). Can be the same layer as the property source when attributes are combined.",
   displayOptionsTitle: "Display options",
+  panelDisplaySettings: "Display behavior",
+  panelHighlightSettings: "Highlight styling",
   maxResultsLabel: "Maximum results",
   maxResultsDescription:
     "Limits the number of features requested per lookup to protect performance.",
@@ -34,8 +36,12 @@ export default {
   highlightOutlineWidthLabel: "Outline width",
   allowedHostsLabel: "Allowed hosts",
   allowedHostsDescription:
-    "List of allowed hostnames for URL validation (one per line). Leave empty to allow all HTTPS ArcGIS services.",
-  allowedHostsPlaceholder: "lund.se\narcgis.com\nesri.com",
+    "Add hostnames that should pass URL validation. Leave empty to allow all HTTPS ArcGIS services.",
+  allowedHostsPlaceholder: "lund.se",
+  addAllowedHostLabel: "Add allowed host",
+  allowedHostsListLabel: "Allowed host entries",
+  allowedHostsEmptyHint: "No allowed hosts added yet.",
+  removeAllowedHostLabel: "Remove allowed host",
   relationshipTitle: "Relationship configuration",
   enableBatchOwnerQueryLabel: "Enable batch owner queries",
   enableBatchOwnerQueryDescription:

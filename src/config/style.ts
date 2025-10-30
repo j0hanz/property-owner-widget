@@ -174,6 +174,7 @@ export const createSettingStyles = (theme: IMThemeVariables) => {
     description: css({
       fontSize: typography?.label2?.fontSize,
       color: colors?.surface?.backgroundHint,
+      marginBlockStart: spacing?.(1),
     }),
     sliderWrap: createFlex("column", {
       inlineSize: "100%",
@@ -193,6 +194,27 @@ export const createSettingStyles = (theme: IMThemeVariables) => {
       textAlign: "right",
       fontSize: typography?.label2?.fontSize,
       color: colors?.surface?.backgroundHint,
+    }),
+    allowedHostInputRow: createFlex("row", {
+      inlineSize: "100%",
+      alignItems: "center",
+    }),
+    allowedHostInput: css({
+      flex: "1 1 auto",
+      inlineSize: "100%",
+      minInlineSize: 0,
+    }),
+    allowedHostList: createFlex("column", {
+      inlineSize: "100%",
+    }),
+    allowedHostListRow: createFlex("row", {
+      inlineSize: "100%",
+      alignItems: "center",
+    }),
+    allowedHostListInput: css({
+      flex: "1 1 auto",
+      inlineSize: "100%",
+      minInlineSize: 0,
     }),
   } as const
 }

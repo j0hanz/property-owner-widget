@@ -23,6 +23,9 @@ const sanitizeText = (str: string): string => {
   return text.replace(/[\s\u00A0\u200B]+/g, " ").trim()
 }
 
+/** Public helper to strip HTML tags and normalize whitespace */
+export const stripHtml = (value: string): string => sanitizeText(value)
+
 /** Mask text with minimum length validation */
 const maskText = (text: string, minLength: number): string => {
   const sanitized = sanitizeText(text)

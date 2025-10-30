@@ -17,6 +17,8 @@ System.register([], function (e) {
         ownerDataSourceDescription:
           "Objektlager eller tabell som innehåller ägaruppgifter (NAMN, BOSTADR, ORGNR, etc.). Kan vara samma lager som fastighetskällan när attributen är sammanslagna.",
         displayOptionsTitle: "Visningsalternativ",
+        panelDisplaySettings: "Visningsbeteende",
+        panelHighlightSettings: "Markeringsstil",
         maxResultsLabel: "Maximalt antal resultat",
         maxResultsDescription:
           "Begränsar hur många objekt som hämtas per sökning för att skydda prestandan.",
@@ -37,8 +39,12 @@ System.register([], function (e) {
         highlightOutlineWidthLabel: "Linjebredd",
         allowedHostsLabel: "Tillåtna värdar",
         allowedHostsDescription:
-          "Lista över tillåtna värdnamn för URL-validering (en per rad). Lämna tomt för att tillåta alla HTTPS ArcGIS-tjänster.",
-        allowedHostsPlaceholder: "lund.se\narcgis.com\nesri.com",
+          "Lägg till värdnamn som ska tillåtas vid URL-validering. Lämna tomt för att tillåta alla HTTPS ArcGIS-tjänster.",
+        allowedHostsPlaceholder: "lund.se",
+        addAllowedHostLabel: "Lägg till tillåten värd",
+        allowedHostsListLabel: "Tillåtna värdposter",
+        allowedHostsEmptyHint: "Inga värdar har lagts till ännu.",
+        removeAllowedHostLabel: "Ta bort tillåten värd",
         relationshipTitle: "Relationskonfiguration",
         enableBatchOwnerQueryLabel: "Aktivera batch-ägarsökningar",
         enableBatchOwnerQueryDescription:

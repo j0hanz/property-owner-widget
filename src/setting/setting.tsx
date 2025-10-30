@@ -10,11 +10,14 @@ import {
   Immutable,
 } from "jimu-core"
 import {
-  NumericInput,
-  Switch,
-  TextArea,
   Alert,
+  Button,
+  CollapsablePanel,
+  NumericInput,
   Slider,
+  Switch,
+  TextInput,
+  SVG,
   defaultMessages as jimuUIMessages,
 } from "jimu-ui"
 import { ColorPicker } from "jimu-ui/basic/color-picker"
@@ -33,11 +36,14 @@ import {
   useUpdateConfig,
   useDebounce,
 } from "../shared/hooks"
+import { stripHtml } from "../shared/utils"
 import {
   DEFAULT_HIGHLIGHT_COLOR,
   HIGHLIGHT_SYMBOL_ALPHA,
   OUTLINE_WIDTH,
 } from "../config/constants"
+import addIcon from "../assets/plus.svg"
+import removeIcon from "../assets/close.svg"
 
 interface FieldErrors {
   [key: string]: string | undefined
@@ -80,6 +86,9 @@ const formatOutlineWidthDisplay = (value: number): string => {
   }
   return normalized.toFixed(1)
 }
+
+const sanitizeHostValue = (value: string): string =>
+  stripHtml(value || "").trim()
 
 const Setting = (
   props: AllWidgetSettingProps<IMConfig>
@@ -140,8 +149,15 @@ const Setting = (
   const [localRelationshipId, setLocalRelationshipId] = React.useState<string>(
     () => String(config.relationshipId ?? 0)
   )
-  const [localAllowedHosts, setLocalAllowedHosts] = React.useState(() =>
-    (config.allowedHosts || []).join("\n")
+  const [localAllowedHostInput, setLocalAllowedHostInput] = React.useState("")
+  const [localAllowedHostsList, setLocalAllowedHostsList] = React.useState(() =>
+    Array.from(
+      new Set(
+        (config.allowedHosts || [])
+          .map((host) => sanitizeHostValue(host))
+          .filter(Boolean)
+      )
+    )
   )
   const [localAutoZoom, setLocalAutoZoom] = React.useState(() =>
     getBooleanConfig("autoZoomOnSelection", false)
@@ -250,19 +266,51 @@ const Setting = (
     }
   })
 
-  const handleAllowedHostsChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setLocalAllowedHosts(evt.target.value)
+  const handleAllowedHostInputChange = hooks.useEventCallback(
+    (evt: React.ChangeEvent<HTMLInputElement>) => {
+      setLocalAllowedHostInput(evt.target.value)
     }
   )
 
-  const handleAllowedHostsBlur = hooks.useEventCallback(() => {
-    const hosts = localAllowedHosts
-      .split("\n")
-      .map((h) => h.trim())
-      .filter(Boolean)
-    updateConfig("allowedHosts", hosts)
+  const handleAddAllowedHost = hooks.useEventCallback(() => {
+    const sanitized = sanitizeHostValue(localAllowedHostInput)
+    if (!sanitized) {
+      setLocalAllowedHostInput("")
+      return
+    }
+    if (localAllowedHostsList.includes(sanitized)) {
+      return
+    }
+    const nextHosts = [...localAllowedHostsList, sanitized]
+    setLocalAllowedHostsList(nextHosts)
+    updateConfig("allowedHosts", nextHosts)
+    setLocalAllowedHostInput("")
   })
+
+  const handleRemoveAllowedHost = hooks.useEventCallback((host: string) => {
+    const sanitized = sanitizeHostValue(host)
+    const nextHosts = localAllowedHostsList.filter(
+      (value) => value !== sanitized
+    )
+    if (nextHosts.length === localAllowedHostsList.length) {
+      return
+    }
+    setLocalAllowedHostsList(nextHosts)
+    updateConfig("allowedHosts", nextHosts)
+  })
+
+  const handleAllowedHostInputKeyDown = hooks.useEventCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.key !== "Enter") {
+        return
+      }
+      event.preventDefault()
+      if (!canAddAllowedHost) {
+        return
+      }
+      handleAddAllowedHost()
+    }
+  )
 
   const handleAutoZoomChange = hooks.useEventCallback(
     (evt: React.ChangeEvent<HTMLInputElement>) => {
@@ -423,7 +471,11 @@ const Setting = (
   }, [config.relationshipId])
 
   hooks.useUpdateEffect(() => {
-    setLocalAllowedHosts((config.allowedHosts || []).join("\n"))
+    const normalizedHosts = (config.allowedHosts || [])
+      .map((host) => sanitizeHostValue(host))
+      .filter(Boolean)
+    const uniqueHosts = Array.from(new Set(normalizedHosts))
+    setLocalAllowedHostsList(uniqueHosts)
   }, [config.allowedHosts])
 
   hooks.useUpdateEffect(() => {
@@ -456,10 +508,54 @@ const Setting = (
     }
   })
 
+  const hasMapSelection =
+    Array.isArray(useMapWidgetIds) && useMapWidgetIds.length > 0
+  const hasPropertyDataSource = Boolean(config.propertyDataSourceId)
+  const hasOwnerDataSource = Boolean(config.ownerDataSourceId)
+  const hasRequiredDataSources = hasPropertyDataSource && hasOwnerDataSource
+  const canShowDisplayOptions = hasMapSelection && hasRequiredDataSources
+  const canShowRelationshipSettings = hasMapSelection && hasRequiredDataSources
+  const shouldDisableRelationshipSettings = !canShowRelationshipSettings
+
+  hooks.useEffectWithPreviousValues(() => {
+    if (!shouldDisableRelationshipSettings) {
+      return
+    }
+
+    if (localBatchOwnerQuery) {
+      setLocalBatchOwnerQuery(false)
+    }
+
+    if (config.enableBatchOwnerQuery) {
+      updateConfig("enableBatchOwnerQuery", false)
+    }
+
+    if (config.relationshipId !== undefined) {
+      updateConfig("relationshipId", undefined)
+    }
+
+    if (localRelationshipId !== "0") {
+      setLocalRelationshipId("0")
+    }
+
+    setFieldErrors((prev) => ({ ...prev, relationshipId: undefined }))
+  }, [
+    shouldDisableRelationshipSettings,
+    localBatchOwnerQuery,
+    config.enableBatchOwnerQuery,
+    config.relationshipId,
+    localRelationshipId,
+    updateConfig,
+  ])
+
   const highlightOpacityPercent = toOpacityPercent(localHighlightOpacity)
   const highlightOpacityLabel = formatOpacityPercent(highlightOpacityPercent)
   const outlineWidthValue = normalizeOutlineWidth(localOutlineWidth)
   const outlineWidthLabel = formatOutlineWidthDisplay(localOutlineWidth)
+  const sanitizedAllowedHostInput = sanitizeHostValue(localAllowedHostInput)
+  const canAddAllowedHost =
+    sanitizedAllowedHostInput.length > 0 &&
+    !localAllowedHostsList.includes(sanitizedAllowedHostInput)
 
   const propertySelectorValue = buildSelectorValue(config.propertyDataSourceId)
   const ownerSelectorValue = buildSelectorValue(config.ownerDataSourceId)
@@ -476,251 +572,353 @@ const Setting = (
         <div css={styles.description}>{translate("mapWidgetDescription")}</div>
       </SettingSection>
 
-      <SettingSection title={translate("dataSourcesTitle")}>
-        <SettingRow
-          flow="wrap"
-          level={2}
-          label={translate("propertyDataSourceLabel")}
-        >
-          <DataSourceSelector
-            types={Immutable([DataSourceTypes.FeatureLayer])}
-            useDataSources={propertySelectorValue}
-            mustUseDataSource
-            onChange={handlePropertyDataSourceChange}
-            widgetId={id}
-            hideTypeDropdown
-          />
-        </SettingRow>
-
-        <div css={styles.description}>
-          {translate("propertyDataSourceDescription")}
-        </div>
-
-        <SettingRow
-          flow="wrap"
-          level={2}
-          label={translate("ownerDataSourceLabel")}
-        >
-          <DataSourceSelector
-            types={Immutable([DataSourceTypes.FeatureLayer])}
-            useDataSources={ownerSelectorValue}
-            mustUseDataSource
-            onChange={handleOwnerDataSourceChange}
-            widgetId={id}
-            hideTypeDropdown
-          />
-        </SettingRow>
-
-        <div css={styles.description}>
-          {translate("ownerDataSourceDescription")}
-        </div>
-
-        <div css={styles.description}>
-          {translate("dataSourcesDescription")}
-        </div>
-      </SettingSection>
-
-      <SettingSection title={translate("displayOptionsTitle")}>
-        <SettingRow flow="wrap" level={2} label={translate("maxResultsLabel")}>
-          <NumericInput
-            css={styles.fullWidth}
-            value={parseInt(localMaxResults, 10)}
-            min={1}
-            max={1000}
-            onChange={handleMaxResultsChange}
-            onBlur={handleMaxResultsBlur}
-            aria-label={translate("maxResultsLabel")}
-            aria-invalid={!!fieldErrors.maxResults}
-          />
-        </SettingRow>
-        {fieldErrors.maxResults && (
-          <SettingRow flow="wrap" level={2}>
-            <Alert
-              css={styles.fullWidth}
-              type="error"
-              text={fieldErrors.maxResults}
-              closable={false}
+      {hasMapSelection && (
+        <SettingSection title={translate("dataSourcesTitle")}>
+          <SettingRow
+            flow="wrap"
+            level={2}
+            label={translate("propertyDataSourceLabel")}
+          >
+            <DataSourceSelector
+              types={Immutable([DataSourceTypes.FeatureLayer])}
+              useDataSources={propertySelectorValue}
+              mustUseDataSource
+              onChange={handlePropertyDataSourceChange}
+              widgetId={id}
+              hideTypeDropdown
             />
           </SettingRow>
-        )}
 
-        <SettingRow
-          flow="no-wrap"
-          level={2}
-          label={translate("enableToggleRemovalLabel")}
-        >
-          <Switch
-            css={styles.fullWidth}
-            checked={localToggleRemoval}
-            onChange={handleToggleRemovalChange}
-            aria-label={translate("enableToggleRemovalLabel")}
-          />
-        </SettingRow>
-
-        <SettingRow
-          flow="no-wrap"
-          level={2}
-          label={translate("enablePIIMaskingLabel")}
-        >
-          <Switch
-            css={styles.fullWidth}
-            checked={localPIIMasking}
-            onChange={handlePIIMaskingChange}
-            aria-label={translate("enablePIIMaskingLabel")}
-          />
-        </SettingRow>
-
-        <SettingRow
-          flow="no-wrap"
-          level={2}
-          label={translate("autoZoomOnSelectionLabel")}
-        >
-          <Switch
-            css={styles.fullWidth}
-            checked={localAutoZoom}
-            onChange={handleAutoZoomChange}
-            aria-label={translate("autoZoomOnSelectionLabel")}
-          />
-        </SettingRow>
-        <div css={styles.description}>
-          {translate("autoZoomOnSelectionDescription")}
-        </div>
-
-        <div css={styles.description}>
-          {translate("highlightOptionsDescription")}
-        </div>
-
-        <SettingRow
-          flow="wrap"
-          level={2}
-          label={translate("highlightColorLabel")}
-        >
-          <ColorPicker
-            css={styles.fullWidth}
-            color={localHighlightColor}
-            onChange={handleHighlightColorChange}
-            aria-label={translate("highlightColorLabel")}
-          />
-        </SettingRow>
-
-        <SettingRow
-          flow="wrap"
-          level={2}
-          label={translate("highlightOpacityLabel")}
-        >
-          <div css={styles.sliderWrap}>
-            <div css={styles.sliderTrack}>
-              <Slider
-                value={highlightOpacityPercent}
-                min={0}
-                max={100}
-                step={5}
-                tooltip
-                formatter={formatOpacityPercent}
-                aria-label={translate("highlightOpacityLabel")}
-                onChange={handleHighlightOpacityChange}
-                css={styles.sliderControl}
-              />
-              <div css={styles.sliderValue} role="status" aria-live="polite">
-                {highlightOpacityLabel}
-              </div>
-            </div>
+          <div css={styles.description}>
+            {translate("propertyDataSourceDescription")}
           </div>
-        </SettingRow>
 
-        <SettingRow
-          flow="wrap"
-          level={2}
-          label={translate("highlightOutlineWidthLabel")}
-        >
-          <div css={styles.sliderWrap}>
-            <div css={styles.sliderTrack}>
-              <Slider
-                value={outlineWidthValue}
-                min={0.5}
-                max={10}
-                step={0.5}
-                tooltip
-                formatter={formatOutlineWidthDisplay}
-                aria-label={translate("highlightOutlineWidthLabel")}
-                onChange={handleOutlineWidthChange}
-                css={styles.sliderControl}
-              />
-              <div css={styles.sliderValue} role="status" aria-live="polite">
-                {outlineWidthLabel}
-              </div>
-            </div>
+          <SettingRow
+            flow="wrap"
+            level={2}
+            label={translate("ownerDataSourceLabel")}
+          >
+            <DataSourceSelector
+              types={Immutable([DataSourceTypes.FeatureLayer])}
+              useDataSources={ownerSelectorValue}
+              mustUseDataSource
+              onChange={handleOwnerDataSourceChange}
+              widgetId={id}
+              hideTypeDropdown
+            />
+          </SettingRow>
+
+          <div css={styles.description}>
+            {translate("ownerDataSourceDescription")}
           </div>
-        </SettingRow>
 
-        <SettingRow
-          flow="wrap"
-          level={2}
-          label={translate("allowedHostsLabel")}
-        >
-          <TextArea
-            css={styles.fullWidth}
-            value={localAllowedHosts}
-            onChange={handleAllowedHostsChange}
-            onBlur={handleAllowedHostsBlur}
-            placeholder={translate("allowedHostsPlaceholder")}
-            aria-label={translate("allowedHostsLabel")}
-          />
-        </SettingRow>
-      </SettingSection>
+          {hasRequiredDataSources ? (
+            <div css={styles.description}>
+              {translate("dataSourcesDescription")}
+            </div>
+          ) : (
+            <SettingRow flow="wrap" level={2}>
+              <Alert
+                css={styles.fullWidth}
+                type="warning"
+                text={translate("dataSourcesDescription")}
+                closable={false}
+              />
+            </SettingRow>
+          )}
+        </SettingSection>
+      )}
 
-      <SettingSection title={translate("relationshipTitle")}>
-        <SettingRow
-          flow="no-wrap"
-          level={2}
-          label={translate("enableBatchOwnerQueryLabel")}
-        >
-          <Switch
-            css={styles.fullWidth}
-            checked={localBatchOwnerQuery}
-            onChange={handleBatchOwnerQueryChange}
-            aria-label={translate("enableBatchOwnerQueryLabel")}
-          />
-        </SettingRow>
-        <div css={styles.description}>
-          {translate("enableBatchOwnerQueryDescription")}
-        </div>
-
-        {localBatchOwnerQuery && (
-          <>
+      {canShowDisplayOptions && (
+        <SettingSection title={translate("displayOptionsTitle")}>
+          <CollapsablePanel
+            label={translate("panelDisplaySettings")}
+            type="default"
+            level={1}
+            role="group"
+            aria-label={translate("panelDisplaySettings")}
+          >
             <SettingRow
               flow="wrap"
               level={2}
-              label={translate("relationshipIdLabel")}
+              label={translate("maxResultsLabel")}
             >
               <NumericInput
                 css={styles.fullWidth}
-                value={parseInt(localRelationshipId, 10)}
-                min={0}
-                max={99}
-                onChange={handleRelationshipIdChange}
-                onBlur={handleRelationshipIdBlur}
-                aria-label={translate("relationshipIdLabel")}
-                title={translate("relationshipIdTooltip")}
-                aria-invalid={!!fieldErrors.relationshipId}
+                value={parseInt(localMaxResults, 10)}
+                min={1}
+                max={1000}
+                onChange={handleMaxResultsChange}
+                onBlur={handleMaxResultsBlur}
+                aria-label={translate("maxResultsLabel")}
+                aria-invalid={!!fieldErrors.maxResults}
               />
             </SettingRow>
-            {fieldErrors.relationshipId && (
+            {fieldErrors.maxResults && (
               <SettingRow flow="wrap" level={2}>
                 <Alert
                   css={styles.fullWidth}
                   type="error"
-                  text={fieldErrors.relationshipId}
+                  text={fieldErrors.maxResults}
                   closable={false}
                 />
               </SettingRow>
             )}
+
+            <SettingRow
+              flow="no-wrap"
+              level={2}
+              label={translate("enableToggleRemovalLabel")}
+            >
+              <Switch
+                css={styles.fullWidth}
+                checked={localToggleRemoval}
+                onChange={handleToggleRemovalChange}
+                aria-label={translate("enableToggleRemovalLabel")}
+              />
+            </SettingRow>
+
+            <SettingRow
+              flow="no-wrap"
+              level={2}
+              label={translate("enablePIIMaskingLabel")}
+            >
+              <Switch
+                css={styles.fullWidth}
+                checked={localPIIMasking}
+                onChange={handlePIIMaskingChange}
+                aria-label={translate("enablePIIMaskingLabel")}
+              />
+            </SettingRow>
+
+            <SettingRow
+              flow="no-wrap"
+              level={2}
+              label={translate("autoZoomOnSelectionLabel")}
+            >
+              <Switch
+                css={styles.fullWidth}
+                checked={localAutoZoom}
+                onChange={handleAutoZoomChange}
+                aria-label={translate("autoZoomOnSelectionLabel")}
+              />
+            </SettingRow>
             <div css={styles.description}>
-              {translate("relationshipIdDescription")}
+              {translate("autoZoomOnSelectionDescription")}
             </div>
-          </>
-        )}
-      </SettingSection>
+
+            <div css={styles.description}>
+              {translate("allowedHostsDescription")}
+            </div>
+
+            <SettingRow
+              flow="wrap"
+              level={2}
+              label={translate("allowedHostsLabel")}
+            >
+              <div css={styles.allowedHostInputRow}>
+                <TextInput
+                  css={styles.allowedHostInput}
+                  value={localAllowedHostInput}
+                  onChange={handleAllowedHostInputChange}
+                  onKeyDown={handleAllowedHostInputKeyDown}
+                  placeholder={translate("allowedHostsPlaceholder")}
+                  aria-label={translate("allowedHostsLabel")}
+                  spellCheck={false}
+                />
+                <Button
+                  type="tertiary"
+                  icon
+                  onClick={handleAddAllowedHost}
+                  title={translate("addAllowedHostLabel")}
+                  aria-label={translate("addAllowedHostLabel")}
+                  disabled={!canAddAllowedHost}
+                >
+                  <SVG src={addIcon} size={16} />
+                </Button>
+              </div>
+            </SettingRow>
+
+            <SettingRow
+              flow="wrap"
+              level={2}
+              label={translate("allowedHostsListLabel")}
+            >
+              <div css={styles.allowedHostList}>
+                {localAllowedHostsList.length > 0 ? (
+                  localAllowedHostsList.map((host) => (
+                    <div css={styles.allowedHostListRow} key={host}>
+                      <TextInput
+                        css={styles.allowedHostListInput}
+                        value={host}
+                        readOnly
+                        borderless
+                        spellCheck={false}
+                        aria-label={`${translate("allowedHostsListLabel")}: ${host}`}
+                      />
+                      <Button
+                        type="tertiary"
+                        icon
+                        onClick={() => handleRemoveAllowedHost(host)}
+                        title={translate("removeAllowedHostLabel")}
+                        aria-label={translate("removeAllowedHostLabel")}
+                      >
+                        <SVG src={removeIcon} size={16} />
+                      </Button>
+                    </div>
+                  ))
+                ) : (
+                  <div
+                    css={styles.description}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {translate("allowedHostsEmptyHint")}
+                  </div>
+                )}
+              </div>
+            </SettingRow>
+          </CollapsablePanel>
+
+          <CollapsablePanel
+            label={translate("panelHighlightSettings")}
+            type="default"
+            level={1}
+            role="group"
+            aria-label={translate("panelHighlightSettings")}
+          >
+            <div css={styles.description}>
+              {translate("highlightOptionsDescription")}
+            </div>
+
+            <SettingRow
+              flow="wrap"
+              level={2}
+              label={translate("highlightColorLabel")}
+            >
+              <ColorPicker
+                css={styles.fullWidth}
+                color={localHighlightColor}
+                onChange={handleHighlightColorChange}
+                aria-label={translate("highlightColorLabel")}
+              />
+            </SettingRow>
+
+            <SettingRow
+              flow="wrap"
+              level={2}
+              label={translate("highlightOpacityLabel")}
+            >
+              <div css={styles.sliderWrap}>
+                <div css={styles.sliderTrack}>
+                  <Slider
+                    value={highlightOpacityPercent}
+                    min={0}
+                    max={100}
+                    step={5}
+                    tooltip
+                    formatter={formatOpacityPercent}
+                    aria-label={translate("highlightOpacityLabel")}
+                    onChange={handleHighlightOpacityChange}
+                    css={styles.sliderControl}
+                  />
+                  <div
+                    css={styles.sliderValue}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {highlightOpacityLabel}
+                  </div>
+                </div>
+              </div>
+            </SettingRow>
+
+            <SettingRow
+              flow="wrap"
+              level={2}
+              label={translate("highlightOutlineWidthLabel")}
+            >
+              <div css={styles.sliderWrap}>
+                <div css={styles.sliderTrack}>
+                  <Slider
+                    value={outlineWidthValue}
+                    min={0.5}
+                    max={10}
+                    step={0.5}
+                    tooltip
+                    formatter={formatOutlineWidthDisplay}
+                    aria-label={translate("highlightOutlineWidthLabel")}
+                    onChange={handleOutlineWidthChange}
+                    css={styles.sliderControl}
+                  />
+                  <div
+                    css={styles.sliderValue}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {outlineWidthLabel}
+                  </div>
+                </div>
+              </div>
+            </SettingRow>
+          </CollapsablePanel>
+        </SettingSection>
+      )}
+
+      {canShowRelationshipSettings && (
+        <SettingSection title={translate("relationshipTitle")}>
+          <SettingRow
+            flow="no-wrap"
+            level={2}
+            label={translate("enableBatchOwnerQueryLabel")}
+          >
+            <Switch
+              css={styles.fullWidth}
+              checked={localBatchOwnerQuery}
+              onChange={handleBatchOwnerQueryChange}
+              aria-label={translate("enableBatchOwnerQueryLabel")}
+            />
+          </SettingRow>
+          <div css={styles.description}>
+            {translate("enableBatchOwnerQueryDescription")}
+          </div>
+
+          {localBatchOwnerQuery && (
+            <>
+              <SettingRow
+                flow="wrap"
+                level={2}
+                label={translate("relationshipIdLabel")}
+              >
+                <NumericInput
+                  css={styles.fullWidth}
+                  value={parseInt(localRelationshipId, 10)}
+                  min={0}
+                  max={99}
+                  onChange={handleRelationshipIdChange}
+                  onBlur={handleRelationshipIdBlur}
+                  aria-label={translate("relationshipIdLabel")}
+                  title={translate("relationshipIdTooltip")}
+                  aria-invalid={!!fieldErrors.relationshipId}
+                />
+              </SettingRow>
+              {fieldErrors.relationshipId && (
+                <SettingRow flow="wrap" level={2}>
+                  <Alert
+                    css={styles.fullWidth}
+                    type="error"
+                    text={fieldErrors.relationshipId}
+                    closable={false}
+                  />
+                </SettingRow>
+              )}
+              <div css={styles.description}>
+                {translate("relationshipIdDescription")}
+              </div>
+            </>
+          )}
+        </SettingSection>
+      )}
     </>
   )
 }
