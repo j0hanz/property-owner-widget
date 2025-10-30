@@ -26,7 +26,6 @@ import {
   usePopupManager,
   useMapViewLifecycle,
   useAbortControllerPool,
-  useDebouncedMapClick,
 } from "../shared/hooks"
 import {
   queryPropertyByPoint,
@@ -174,7 +173,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const requestIdRef = React.useRef(0)
 
   const [state, setState] = React.useState<PropertyWidgetState>({
-    loading: false,
     error: null,
     selectedProperties: [],
   })
@@ -288,7 +286,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       return
     }
 
-    setState((prev) => ({ ...prev, loading: true, error: null }))
+    setState((prev) => ({ ...prev, error: null }))
 
     const controller = getController()
     try {
@@ -300,7 +298,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       )
 
       if (controller.signal.aborted) {
-        setState((prev) => ({ ...prev, loading: false }))
         return
       }
 
@@ -311,8 +308,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       await view.goTo(extent.expand(1.2), { duration: 1000 })
 
-      setState((prev) => ({ ...prev, loading: false }))
-
       trackEvent({
         category: "Navigation",
         action: "zoom_to_results",
@@ -320,10 +315,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       })
     } catch (error) {
       if (isAbortError(error)) {
-        setState((prev) => ({ ...prev, loading: false }))
         return
       }
-      setError(ErrorType.QUERY_ERROR, translate("errorQueryFailed"))
+      setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
       trackError("zoom_to_results", error)
     } finally {
       releaseController(controller)
@@ -334,7 +328,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     (type: ErrorType, message: string, details?: string) => {
       setState((prev) => ({
         ...prev,
-        loading: false,
         error: { type, message, details },
       }))
     }
@@ -385,7 +378,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       setState((prev) => ({
         ...prev,
-        loading: true,
         error: null,
       }))
 
@@ -414,7 +406,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             return
           }
           console.log("No property results returned from query")
-          setState((prev) => ({ ...prev, loading: false }))
           tracker.success()
           trackEvent({
             category: "Query",
@@ -505,7 +496,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           if (isStaleRequest()) {
             return
           }
-          setState((prev) => ({ ...prev, loading: false }))
           tracker.failure("aborted")
           return
         }
@@ -568,7 +558,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
           return {
             ...prev,
-            loading: false,
             selectedProperties: updatedRows,
           }
         })
@@ -606,7 +595,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           return
         }
         if (isAbortError(error)) {
-          setState((prev) => ({ ...prev, loading: false }))
           tracker.failure("aborted")
           return
         }
@@ -626,16 +614,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
   )
 
-  // Debounce map clicks to prevent rapid-fire queries
-  const debouncedMapClick = useDebouncedMapClick(handleMapClick)
-
   const { onActiveViewChange, getCurrentView } = useMapViewLifecycle({
     modules,
     ensureGraphicsLayer,
     destroyGraphicsLayer,
     disablePopup,
     restorePopup,
-    onMapClick: debouncedMapClick,
+    onMapClick: handleMapClick,
   })
 
   hooks.useUnmount(() => {
@@ -701,7 +686,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             icon
             onClick={handleZoomToResults}
             title={translate("zoomToResults")}
-            disabled={state.selectedProperties.length === 0 || state.loading}
+            disabled={state.selectedProperties.length === 0}
             aria-label={translate("zoomToResults")}
           >
             <SVG src={zoomIcon} size={20} />
@@ -732,23 +717,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           </div>
         )}
 
-        {isConfigured && state.loading && (
-          <div
-            css={styles.emptyState}
-            role="status"
-            aria-live="polite"
-            aria-busy="true"
-          >
-            <Loading
-              css={styles.loadingState}
-              type={LoadingType.Donut}
-              width={100}
-              height={100}
-            />
-            <div css={styles.messageState}>{translate("loadingData")}</div>
-          </div>
-        )}
-
         {isConfigured && state.error && (
           <div css={styles.emptyState} role="alert" aria-live="assertive">
             <Alert type="error" withIcon text={state.error.message} />
@@ -757,7 +725,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         )}
 
         {isConfigured &&
-          !state.loading &&
           !state.error &&
           state.selectedProperties.length === 0 && (
             <div css={styles.emptyState} role="status" aria-live="polite">
@@ -767,12 +734,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
                 width={100}
                 height={100}
               />
-              <div css={styles.messageState}>{translate("readyToSelect")}</div>
+              /* Lines 770-771 omitted */
             </div>
           )}
 
         {isConfigured &&
-          !state.loading &&
           !state.error &&
           state.selectedProperties.length > 0 && (
             <PropertyTable

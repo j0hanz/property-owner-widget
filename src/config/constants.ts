@@ -39,8 +39,5 @@ export const QUERY_DEDUPLICATION_TIMEOUT = 300
 // AbortController pool size for efficient cancellation management
 export const ABORT_CONTROLLER_POOL_SIZE = 10
 
-// Map click debounce timeout (ms) - prevents rapid-fire queries when user clicks quickly
-export const MAP_CLICK_DEBOUNCE_MS = 200
-
 export const PROPERTY_QUERY_CACHE = new Map<string, InflightQuery>()
 export const OWNER_QUERY_CACHE = new Map<string, InflightQuery>()

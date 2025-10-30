@@ -346,31 +346,6 @@ export const useMapViewLifecycle = (params: {
   }
 }
 
-export const useDebouncedMapClick = (
-  callback: (event: __esri.ViewClickEvent) => Promise<void>
-) => {
-  const [debouncedCallback, setDebouncedCallback] = React.useState<
-    ((event: __esri.ViewClickEvent) => Promise<void>) | null
-  >(null)
-  const [promiseUtils, setPromiseUtils] = React.useState<any>(null)
-
-  hooks.useEffectOnce(() => {
-    loadArcGISJSAPIModules(["esri/core/promiseUtils"]).then(
-      ([loadedPromiseUtils]) => {
-        setPromiseUtils(loadedPromiseUtils)
-      }
-    )
-  })
-
-  hooks.useUpdateEffect(() => {
-    if (promiseUtils && callback) {
-      setDebouncedCallback(() => promiseUtils.debounce(callback))
-    }
-  }, [promiseUtils, callback])
-
-  return debouncedCallback || callback
-}
-
 export const useStringConfigValue = (config: { [key: string]: any }) => {
   const configRef = hooks.useLatest(config)
   return hooks.useEventCallback((key: string, defaultValue = ""): string => {

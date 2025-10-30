@@ -816,7 +816,15 @@ const buildPropertyRows = (params: {
     errorNoDataAvailable: string
   }
 }): GridRowData[] => {
-  const { fnr, propertyAttrs, ownerFeatures, propertyGraphic, config, helpers, messages } = params
+  const {
+    fnr,
+    propertyAttrs,
+    ownerFeatures,
+    propertyGraphic,
+    config,
+    helpers,
+    messages,
+  } = params
 
   if (ownerFeatures.length > 0) {
     return ownerFeatures.map((ownerFeature) => {

@@ -83,7 +83,6 @@ export interface ErrorState {
 }
 
 export interface PropertyWidgetState {
-  loading: boolean
   error: ErrorState | null
   selectedProperties: GridRowData[]
 }
