@@ -35,6 +35,7 @@ export interface OwnerAttributes {
   POSTADR?: string
   ANDEL?: string
   ORGNR?: string
+  AGARLISTA?: string
   [key: string]: any
 }
 

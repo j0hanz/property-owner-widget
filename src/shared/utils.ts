@@ -57,6 +57,31 @@ export const formatOwnerInfo = (
   maskPII: boolean,
   unknownOwnerText: string
 ): string => {
+  // Check if this is a combined property/owner layer with AGARLISTA field
+  if (owner.AGARLISTA && typeof owner.AGARLISTA === "string") {
+    const agarLista = sanitizeText(owner.AGARLISTA)
+    // AGARLISTA contains pre-formatted owner info, optionally mask it
+    if (maskPII && agarLista) {
+      // Split by semicolon for multiple owners, mask each
+      return agarLista
+        .split(";")
+        .map((ownerEntry) => {
+          const trimmed = ownerEntry.trim()
+          // Try to extract name before organization number
+          const match = trimmed.match(/^(.+?)\s*\(([^)]+)\)\s*$/)
+          if (match) {
+            const name = match[1].trim()
+            const orgNr = match[2].trim()
+            return `${maskName(name)} (${orgNr})`
+          }
+          return maskName(trimmed)
+        })
+        .join("; ")
+    }
+    return agarLista
+  }
+
+  // Original logic for separate owner layer with NAMN/BOSTADR fields
   const rawName = sanitizeText(owner.NAMN || "") || unknownOwnerText
   const namePart =
     maskPII && rawName !== unknownOwnerText ? maskName(rawName) : rawName
