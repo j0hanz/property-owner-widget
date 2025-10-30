@@ -37,6 +37,14 @@ const Setting = (
 
   const handleDataSourceChange = hooks.useEventCallback(
     (useDataSources: UseDataSource[]) => {
+      console.log("handleDataSourceChange called:", {
+        count: useDataSources?.length,
+        dataSources: useDataSources?.map((ds) => ({
+          id: ds?.dataSourceId,
+          rootId: ds?.rootDataSourceId,
+        })),
+      })
+
       if (!useDataSources || useDataSources.length < 2) {
         console.log("Both property and owner data sources are required")
         return
@@ -45,10 +53,18 @@ const Setting = (
       const propertyDs = useDataSources[0]
       const ownerDs = useDataSources[1]
 
+      console.log("Property DS:", propertyDs?.dataSourceId)
+      console.log("Owner DS:", ownerDs?.dataSourceId)
+
       if (!propertyDs?.dataSourceId || !ownerDs?.dataSourceId) {
         console.log("Invalid data source selection - both must have IDs")
         return
       }
+
+      console.log("Saving config with IDs:", {
+        propertyDataSourceId: propertyDs.dataSourceId,
+        ownerDataSourceId: ownerDs.dataSourceId,
+      })
 
       onSettingChange({
         id,
