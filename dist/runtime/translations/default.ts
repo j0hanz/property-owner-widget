@@ -14,7 +14,7 @@ export default {
     "Widget is not configured. Please configure data sources in settings.",
   readyToSelect: "Click on the map to select a property",
   columnFastighet: "Property",
-  columnOwner: "Owner & Address",
+  columnAddress: "Address",
   actions: "Actions",
   errorTitle: "Error",
   errorModuleTitle: "Module Error",

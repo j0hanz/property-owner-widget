@@ -35,48 +35,19 @@ const Setting = (
     }
   )
 
-  const handlePropertyDataSourceChange = hooks.useEventCallback(
+  const handleDataSourceChange = hooks.useEventCallback(
     (useDataSources: UseDataSource[]) => {
-      const propertyDs = useDataSources?.[0]
-      if (!propertyDs?.dataSourceId) {
+      const selectedDs = useDataSources?.[0]
+      if (!selectedDs?.dataSourceId) {
         return
       }
 
-      const existingOwnerDs = props.useDataSources?.find(
-        (ds) => ds.dataSourceId === config.ownerDataSourceId
-      )
-
-      const newUseDataSources = existingOwnerDs
-        ? [propertyDs, existingOwnerDs]
-        : [propertyDs]
-
       onSettingChange({
         id,
-        useDataSources: newUseDataSources,
-        config: config.set("propertyDataSourceId", propertyDs.dataSourceId),
-      })
-    }
-  )
-
-  const handleOwnerDataSourceChange = hooks.useEventCallback(
-    (useDataSources: UseDataSource[]) => {
-      const ownerDs = useDataSources?.[0]
-      if (!ownerDs?.dataSourceId) {
-        return
-      }
-
-      const existingPropertyDs = props.useDataSources?.find(
-        (ds) => ds.dataSourceId === config.propertyDataSourceId
-      )
-
-      const newUseDataSources = existingPropertyDs
-        ? [existingPropertyDs, ownerDs]
-        : [ownerDs]
-
-      onSettingChange({
-        id,
-        useDataSources: newUseDataSources,
-        config: config.set("ownerDataSourceId", ownerDs.dataSourceId),
+        useDataSources: [selectedDs],
+        config: config
+          .set("propertyDataSourceId", selectedDs.dataSourceId)
+          .set("ownerDataSourceId", selectedDs.dataSourceId),
       })
     }
   )
@@ -141,11 +112,7 @@ const Setting = (
       </SettingSection>
 
       <SettingSection title={translate("dataSourcesTitle")}>
-        <SettingRow
-          flow="wrap"
-          level={2}
-          label={translate("propertyLayerLabel")}
-        >
+        <SettingRow flow="wrap" level={2} label={translate("dataSourceLabel")}>
           <DataSourceSelector
             types={Immutable([DataSourceTypes.FeatureLayer])}
             useDataSources={
@@ -158,26 +125,7 @@ const Setting = (
                 : Immutable([])
             }
             mustUseDataSource
-            onChange={handlePropertyDataSourceChange}
-            widgetId={id}
-            hideTypeDropdown
-          />
-        </SettingRow>
-
-        <SettingRow flow="wrap" level={2} label={translate("ownerLayerLabel")}>
-          <DataSourceSelector
-            types={Immutable([DataSourceTypes.FeatureLayer])}
-            useDataSources={
-              config.ownerDataSourceId && props.useDataSources
-                ? Immutable(
-                    props.useDataSources.filter(
-                      (ds) => ds.dataSourceId === config.ownerDataSourceId
-                    )
-                  )
-                : Immutable([])
-            }
-            mustUseDataSource
-            onChange={handleOwnerDataSourceChange}
+            onChange={handleDataSourceChange}
             widgetId={id}
             hideTypeDropdown
           />

@@ -16,7 +16,7 @@ System.register([], function (e) {
         widgetNotConfigured: "Konfigurera widgeten för att börja använda den",
         readyToSelect: "Klicka på kartan för att välja en fastighet",
         columnFastighet: "Fastighet",
-        columnOwner: "Ägare & Adress",
+        columnAddress: "Adress",
         actions: "Åtgärder",
         errorTitle: "Fel",
         errorModuleTitle: "Modulfel",

@@ -722,7 +722,6 @@ const processBatchOfProperties = async (params: {
         helpers: {
           createRowId: helpers.createRowId,
           formatPropertyWithShare: helpers.formatPropertyWithShare,
-          formatOwnerInfo: helpers.formatOwnerInfo,
         },
         messages,
       })
@@ -760,7 +759,6 @@ const processBatchOfProperties = async (params: {
       helpers: {
         createRowId: helpers.createRowId,
         formatPropertyWithShare: helpers.formatPropertyWithShare,
-        formatOwnerInfo: helpers.formatOwnerInfo,
       },
       messages,
     })
@@ -804,11 +802,6 @@ const buildPropertyRows = (params: {
   helpers: {
     createRowId: (fnr: string | number, objectId: number) => string
     formatPropertyWithShare: (property: string, share?: string) => string
-    formatOwnerInfo: (
-      owner: any,
-      maskPII: boolean,
-      unknownOwnerText: string
-    ) => string
   }
   messages: {
     unknownOwner: string
@@ -816,16 +809,7 @@ const buildPropertyRows = (params: {
     errorNoDataAvailable: string
   }
 }): GridRowData[] => {
-  const {
-    fnr,
-    propertyAttrs,
-    ownerFeatures,
-    queryFailed,
-    propertyGraphic,
-    config,
-    helpers,
-    messages,
-  } = params
+  const { fnr, propertyAttrs, ownerFeatures, propertyGraphic, helpers } = params
 
   if (ownerFeatures.length > 0) {
     return ownerFeatures.map((ownerFeature) => {
@@ -844,11 +828,7 @@ const buildPropertyRows = (params: {
           attrs?.FASTIGHET || "",
           attrs?.ANDEL || ""
         ),
-        bostadr: helpers.formatOwnerInfo(
-          attrs || {},
-          config.enablePIIMasking,
-          messages.unknownOwner
-        ),
+        bostadr: attrs?.BOSTADR || propertyAttrs?.BOSTADR || "",
         graphic: propertyGraphic,
         createRowId: helpers.createRowId,
       })
@@ -861,9 +841,7 @@ const buildPropertyRows = (params: {
       objectId: propertyAttrs.OBJECTID,
       uuidFastighet: propertyAttrs.UUID_FASTIGHET,
       fastighet: propertyAttrs.FASTIGHET,
-      bostadr: queryFailed
-        ? messages.errorOwnerQueryFailed
-        : messages.errorNoDataAvailable,
+      bostadr: propertyAttrs?.BOSTADR || "",
       graphic: propertyGraphic,
       createRowId: helpers.createRowId,
     }),

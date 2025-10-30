@@ -6,13 +6,10 @@ export default {
     "Select a map widget to enable property querying by clicking on the map. The widget will listen for map clicks and query property information at the clicked location.",
   dataSourcesTitle: "Data sources",
   dataSourcesDescription:
-    "Select two feature layers: first for property parcels, second for ownership information. Both layers must use the FNR field to relate properties to owners.",
-  propertyLayerLabel: "Property layer URL",
-  propertyLayerTooltip:
-    "Portal item or service URL that exposes property parcel features.",
-  ownerLayerLabel: "Owner layer URL",
-  ownerLayerTooltip:
-    "Portal item or service URL that exposes property ownership attributes.",
+    "Select a feature layer containing property and owner information. The layer must have FNR field to identify properties and owner attributes (NAMN, BOSTADR, etc.).",
+  dataSourceLabel: "Feature layer",
+  dataSourceTooltip:
+    "Portal item or service URL that exposes property and owner information.",
   displayOptionsTitle: "Display options",
   maxResultsLabel: "Maximum results",
   maxResultsDescription:

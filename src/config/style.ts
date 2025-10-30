@@ -87,15 +87,8 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
         backgroundColor: color?.surface?.background,
       },
     }),
-    tbody: css({
-      display: "block",
-      overflowY: "auto",
-      flex: "1 1 0",
-    }),
+    tbody: css({}),
     tr: css({
-      display: "table",
-      width: "100%",
-      tableLayout: "fixed",
       "&:hover": {
         backgroundColor: color?.surface?.background,
       },

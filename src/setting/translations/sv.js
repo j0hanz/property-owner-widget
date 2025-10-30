@@ -9,13 +9,10 @@ System.register([], function (e) {
           "Välj en kartwidget för att aktivera fastighetsfrågor genom att klicka på kartan. Widgeten kommer att lyssna efter kartklick och hämta fastighetsinformation vid den klickade platsen.",
         dataSourcesTitle: "Datakällor",
         dataSourcesDescription:
-          "Välj två objektlager: först för fastighetstomter, därefter för ägarinformation. Båda lagren måste använda FNR-fältet för att koppla fastigheter till ägare.",
-        propertyLayerLabel: "URL till fastighetslager",
-        propertyLayerTooltip:
-          "Portal- eller tjänst-URL som innehåller fastighetsgeometrier.",
-        ownerLayerLabel: "URL till ägarlager",
-        ownerLayerTooltip:
-          "Portal- eller tjänst-URL som innehåller ägarattribut.",
+          "Välj ett objektlager som innehåller fastighets- och ägarinformation. Lagret måste ha FNR-fält för att identifiera fastigheter och ägarattribut (NAMN, BOSTADR, etc.).",
+        dataSourceLabel: "Objektlager",
+        dataSourceTooltip:
+          "Portal- eller tjänst-URL som innehåller fastighets- och ägarinformation.",
         displayOptionsTitle: "Visningsalternativ",
         maxResultsLabel: "Maximalt antal resultat",
         maxResultsDescription:

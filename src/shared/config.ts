@@ -34,7 +34,7 @@ export const createPropertyTableColumns = (params: {
     }),
     columnHelper.accessor("BOSTADR", {
       id: GRID_COLUMN_KEYS.BOSTADR,
-      header: () => translate("columnOwner"),
+      header: () => translate("columnAddress"),
       cell: (info) => info.getValue(),
       enableSorting: true,
       enableColumnFilter: true,
