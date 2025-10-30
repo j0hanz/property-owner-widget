@@ -92,8 +92,15 @@ export const queryPropertyByPoint = async (
         }
 
         console.log("Query parameters:", {
-          geometry: point,
-          spatialRef: point.spatialReference,
+          geometry: {
+            x: point.x,
+            y: point.y,
+            type: point.type,
+          },
+          spatialRef: {
+            wkid: point.spatialReference?.wkid,
+            wkt: point.spatialReference?.wkt,
+          },
           dataSourceId,
           dataSourceUrl: ds.url,
         })
