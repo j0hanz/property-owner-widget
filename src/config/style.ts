@@ -83,7 +83,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       cursor: "pointer",
       userSelect: "none",
       "&:hover": {
-        backgroundColor: borderColor,
+        backgroundColor: color?.surface?.background,
       },
     }),
     tbody: css({
@@ -96,7 +96,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       width: "100%",
       tableLayout: "fixed",
       "&:hover": {
-        backgroundColor: borderColor,
+        backgroundColor: color?.surface?.background,
       },
     }),
     td: css({
@@ -109,11 +109,6 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     sortIndicator: css({
       marginInlineStart: spacing?.(1),
       display: "inline-block",
-    }),
-    actionCell: css({
-      display: "flex",
-      justifyContent: "flex-end",
-      alignItems: "center",
     }),
     emptyState: css({
       ...centeredFlex,

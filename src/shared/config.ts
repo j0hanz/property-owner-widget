@@ -18,9 +18,8 @@ const columnHelper = createColumnHelper<GridRowData>()
 
 export const createPropertyTableColumns = (params: {
   translate: (key: string) => string
-  onRemove: (fnr: string | number) => void
 }): Array<ColumnDef<GridRowData, any>> => {
-  const { translate, onRemove } = params
+  const { translate } = params
 
   return [
     columnHelper.accessor("FASTIGHET", {
@@ -38,18 +37,6 @@ export const createPropertyTableColumns = (params: {
       enableSorting: true,
       enableColumnFilter: true,
       filterFn: "includesString",
-    }),
-    columnHelper.display({
-      id: "actions",
-      header: () => translate("actions"),
-      cell: (props) => ({
-        rowId: props.row.id,
-        fnr: props.row.original.FNR,
-        fastighet: props.row.original.FASTIGHET,
-        onRemove,
-      }),
-      enableSorting: false,
-      enableColumnFilter: false,
     }),
   ]
 }

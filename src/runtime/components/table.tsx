@@ -1,6 +1,5 @@
 /** @jsx jsx */
-import { React, jsx, hooks } from "jimu-core"
-import { Button } from "jimu-ui"
+import { React, jsx } from "jimu-core"
 import { useReactTable, flexRender } from "@tanstack/react-table"
 import type { SortingState, ColumnFiltersState } from "@tanstack/react-table"
 import type { PropertyTableProps } from "../../config/types"
@@ -35,17 +34,6 @@ export const PropertyTable = (props: PropertyTableProps) => {
   })
 
   const visibleRows = getVisibleRows(table)
-
-  const handleRemoveClick = hooks.useEventCallback((cellValue: any) => {
-    if (
-      cellValue &&
-      typeof cellValue === "object" &&
-      "onRemove" in cellValue &&
-      typeof cellValue.onRemove === "function"
-    ) {
-      cellValue.onRemove(cellValue.fnr)
-    }
-  })
 
   const renderSortIndicator = (isSorted: false | "asc" | "desc") => {
     if (!isSorted) return null
@@ -100,34 +88,11 @@ export const PropertyTable = (props: PropertyTableProps) => {
         <tbody css={styles.tbody}>
           {visibleRows.map((row) => (
             <tr key={row.id} css={styles.tr} role="row">
-              {row.getVisibleCells().map((cell) => {
-                const isActionCell = cell.column.id === "actions"
-                const cellValue = flexRender(
-                  cell.column.columnDef.cell,
-                  cell.getContext()
-                )
-
-                return (
-                  <td key={cell.id} css={styles.td} role="cell">
-                    {isActionCell &&
-                    typeof cellValue === "object" &&
-                    cellValue !== null ? (
-                      <div css={styles.actionCell}>
-                        <Button
-                          type="tertiary"
-                          size="sm"
-                          onClick={() => handleRemoveClick(cellValue as any)}
-                          aria-label={`${translate("removeProperty")} ${(cellValue as any).fastighet}`}
-                        >
-                          {translate("removeProperty")}
-                        </Button>
-                      </div>
-                    ) : (
-                      cellValue
-                    )}
-                  </td>
-                )
-              })}
+              {row.getVisibleCells().map((cell) => (
+                <td key={cell.id} css={styles.td} role="cell">
+                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>

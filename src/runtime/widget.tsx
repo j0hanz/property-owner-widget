@@ -187,7 +187,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const tableColumns = hooks.useEventCallback(() =>
     createPropertyTableColumns({
       translate,
-      onRemove: handleRemoveProperty,
     })
   )
 

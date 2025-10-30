@@ -477,7 +477,7 @@ const validatePropertyFeature = (
   propertyResult: any,
   extractFnr: (attrs: any) => string | number | null
 ): { fnr: string | number; attrs: any; graphic: __esri.Graphic } | null => {
-    console.log("validatePropertyFeature input:", {
+  console.log("validatePropertyFeature input:", {
     hasPropertyResult: !!propertyResult,
     hasFeatures: !!propertyResult?.features,
     featuresLength: propertyResult?.features?.length,
@@ -498,7 +498,7 @@ const validatePropertyFeature = (
   console.log("validatePropertyFeature attributes:", {
     attributeKeys: attrKeys,
     allAttributes: graphic.attributes,
-    attributePairs: attrKeys.map(k => `${k}: ${graphic.attributes[k]}`),
+    attributePairs: attrKeys.map((k) => `${k}: ${graphic.attributes[k]}`),
   })
 
   const fnr = extractFnr(graphic.attributes)
