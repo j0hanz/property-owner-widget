@@ -31,6 +31,7 @@ import type {
   PropertyWidgetState,
   GridRowData,
   SelectionGraphicsParams,
+  LoadingBlockProps,
 } from "../config/types"
 import { ErrorType } from "../config/enums"
 import { useWidgetStyles } from "../config/style"
@@ -40,6 +41,7 @@ import {
   usePopupManager,
   useMapViewLifecycle,
   useAbortControllerPool,
+  useDebouncedValue,
 } from "../shared/hooks"
 import {
   queryPropertyByPoint,
@@ -64,7 +66,11 @@ import {
   cleanupRemovedGraphics,
   isValidationFailure,
 } from "../shared/utils"
-import { HIGHLIGHT_COLOR_RGBA, OUTLINE_WIDTH } from "../config/constants"
+import {
+  HIGHLIGHT_COLOR_RGBA,
+  OUTLINE_WIDTH,
+  LOADING_VISIBILITY_DEBOUNCE_MS,
+} from "../config/constants"
 import {
   trackEvent,
   trackError,
@@ -107,6 +113,61 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
     console.log("syncSelectionGraphics: failed to sync graphics with state")
   }
 }
+
+const extractUseDataSourceId = (
+  useDataSource: ImmutableObject<UseDataSource> | null | undefined
+): string | null => {
+  if (!useDataSource) {
+    return null
+  }
+
+  const getId = (useDataSource as any)?.get
+  if (typeof getId === "function") {
+    return getId.call(useDataSource, "dataSourceId") ?? null
+  }
+
+  return (useDataSource as any)?.dataSourceId ?? null
+}
+
+const findUseDataSourceById = (
+  useDataSources: AllWidgetProps<IMConfig>["useDataSources"],
+  dataSourceId?: string
+): ImmutableObject<UseDataSource> | null => {
+  if (!dataSourceId || !useDataSources) {
+    return null
+  }
+
+  const collection = useDataSources as unknown as {
+    find: (
+      predicate: (candidate: ImmutableObject<UseDataSource>) => boolean
+    ) => ImmutableObject<UseDataSource> | undefined
+  }
+
+  if (typeof collection.find !== "function") {
+    return null
+  }
+
+  const match = collection.find((candidate) => {
+    if (!candidate) {
+      return false
+    }
+    return extractUseDataSourceId(candidate) === dataSourceId
+  })
+
+  return match ?? null
+}
+
+const LoadingBlock = ({ styles, translate, size = 32 }: LoadingBlockProps) => (
+  <div
+    css={styles.loadingInline}
+    role="status"
+    aria-live="polite"
+    aria-busy="true"
+  >
+    <Loading type={LoadingType.Donut} width={size} height={size} />
+    <div css={styles.loadingMessage}>{translate("loadingData")}</div>
+  </div>
+)
 
 // Error boundaries require class components in React (no functional equivalent)
 class PropertyWidgetErrorBoundary extends React.Component<
@@ -174,58 +235,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     })
   })
 
-  const getUseDataSourceId = (
-    useDataSource: ImmutableObject<UseDataSource> | null | undefined
-  ): string | null => {
-    if (!useDataSource) {
-      return null
-    }
-
-    const getId = (useDataSource as any)?.get
-    if (typeof getId === "function") {
-      return getId.call(useDataSource, "dataSourceId") ?? null
-    }
-
-    return (useDataSource as any)?.dataSourceId ?? null
-  }
-
-  const getUseDataSourceById = (
-    dataSourceId?: string
-  ): ImmutableObject<UseDataSource> | null => {
-    if (!dataSourceId || !props.useDataSources) {
-      return null
-    }
-
-    const collection = props.useDataSources as unknown as {
-      find: (
-        predicate: (candidate: ImmutableObject<UseDataSource>) => boolean
-      ) => ImmutableObject<UseDataSource> | undefined
-    }
-
-    if (typeof collection.find !== "function") {
-      return null
-    }
-
-    const match = collection.find((candidate) => {
-      if (!candidate) {
-        return false
-      }
-
-      const getId = (candidate as any)?.get
-      if (typeof getId === "function") {
-        return getId.call(candidate, "dataSourceId") === dataSourceId
-      }
-
-      return (candidate as any)?.dataSourceId === dataSourceId
-    })
-
-    return match ?? null
-  }
-
-  const propertyUseDataSource = getUseDataSourceById(
+  const propertyUseDataSource = findUseDataSourceById(
+    props.useDataSources,
     config.propertyDataSourceId
   )
-  const ownerUseDataSource = getUseDataSourceById(config.ownerDataSourceId)
+  const ownerUseDataSource = findUseDataSourceById(
+    props.useDataSources,
+    config.ownerDataSourceId
+  )
+  const propertyUseDataSourceId = extractUseDataSourceId(propertyUseDataSource)
+  const ownerUseDataSourceId = extractUseDataSourceId(ownerUseDataSource)
 
   const {
     modules,
@@ -252,6 +271,55 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const [state, setState] = React.useState<PropertyWidgetState>({
     error: null,
     selectedProperties: [],
+    isQueryInFlight: false,
+  })
+  const isMountedRef = React.useRef(true)
+
+  const debouncedQueryLoading = useDebouncedValue(
+    state.isQueryInFlight,
+    LOADING_VISIBILITY_DEBOUNCE_MS
+  )
+  const showQueryLoading = state.isQueryInFlight || debouncedQueryLoading
+  const hasSelectedProperties = state.selectedProperties.length > 0
+
+  const renderConfiguredContent = hooks.useEventCallback(() => {
+    if (state.error) {
+      return (
+        <div css={styles.emptyState} role="alert" aria-live="assertive">
+          <Alert type="error" withIcon text={state.error.message} />
+          {state.error.details && <div>{state.error.details}</div>}
+        </div>
+      )
+    }
+
+    if (hasSelectedProperties) {
+      return (
+        <>
+          <PropertyTable
+            data={state.selectedProperties}
+            columns={tableColumns()}
+            translate={translate}
+            styles={styles}
+          />
+          {showQueryLoading ? (
+            <LoadingBlock styles={styles} translate={translate} />
+          ) : null}
+        </>
+      )
+    }
+
+    if (showQueryLoading) {
+      return <LoadingBlock styles={styles} translate={translate} />
+    }
+
+    return (
+      <div css={styles.emptyState} role="status" aria-live="polite">
+        <SVG css={styles.svgState} src={mapSelect} width={100} height={100} />
+        <div css={styles.messageState}>
+          {translate("clickMapToSelectProperties")}
+        </div>
+      </div>
+    )
   })
 
   const maxResults = config.maxResults
@@ -355,6 +423,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         ...prev,
         selectedProperties: [],
         error: null,
+        isQueryInFlight: false,
       }
     })
   })
@@ -417,9 +486,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   const setError = hooks.useEventCallback(
     (type: ErrorType, message: string, details?: string) => {
+      if (!isMountedRef.current) {
+        return
+      }
       setState((prev) => ({
         ...prev,
         error: { type, message, details },
+        isQueryInFlight: false,
       }))
     }
   )
@@ -480,6 +553,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       setState((prev) => ({
         ...prev,
         error: null,
+        isQueryInFlight: true,
       }))
 
       const controller = getController()
@@ -497,7 +571,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           if (isStaleRequest()) {
             return
           }
-          setState((prev) => ({ ...prev, loading: false }))
           tracker.failure("aborted")
           return
         }
@@ -660,6 +733,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           return {
             ...prev,
             selectedProperties: updatedRows,
+            isQueryInFlight: false,
           }
         })
 
@@ -710,6 +784,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         tracker.failure("query_error")
         trackError("property_query", error)
       } finally {
+        if (isMountedRef.current && !isStaleRequest()) {
+          setState((prev) => ({
+            ...prev,
+            isQueryInFlight: false,
+          }))
+        }
         releaseController(controller)
       }
     }
@@ -758,6 +838,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   ])
 
   hooks.useUnmount(() => {
+    isMountedRef.current = false
     abortAll()
     clearQueryCache()
   })
@@ -820,8 +901,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         />
       ) : null}
       {ownerUseDataSource &&
-      getUseDataSourceId(ownerUseDataSource) !==
-        getUseDataSourceId(propertyUseDataSource) ? (
+      ownerUseDataSourceId !== propertyUseDataSourceId ? (
         <DataSourceComponent
           key={`${id}-owner-ds`}
           useDataSource={ownerUseDataSource}
@@ -851,8 +931,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           </Button>
         </div>
       </div>
-      <div css={styles.body} role="main">
-        {!isConfigured && (
+      <div
+        css={styles.body}
+        role="main"
+        aria-busy={showQueryLoading}
+        aria-live={showQueryLoading ? "polite" : "off"}
+      >
+        {!isConfigured ? (
           <div css={styles.emptyState} role="status" aria-live="polite">
             <SVG
               css={styles.svgState}
@@ -864,41 +949,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
               {translate("widgetNotConfigured")}
             </div>
           </div>
+        ) : (
+          renderConfiguredContent()
         )}
-
-        {isConfigured && state.error && (
-          <div css={styles.emptyState} role="alert" aria-live="assertive">
-            <Alert type="error" withIcon text={state.error.message} />
-            {state.error.details && <div>{state.error.details}</div>}
-          </div>
-        )}
-
-        {isConfigured &&
-          !state.error &&
-          state.selectedProperties.length === 0 && (
-            <div css={styles.emptyState} role="status" aria-live="polite">
-              <SVG
-                css={styles.svgState}
-                src={mapSelect}
-                width={100}
-                height={100}
-              />
-              <div css={styles.messageState}>
-                {translate("clickMapToSelectProperties")}
-              </div>
-            </div>
-          )}
-
-        {isConfigured &&
-          !state.error &&
-          state.selectedProperties.length > 0 && (
-            <PropertyTable
-              data={state.selectedProperties}
-              columns={tableColumns()}
-              translate={translate}
-              styles={styles}
-            />
-          )}
       </div>
 
       <div css={styles.footer}>

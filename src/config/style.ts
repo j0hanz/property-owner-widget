@@ -59,7 +59,11 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       },
       padding: spacing?.(1),
     }),
-    body: createFlex("column", { flex: "1 1 0", overflow: "auto" }),
+    body: createFlex("column", {
+      flex: "1 1 0",
+      overflow: "auto",
+      position: "relative",
+    }),
     tableContainer: createFlex("column", {
       flex: "1 1 0",
       overflow: "hidden",
@@ -117,6 +121,18 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       fontWeight: typography?.label2?.fontWeight,
       textAlign: "center",
       opacity: 0.7,
+    }),
+    loadingInline: css({
+      marginBlockStart: spacing?.(2),
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing?.(1),
+    }),
+    loadingMessage: css({
+      fontFamily: typography?.body1?.fontFamily,
+      fontSize: typography?.body1?.fontSize,
     }),
     loadingState: css({
       ...centeredFlex,

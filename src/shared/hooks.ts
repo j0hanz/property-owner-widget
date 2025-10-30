@@ -53,6 +53,22 @@ export const useEsriModules = () => {
   return { modules, loading, error }
 }
 
+export const useDebouncedValue = <T>(value: T, delay: number) => {
+  const [debouncedValue, setDebouncedValue] = React.useState(value)
+
+  hooks.useEffectWithPreviousValues(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value)
+    }, delay)
+
+    return () => {
+      clearTimeout(handler)
+    }
+  }, [value, delay])
+
+  return debouncedValue
+}
+
 export const useAbortControllerPool = () => {
   const poolRef = React.useRef<AbortController[]>([])
   const activeControllersRef = React.useRef<Set<AbortController>>(new Set())

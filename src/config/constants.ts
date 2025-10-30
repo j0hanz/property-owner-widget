@@ -40,5 +40,8 @@ export const QUERY_DEDUPLICATION_TIMEOUT = 300
 // AbortController pool size for efficient cancellation management
 export const ABORT_CONTROLLER_POOL_SIZE = 10
 
+// Debounce duration (ms) for stabilizing loading indicator visibility
+export const LOADING_VISIBILITY_DEBOUNCE_MS = 200
+
 export const PROPERTY_QUERY_CACHE = new Map<string, InflightQuery>()
 export const OWNER_QUERY_CACHE = new Map<string, InflightQuery>()

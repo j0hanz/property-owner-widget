@@ -587,7 +587,7 @@ const validateAndDeduplicateProperties = (
   extractFnr: (attrs: any) => string | number | null,
   maxResults?: number
 ): Array<{ fnr: string | number; attrs: any; graphic: __esri.Graphic }> => {
-  const processedFnrs = new Set<string | number>()
+  const processedFnrs = new Set<string>()
   const validatedProperties: Array<{
     fnr: string | number
     attrs: any
@@ -596,11 +596,16 @@ const validateAndDeduplicateProperties = (
 
   for (const propertyResult of propertyResults) {
     const validated = validatePropertyFeature(propertyResult, extractFnr)
-    if (validated && !processedFnrs.has(validated.fnr)) {
-      processedFnrs.add(validated.fnr)
-      validatedProperties.push(validated)
-      if (maxResults && validatedProperties.length >= maxResults) break
+    if (!validated) {
+      continue
     }
+    const fnrKey = normalizeFnrKey(validated.fnr)
+    if (processedFnrs.has(fnrKey)) {
+      continue
+    }
+    processedFnrs.add(fnrKey)
+    validatedProperties.push(validated)
+    if (maxResults && validatedProperties.length >= maxResults) break
   }
 
   return validatedProperties
