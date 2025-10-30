@@ -15,25 +15,145 @@ import {
   MapWidgetSelector,
 } from "jimu-ui/advanced/setting-components"
 import { DataSourceSelector } from "jimu-ui/advanced/data-source-selector"
-import { NumericInput, Switch, TextArea } from "jimu-ui"
+import { NumericInput, Switch, TextArea, Alert } from "jimu-ui"
 import type { IMConfig } from "../config/types"
 import { useSettingStyles } from "../config/style"
+import {
+  useBooleanConfigValue,
+  useUpdateConfig,
+  useDebounce,
+} from "../shared/hooks"
+
+interface FieldErrors {
+  [key: string]: string | undefined
+}
 
 const Setting = (
   props: AllWidgetSettingProps<IMConfig>
 ): React.ReactElement => {
-  const { config, id, onSettingChange } = props
+  const { config, id, onSettingChange, useMapWidgetIds } = props
   const translate = hooks.useTranslation()
   const styles = useSettingStyles()
 
-  const updateConfigField = hooks.useEventCallback(
-    <K extends keyof IMConfig>(field: K, value: IMConfig[K]) => {
-      onSettingChange({
-        id,
-        config: config.set(field, value),
-      })
+  const getBooleanConfig = useBooleanConfigValue(config)
+  const updateConfig = useUpdateConfig(id, config, onSettingChange)
+
+  const [localMaxResults, setLocalMaxResults] = React.useState<string>(() =>
+    String(config.maxResults || 50)
+  )
+  const [localToggleRemoval, setLocalToggleRemoval] = React.useState(() =>
+    getBooleanConfig("enableToggleRemoval")
+  )
+  const [localPIIMasking, setLocalPIIMasking] = React.useState(() =>
+    getBooleanConfig("enablePIIMasking")
+  )
+  const [localBatchOwnerQuery, setLocalBatchOwnerQuery] = React.useState(() =>
+    getBooleanConfig("enableBatchOwnerQuery", false)
+  )
+  const [localRelationshipId, setLocalRelationshipId] = React.useState<string>(
+    () => String(config.relationshipId ?? 0)
+  )
+  const [localAllowedHosts, setLocalAllowedHosts] = React.useState(() =>
+    (config.allowedHosts || []).join("\n")
+  )
+
+  const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
+
+  const validateMaxResults = hooks.useEventCallback(
+    (value: string): boolean => {
+      const num = parseInt(value, 10)
+      if (isNaN(num) || num < 1 || num > 1000) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          maxResults: translate("errorMaxResultsInvalid"),
+        }))
+        return false
+      }
+      setFieldErrors((prev) => ({ ...prev, maxResults: undefined }))
+      return true
     }
   )
+
+  const validateRelationshipId = hooks.useEventCallback(
+    (value: string): boolean => {
+      const num = parseInt(value, 10)
+      if (isNaN(num) || num < 0 || num > 99) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          relationshipId: translate("errorRelationshipIdInvalid"),
+        }))
+        return false
+      }
+      setFieldErrors((prev) => ({ ...prev, relationshipId: undefined }))
+      return true
+    }
+  )
+
+  const debouncedMaxResultsValidation = useDebounce(validateMaxResults, 500)
+
+  const handleMaxResultsChange = hooks.useEventCallback((value: number) => {
+    setLocalMaxResults(String(value))
+    debouncedMaxResultsValidation(String(value))
+  })
+
+  const handleMaxResultsBlur = hooks.useEventCallback(() => {
+    debouncedMaxResultsValidation.cancel()
+    const isValid = validateMaxResults(localMaxResults)
+    if (isValid) {
+      const num = parseInt(localMaxResults, 10)
+      updateConfig("maxResults", num)
+    }
+  })
+
+  const handleToggleRemovalChange = hooks.useEventCallback(
+    (evt: React.ChangeEvent<HTMLInputElement>) => {
+      const checked = evt.target.checked
+      setLocalToggleRemoval(checked)
+      updateConfig("enableToggleRemoval", checked)
+    }
+  )
+
+  const handlePIIMaskingChange = hooks.useEventCallback(
+    (evt: React.ChangeEvent<HTMLInputElement>) => {
+      const checked = evt.target.checked
+      setLocalPIIMasking(checked)
+      updateConfig("enablePIIMasking", checked)
+    }
+  )
+
+  const handleBatchOwnerQueryChange = hooks.useEventCallback(
+    (evt: React.ChangeEvent<HTMLInputElement>) => {
+      const checked = evt.target.checked
+      setLocalBatchOwnerQuery(checked)
+      updateConfig("enableBatchOwnerQuery", checked)
+    }
+  )
+
+  const handleRelationshipIdChange = hooks.useEventCallback((value: number) => {
+    setLocalRelationshipId(String(value))
+  })
+
+  const handleRelationshipIdBlur = hooks.useEventCallback(() => {
+    const isValid = validateRelationshipId(localRelationshipId)
+    if (isValid) {
+      const num = parseInt(localRelationshipId, 10)
+      updateConfig("relationshipId", num)
+    }
+  })
+
+  const handleAllowedHostsChange = hooks.useEventCallback(
+    (evt: React.ChangeEvent<HTMLTextAreaElement>) => {
+      setLocalAllowedHosts(evt.target.value)
+    }
+  )
+
+  const handleAllowedHostsBlur = hooks.useEventCallback(() => {
+    const hosts = localAllowedHosts
+      .split("\n")
+      .map((h) => h.trim())
+      .filter(Boolean)
+    updateConfig("allowedHosts", hosts)
+  })
 
   const handleDataSourceChange = hooks.useEventCallback(
     (useDataSources: UseDataSource[]) => {
@@ -52,44 +172,6 @@ const Setting = (
     }
   )
 
-  const handleMaxResultsChange = hooks.useEventCallback((value: number) => {
-    const validValue = Math.max(1, Math.min(1000, Math.floor(value)))
-    updateConfigField("maxResults", validValue)
-  })
-
-  const handleToggleRemovalChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      updateConfigField("enableToggleRemoval", evt.target.checked)
-    }
-  )
-
-  const handlePIIMaskingChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      updateConfigField("enablePIIMasking", evt.target.checked)
-    }
-  )
-
-  const handleAllowedHostsChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const hosts = evt.target.value
-        .split("\n")
-        .map((h) => h.trim())
-        .filter(Boolean)
-      updateConfigField("allowedHosts", hosts)
-    }
-  )
-
-  const handleBatchOwnerQueryChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      updateConfigField("enableBatchOwnerQuery", evt.target.checked)
-    }
-  )
-
-  const handleRelationshipIdChange = hooks.useEventCallback((value: number) => {
-    const validValue = Math.max(0, Math.floor(value))
-    updateConfigField("relationshipId", validValue)
-  })
-
   const handleMapWidgetChange = hooks.useEventCallback(
     (useMapWidgetIds: string[]) => {
       onSettingChange({
@@ -98,6 +180,36 @@ const Setting = (
       })
     }
   )
+
+  hooks.useUpdateEffect(() => {
+    setLocalMaxResults(String(config.maxResults || 50))
+  }, [config.maxResults])
+
+  hooks.useUpdateEffect(() => {
+    setLocalToggleRemoval(getBooleanConfig("enableToggleRemoval"))
+  }, [config.enableToggleRemoval])
+
+  hooks.useUpdateEffect(() => {
+    setLocalPIIMasking(getBooleanConfig("enablePIIMasking"))
+  }, [config.enablePIIMasking])
+
+  hooks.useUpdateEffect(() => {
+    setLocalBatchOwnerQuery(getBooleanConfig("enableBatchOwnerQuery", false))
+  }, [config.enableBatchOwnerQuery])
+
+  hooks.useUpdateEffect(() => {
+    setLocalRelationshipId(String(config.relationshipId ?? 0))
+  }, [config.relationshipId])
+
+  hooks.useUpdateEffect(() => {
+    setLocalAllowedHosts((config.allowedHosts || []).join("\n"))
+  }, [config.allowedHosts])
+
+  hooks.useEffectOnce(() => {
+    if (useMapWidgetIds && useMapWidgetIds.length > 0) {
+      console.log("Property Widget: Map configured on mount", useMapWidgetIds)
+    }
+  })
 
   return (
     <>
@@ -139,13 +251,24 @@ const Setting = (
       <SettingSection title={translate("displayOptionsTitle")}>
         <SettingRow flow="wrap" level={2} label={translate("maxResultsLabel")}>
           <NumericInput
-            value={config.maxResults}
+            value={parseInt(localMaxResults, 10)}
             min={1}
             max={1000}
             onChange={handleMaxResultsChange}
+            onBlur={handleMaxResultsBlur}
             aria-label={translate("maxResultsLabel")}
+            aria-invalid={!!fieldErrors.maxResults}
           />
         </SettingRow>
+        {fieldErrors.maxResults && (
+          <SettingRow flow="wrap" level={2}>
+            <Alert
+              type="error"
+              text={fieldErrors.maxResults}
+              closable={false}
+            />
+          </SettingRow>
+        )}
 
         <SettingRow
           flow="no-wrap"
@@ -153,7 +276,7 @@ const Setting = (
           label={translate("enableToggleRemovalLabel")}
         >
           <Switch
-            checked={config.enableToggleRemoval}
+            checked={localToggleRemoval}
             onChange={handleToggleRemovalChange}
             aria-label={translate("enableToggleRemovalLabel")}
           />
@@ -165,7 +288,7 @@ const Setting = (
           label={translate("enablePIIMaskingLabel")}
         >
           <Switch
-            checked={config.enablePIIMasking}
+            checked={localPIIMasking}
             onChange={handlePIIMaskingChange}
             aria-label={translate("enablePIIMaskingLabel")}
           />
@@ -177,8 +300,9 @@ const Setting = (
           label={translate("allowedHostsLabel")}
         >
           <TextArea
-            value={(config.allowedHosts || []).join("\n")}
+            value={localAllowedHosts}
             onChange={handleAllowedHostsChange}
+            onBlur={handleAllowedHostsBlur}
             placeholder={translate("allowedHostsPlaceholder")}
             aria-label={translate("allowedHostsLabel")}
           />
@@ -192,7 +316,7 @@ const Setting = (
           label={translate("enableBatchOwnerQueryLabel")}
         >
           <Switch
-            checked={config.enableBatchOwnerQuery ?? false}
+            checked={localBatchOwnerQuery}
             onChange={handleBatchOwnerQueryChange}
             aria-label={translate("enableBatchOwnerQueryLabel")}
           />
@@ -201,7 +325,7 @@ const Setting = (
           {translate("enableBatchOwnerQueryDescription")}
         </div>
 
-        {config.enableBatchOwnerQuery && (
+        {localBatchOwnerQuery && (
           <>
             <SettingRow
               flow="wrap"
@@ -209,14 +333,25 @@ const Setting = (
               label={translate("relationshipIdLabel")}
             >
               <NumericInput
-                value={config.relationshipId ?? 0}
+                value={parseInt(localRelationshipId, 10)}
                 min={0}
                 max={99}
                 onChange={handleRelationshipIdChange}
+                onBlur={handleRelationshipIdBlur}
                 aria-label={translate("relationshipIdLabel")}
                 title={translate("relationshipIdTooltip")}
+                aria-invalid={!!fieldErrors.relationshipId}
               />
             </SettingRow>
+            {fieldErrors.relationshipId && (
+              <SettingRow flow="wrap" level={2}>
+                <Alert
+                  type="error"
+                  text={fieldErrors.relationshipId}
+                  closable={false}
+                />
+              </SettingRow>
+            )}
             <div css={styles.description}>
               {translate("relationshipIdDescription")}
             </div>

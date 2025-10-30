@@ -370,3 +370,122 @@ export const useDebouncedMapClick = (
 
   return debouncedCallback || callback
 }
+
+export const useStringConfigValue = (config: { [key: string]: any }) => {
+  const configRef = hooks.useLatest(config)
+  return hooks.useEventCallback((key: string, defaultValue = ""): string => {
+    const v = configRef.current?.[key]
+    return typeof v === "string" ? v : defaultValue
+  })
+}
+
+export const useBooleanConfigValue = (config: { [key: string]: any }) => {
+  const configRef = hooks.useLatest(config)
+  return hooks.useEventCallback(
+    (key: string, defaultValue = false): boolean => {
+      const v = configRef.current?.[key]
+      return typeof v === "boolean" ? v : defaultValue
+    }
+  )
+}
+
+export const useNumberConfigValue = (config: { [key: string]: any }) => {
+  const configRef = hooks.useLatest(config)
+  return hooks.useEventCallback(
+    (key: string, defaultValue?: number): number | undefined => {
+      const v = configRef.current?.[key]
+      if (typeof v === "number" && Number.isFinite(v)) return v
+      return defaultValue
+    }
+  )
+}
+
+export const useUpdateConfig = (
+  id: string,
+  config: { [key: string]: any; set?: (key: string, value: any) => any },
+  onSettingChange: (update: { id: string; config: any }) => void
+) => {
+  return hooks.useEventCallback((key: string, value: any) => {
+    onSettingChange({
+      id,
+      config: config.set ? config.set(key, value) : { ...config, [key]: value },
+    })
+  })
+}
+
+type DebouncedFn<T extends (...args: any[]) => void> = ((
+  ...args: Parameters<T>
+) => void) & {
+  cancel: () => void
+  flush: () => void
+}
+
+export const useDebounce = <T extends (...args: any[]) => void>(
+  callback: T,
+  delay: number,
+  options?: { onPendingChange?: (pending: boolean) => void }
+): DebouncedFn<T> => {
+  const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingRef = React.useRef(false)
+  const callbackRef = hooks.useLatest(callback)
+  const optionsRef = hooks.useLatest(options)
+
+  const notifyPending = hooks.useEventCallback((next: boolean) => {
+    if (pendingRef.current === next) return
+    pendingRef.current = next
+    const handler = optionsRef.current?.onPendingChange
+    if (typeof handler === "function") {
+      try {
+        handler(next)
+      } catch {}
+    }
+  })
+
+  const cancel = hooks.useEventCallback(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+      timeoutRef.current = null
+    }
+    if (pendingRef.current) {
+      notifyPending(false)
+    }
+  })
+
+  const run = hooks.useEventCallback((...args: Parameters<T>) => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+    }
+    notifyPending(true)
+    timeoutRef.current = setTimeout(() => {
+      timeoutRef.current = null
+      try {
+        callbackRef.current(...args)
+      } finally {
+        notifyPending(false)
+      }
+    }, safeDelay)
+  })
+
+  const debouncedRef = React.useRef<DebouncedFn<T> | null>(null)
+  const runRef = hooks.useLatest(run)
+  const cancelRef = hooks.useLatest(cancel)
+
+  if (!debouncedRef.current) {
+    const noop = () => undefined
+    const runner = ((...args: Parameters<T>) => {
+      runRef.current(...args)
+    }) as DebouncedFn<T>
+    runner.cancel = () => cancelRef.current()
+    runner.flush = noop
+    debouncedRef.current = runner
+  }
+
+  hooks.useEffectOnce(() => {
+    return () => {
+      cancelRef.current()
+    }
+  })
+
+  return debouncedRef.current
+}

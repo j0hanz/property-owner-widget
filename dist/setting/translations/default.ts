@@ -37,4 +37,6 @@ export default {
     "Check /MapServer/[layerId]?f=json in your property layer URL to find available relationships.",
   errorInvalidUrl: "Enter a valid ArcGIS REST service URL.",
   errorInvalidNumber: "Enter a whole number greater than zero.",
+  errorMaxResultsInvalid: "Max results must be between 1 and 1000.",
+  errorRelationshipIdInvalid: "Relationship ID must be between 0 and 99.",
 }

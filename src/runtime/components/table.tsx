@@ -88,23 +88,11 @@ export const PropertyTable = (props: PropertyTableProps) => {
         <tbody css={styles.tbody}>
           {visibleRows.map((row) => (
             <tr key={row.id} css={styles.tr} role="row">
-              {row.getVisibleCells().map((cell) => {
-                const cellValue = cell.getValue()
-                const displayValue =
-                  typeof cellValue === "string" || typeof cellValue === "number"
-                    ? String(cellValue)
-                    : ""
-                return (
-                  <td
-                    key={cell.id}
-                    css={styles.td}
-                    role="cell"
-                    title={displayValue}
-                  >
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
-                )
-              })}
+              {row.getVisibleCells().map((cell) => (
+                <td key={cell.id} css={styles.td} role="cell">
+                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>

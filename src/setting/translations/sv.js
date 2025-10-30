@@ -40,6 +40,8 @@ System.register([], function (e) {
           "Kontrollera /MapServer/[layerId]?f=json i din fastighetslager-URL för att hitta tillgängliga relationer.",
         errorInvalidUrl: "Ange en giltig ArcGIS REST-tjänst-URL.",
         errorInvalidNumber: "Ange ett heltal större än noll.",
+        errorMaxResultsInvalid: "Max resultat måste vara mellan 1 och 1000.",
+        errorRelationshipIdInvalid: "Relations-ID måste vara mellan 0 och 99.",
       })
     },
   }

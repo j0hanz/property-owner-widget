@@ -29,8 +29,6 @@ export const createPropertyTableColumns = (params: {
       enableSorting: true,
       enableColumnFilter: true,
       filterFn: "includesString",
-      size: 35,
-      minSize: 100,
     }),
     columnHelper.accessor("BOSTADR", {
       id: GRID_COLUMN_KEYS.BOSTADR,
@@ -39,8 +37,6 @@ export const createPropertyTableColumns = (params: {
       enableSorting: true,
       enableColumnFilter: true,
       filterFn: "includesString",
-      size: 65,
-      minSize: 150,
     }),
   ]
 }

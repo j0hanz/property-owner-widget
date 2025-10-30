@@ -184,6 +184,67 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const piiMaskingEnabled = config.enablePIIMasking
   const mapWidgetId = useMapWidgetIds?.[0]
 
+  hooks.useUpdateEffect(() => {
+    setState((prev) => {
+      if (prev.selectedProperties.length === 0) return prev
+
+      console.log(
+        "PII masking toggled:",
+        piiMaskingEnabled,
+        "- table will reformat"
+      )
+      trackFeatureUsage("pii_masking_toggled", piiMaskingEnabled)
+
+      return { ...prev }
+    })
+  }, [piiMaskingEnabled])
+
+  hooks.useUpdateEffect(() => {
+    setState((prev) => {
+      if (prev.selectedProperties.length <= maxResults) return prev
+
+      console.log(
+        `Max results changed to ${maxResults}, trimming from ${prev.selectedProperties.length} properties`
+      )
+      trackEvent({
+        category: "Property",
+        action: "max_results_trim",
+        value: prev.selectedProperties.length - maxResults,
+      })
+
+      const trimmedProperties = prev.selectedProperties.slice(0, maxResults)
+      const removedProperties = prev.selectedProperties.slice(maxResults)
+
+      removedProperties.forEach((prop) => {
+        const fnr = extractFnr(prop)
+        if (fnr) removeGraphicsForFnr(fnr)
+      })
+
+      return {
+        ...prev,
+        selectedProperties: trimmedProperties,
+      }
+    })
+  }, [maxResults])
+
+  hooks.useUpdateEffect(() => {
+    console.log("Toggle removal mode changed:", toggleEnabled)
+    trackFeatureUsage("toggle_removal_changed", toggleEnabled)
+  }, [toggleEnabled])
+
+  hooks.useUpdateEffect(() => {
+    console.log(
+      "Batch owner query mode changed:",
+      config.enableBatchOwnerQuery,
+      "relationshipId:",
+      config.relationshipId
+    )
+    trackFeatureUsage(
+      "batch_owner_query_changed",
+      config.enableBatchOwnerQuery ?? false
+    )
+  }, [config.enableBatchOwnerQuery, config.relationshipId])
+
   const tableColumns = hooks.useEventCallback(() =>
     createPropertyTableColumns({
       translate,
