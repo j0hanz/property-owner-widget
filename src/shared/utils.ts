@@ -1226,20 +1226,18 @@ class PopupSuppressionManager {
   acquire(ownerId: symbol, view: __esri.MapView | null | undefined): void {
     if (!view) return
 
-    const popup = view.popup as
-      | (__esri.Popup & { autoOpenEnabled?: boolean })
-      | undefined
-    if (!popup || typeof popup.autoOpenEnabled !== "boolean") return
+    const popupEnabled = (view as any).popupEnabled
+    if (typeof popupEnabled !== "boolean") return
 
     let owners = this.ownersByView.get(view)
     if (!owners) {
       owners = new Set()
       this.ownersByView.set(view, owners)
-      this.originalStateByView.set(view, popup.autoOpenEnabled)
+      this.originalStateByView.set(view, popupEnabled)
     }
 
     owners.add(ownerId)
-    popup.autoOpenEnabled = false
+    ;(view as any).popupEnabled = false
   }
 
   release(ownerId: symbol, view: __esri.MapView | null | undefined): void {
@@ -1254,13 +1252,10 @@ class PopupSuppressionManager {
   }
 
   private restorePopupState(view: __esri.MapView): void {
-    const popup = view.popup as
-      | (__esri.Popup & { autoOpenEnabled?: boolean })
-      | undefined
     const originalState = this.originalStateByView.get(view)
 
-    if (popup && originalState !== undefined) {
-      popup.autoOpenEnabled = originalState
+    if (originalState !== undefined) {
+      ;(view as any).popupEnabled = originalState
       this.originalStateByView.delete(view)
       this.ownersByView.delete(view)
     }

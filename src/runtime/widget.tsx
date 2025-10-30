@@ -799,12 +799,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         <div css={styles.col}>{state.selectedProperties.length}</div>
       </div>
 
-      {mapWidgetId && (
+      {mapWidgetId ? (
         <JimuMapViewComponent
           useMapWidgetId={mapWidgetId}
           onActiveViewChange={onActiveViewChange}
         />
-      )}
+      ) : null}
     </div>
   )
 }
