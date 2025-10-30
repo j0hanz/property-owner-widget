@@ -707,8 +707,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             <SVG
               css={styles.svgState}
               src={setupIcon}
-              width={125}
-              height={125}
+              width={100}
+              height={100}
             />
             <div css={styles.messageState}>
               {translate("widgetNotConfigured")}
@@ -730,8 +730,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
               <SVG
                 css={styles.svgState}
                 src={mapSelect}
-                width={125}
-                height={125}
+                width={100}
+                height={100}
               />
               <div css={styles.messageState}>
                 {translate("clickMapToSelectProperties")}

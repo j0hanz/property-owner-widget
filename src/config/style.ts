@@ -118,7 +118,6 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     }),
     loadingState: css({
       ...centeredFlex,
-      gap: spacing?.(4),
     }),
     errorWrap: createFlex("column", {
       flex: "1 1 auto",
