@@ -96,6 +96,9 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       padding: spacing?.(1),
       borderBlockEnd: border,
       overflow: "hidden",
+      fontFamily: typography?.label2?.fontFamily,
+      fontSize: typography?.label2?.fontSize,
+      fontWeight: typography?.label2?.fontWeight,
     }),
     sortIndicator: css({
       marginInlineStart: spacing?.(1),
@@ -112,7 +115,6 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       fontFamily: typography?.label2?.fontFamily,
       fontSize: typography?.label2?.fontSize,
       fontWeight: typography?.label2?.fontWeight,
-      lineHeight: typography?.label2?.lineHeight,
       textAlign: "center",
       opacity: 0.7,
     }),
@@ -131,7 +133,6 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       fontFamily: typography?.label2?.fontFamily,
       fontSize: typography?.label2?.fontSize,
       fontWeight: typography?.label2?.fontWeight,
-      lineHeight: typography?.label2?.lineHeight,
     }),
   } as const
 }

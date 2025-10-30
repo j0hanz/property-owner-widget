@@ -112,6 +112,23 @@ export const formatPropertyWithShare = (
   return trimmedShare ? `${property} (${trimmedShare})` : property
 }
 
+/** Reformat existing grid rows with new PII masking setting */
+export const reformatGridRows = (
+  rows: GridRowData[],
+  maskPII: boolean,
+  unknownOwnerText: string
+): GridRowData[] => {
+  return rows.map((row) => {
+    if (!row.rawOwner) {
+      return row
+    }
+    return {
+      ...row,
+      BOSTADR: formatOwnerInfo(row.rawOwner, maskPII, unknownOwnerText),
+    }
+  })
+}
+
 /** Create unique row identifier from FNR and OBJECTID */
 export const createRowId = (fnr: string | number, objectId: number): string =>
   `${fnr}_${objectId}`
@@ -785,6 +802,7 @@ const createGridRow = (params: {
   bostadr: string
   graphic: __esri.Graphic
   createRowId: (fnr: string | number, objectId: number) => string
+  rawOwner?: OwnerAttributes
 }): GridRowData => ({
   id: params.createRowId(params.fnr, params.objectId),
   FNR: params.fnr,
@@ -792,6 +810,7 @@ const createGridRow = (params: {
   FASTIGHET: params.fastighet,
   BOSTADR: params.bostadr,
   graphic: params.graphic,
+  rawOwner: params.rawOwner,
 })
 
 const buildPropertyRows = (params: {
@@ -850,6 +869,7 @@ const buildPropertyRows = (params: {
         ),
         graphic: propertyGraphic,
         createRowId: helpers.createRowId,
+        rawOwner: attrs as OwnerAttributes,
       })
     })
   }
@@ -863,6 +883,7 @@ const buildPropertyRows = (params: {
       bostadr: propertyAttrs?.BOSTADR || "",
       graphic: propertyGraphic,
       createRowId: helpers.createRowId,
+      rawOwner: propertyAttrs as OwnerAttributes,
     }),
   ]
 }
@@ -976,6 +997,7 @@ export const processPropertyResultsWithBatchQuery = async (params: {
             bostadr: formattedOwner,
             graphic,
             createRowId: helpers.createRowId,
+            rawOwner: owner as OwnerAttributes,
           })
         )
       }
@@ -983,6 +1005,14 @@ export const processPropertyResultsWithBatchQuery = async (params: {
       const fallbackMessage = failedFnrs.has(String(fnr))
         ? messages.errorOwnerQueryFailed
         : messages.errorNoDataAvailable
+      const fallbackOwner = {
+        NAMN: fallbackMessage,
+        BOSTADR: "",
+        POSTNR: "",
+        POSTADR: "",
+        ORGNR: "",
+        FNR: fnr,
+      } as OwnerAttributes
       rowsToProcess.push(
         createGridRow({
           fnr,
@@ -992,6 +1022,7 @@ export const processPropertyResultsWithBatchQuery = async (params: {
           bostadr: fallbackMessage,
           graphic,
           createRowId: helpers.createRowId,
+          rawOwner: fallbackOwner,
         })
       )
     }

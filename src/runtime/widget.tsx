@@ -189,11 +189,25 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       console.log(
         "PII masking toggled:",
         piiMaskingEnabled,
-        "- table will reformat"
+        "- reformatting existing data"
       )
       trackFeatureUsage("pii_masking_toggled", piiMaskingEnabled)
 
-      return { ...prev }
+      const reformattedProperties = prev.selectedProperties.map((row) => {
+        if (!row.rawOwner) {
+          return row
+        }
+        return {
+          ...row,
+          BOSTADR: formatOwnerInfo(
+            row.rawOwner,
+            piiMaskingEnabled,
+            translate("unknownOwner")
+          ),
+        }
+      })
+
+      return { ...prev, selectedProperties: reformattedProperties }
     })
   }, [piiMaskingEnabled])
 

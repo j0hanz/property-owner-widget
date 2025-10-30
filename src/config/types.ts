@@ -46,6 +46,7 @@ export interface GridRowData {
   FASTIGHET: string
   BOSTADR: string
   graphic?: __esri.Graphic
+  rawOwner?: OwnerAttributes
 }
 
 export interface SelectionGraphicsHelpers {

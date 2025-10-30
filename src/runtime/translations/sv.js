@@ -11,7 +11,8 @@ System.register([], function (e) {
         queryingOwner: "Hämtar ägarinformation...",
         noResults: "Inga fastigheter hittades",
         propertySelected: "Fastigheter valda:",
-        clickMapToSelectProperties: "Börja klicka på kartan för att välja fastigheter",
+        clickMapToSelectProperties:
+          "Börja klicka på kartan för att välja fastigheter",
         multipleOwnersFound: "Flera ägare hittades",
         emptyStatePrompt: "Klicka på fastighet",
         widgetNotConfigured: "Konfigurera widgeten för att börja använda den",
