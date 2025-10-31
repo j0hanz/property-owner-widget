@@ -15,6 +15,7 @@ import {
   shouldToggleRemove,
   calculatePropertyUpdates,
   buildHighlightColor,
+  buildHighlightSymbolJSON,
 } from "../shared/utils"
 import {
   isValidArcGISUrl,
@@ -217,6 +218,20 @@ describe("Property Widget - Highlight Styling", () => {
   it("should clamp opacity and fall back to default color when invalid inputs provided", () => {
     const rgba = buildHighlightColor("not-a-color", 5)
     expect(rgba).toEqual([0, 180, 216, 1])
+  })
+
+  it("should build highlight symbol definition with solid fill and outline", () => {
+    const symbolJSON = buildHighlightSymbolJSON([10, 20, 30, 0.75], 3)
+
+    expect(symbolJSON).toMatchObject({
+      style: "solid",
+      color: [10, 20, 30, 0.75],
+      outline: {
+        style: "solid",
+        color: [10, 20, 30, 1],
+        width: 3,
+      },
+    })
   })
 })
 

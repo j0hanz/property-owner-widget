@@ -5,7 +5,7 @@ import {
   ESRI_MODULES_TO_LOAD,
   ABORT_CONTROLLER_POOL_SIZE,
 } from "../config/constants"
-import { popupSuppressionManager } from "./utils"
+import { popupSuppressionManager, buildHighlightSymbolJSON } from "./utils"
 
 export const useEsriModules = () => {
   const [modules, setModules] = React.useState<EsriModules | null>(null)
@@ -165,13 +165,8 @@ export const useGraphicsLayer = (
     outlineWidth: number
   ): __esri.SimpleFillSymbol | null => {
     if (!modules) return null
-    return new modules.SimpleFillSymbol({
-      color: highlightColor,
-      outline: {
-        color: [highlightColor[0], highlightColor[1], highlightColor[2], 1],
-        width: outlineWidth,
-      },
-    })
+    const symbolJSON = buildHighlightSymbolJSON(highlightColor, outlineWidth)
+    return new modules.SimpleFillSymbol(symbolJSON)
   }
 
   const addGraphicsToMap = hooks.useEventCallback(

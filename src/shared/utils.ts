@@ -206,6 +206,23 @@ export const buildHighlightColor = (
   return [r, g, b, clampedOpacity]
 }
 
+export const buildHighlightSymbolJSON = (
+  highlightColor: [number, number, number, number],
+  outlineWidth: number
+): __esri.SimpleFillSymbolProperties => {
+  const [r, g, b, a] = highlightColor
+
+  return {
+    style: "solid",
+    color: [r, g, b, a],
+    outline: {
+      style: "solid",
+      color: [r, g, b, 1],
+      width: outlineWidth,
+    },
+  }
+}
+
 export const createRowId = (fnr: string | number, objectId: number): string =>
   `${fnr}_${objectId}`
 

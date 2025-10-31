@@ -1,0 +1,12 @@
+https://developers.arcgis.com/javascript/latest/api-reference/esri-symbols-SimpleFillSymbol.html
+https://developers.arcgis.com/javascript/latest/api-reference/esri-symbols-FillSymbol.html
+https://developers.arcgis.com/javascript/latest/api-reference/esri-symbols-Symbol.html
+https://developers.arcgis.com/javascript/latest/api-reference/esri-core-Accessor.html
+https://developers.arcgis.com/javascript/latest/api-reference/esri-views-MapView.html
+https://developers.arcgis.com/javascript/latest/api-reference/esri-views-SceneView.html
+https://developers.arcgis.com/javascript/latest/api-reference/esri-symbols-SimpleFillSymbol.html#color
+https://developers.arcgis.com/javascript/latest/api-reference/esri-symbols-SimpleFillSymbol.html#style
+https://developers.arcgis.com/javascript/latest/api-reference/esri-symbols-SimpleFillSymbol.html#outline
+https://developers.arcgis.com/javascript/latest/api-reference/esri-symbols-SimpleLineSymbol.html
+https://developers.arcgis.com/javascript/latest/api-reference/esri-layers-FeatureLayer.html
+https://developers.arcgis.com/javascript/latest/api-reference/esri-Graphic.html
