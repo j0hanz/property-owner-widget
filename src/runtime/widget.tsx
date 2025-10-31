@@ -25,6 +25,7 @@ import {
 import { PropertyTable } from "./components/table"
 import { createPropertyTableColumns } from "../shared/config"
 import defaultMessages from "./translations/default"
+import type { ColumnDef } from "@tanstack/react-table"
 import type {
   IMConfig,
   ErrorBoundaryProps,
@@ -273,7 +274,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       return (
         <PropertyTable
           data={state.selectedProperties}
-          columns={tableColumns()}
+          columns={tableColumns}
           translate={translate}
           styles={styles}
         />
@@ -386,11 +387,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     )
   }, [config.enableBatchOwnerQuery, config.relationshipId])
 
-  const tableColumns = hooks.useEventCallback(() =>
-    createPropertyTableColumns({
-      translate,
-    })
+  const tableColumnsRef = React.useRef<Array<ColumnDef<GridRowData, any>>>(
+    createPropertyTableColumns({ translate })
   )
+  const tableColumns = tableColumnsRef.current
 
   const handleClearAll = hooks.useEventCallback(() => {
     abortAll()
@@ -532,8 +532,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       const requestId = requestIdRef.current + 1
       requestIdRef.current = requestId
-      const requestIdSnapshot = requestId
-      const isStaleRequest = () => requestIdSnapshot !== requestIdRef.current
+      const isStaleRequest = () => requestId !== requestIdRef.current
 
       setState((prev) => ({
         ...prev,
@@ -650,7 +649,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           return
         }
 
-        // Step 5: Calculate updates with toggle logic (use snapshot)
+        // Step 5: Calculate updates with toggle logic
         let cleanupParams: {
           updatedRows: GridRowData[]
           previousRows: GridRowData[]
@@ -658,13 +657,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         let syncParams: SelectionGraphicsParams | null = null
 
-        // Capture requestId snapshot to prevent TOCTOU race condition
-        const requestIdSnapshot = requestIdRef.current
-        const isStaleRequestSnapshot = () => requestId !== requestIdSnapshot
-
         setState((prev) => {
-          // Check staleness using snapshot (atomic check)
-          if (isStaleRequestSnapshot()) {
+          // Check staleness atomically within setState
+          if (isStaleRequest()) {
             return prev
           }
           const { updatedRows, toRemove } = calculatePropertyUpdates(
@@ -713,8 +708,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           }
         })
 
-        // Revalidate staleness before executing side effects using snapshot
-        if (isStaleRequestSnapshot()) {
+        // Revalidate staleness before executing side effects
+        if (isStaleRequest()) {
           releaseController(controller)
           return
         }
@@ -762,7 +757,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
                 if (
                   extent &&
                   !zoomController.signal.aborted &&
-                  !isStaleRequestSnapshot()
+                  !isStaleRequest()
                 ) {
                   await view.goTo(extent.expand(1.2), { duration: 1000 })
                   trackEvent({
@@ -775,6 +770,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
                 if (!isAbortError(error)) {
                   console.error("Auto zoom failed", error)
                   trackError("auto_zoom", error)
+                  // Reset query state on auto-zoom error
+                  if (isMountedRef.current && !isStaleRequest()) {
+                    setState((prev) => ({ ...prev, isQueryInFlight: false }))
+                  }
                 }
               } finally {
                 releaseController(zoomController)

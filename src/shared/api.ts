@@ -509,7 +509,12 @@ export const queryExtentForProperties = async (
     result.records.forEach((record: FeatureDataRecord) => {
       const feature = record.getData()
       const geom = feature.geometry as __esri.Geometry
-      if (geom && geom.extent && typeof geom.extent.clone === "function") {
+      if (
+        geom &&
+        geom.extent !== undefined &&
+        geom.extent !== null &&
+        typeof geom.extent.clone === "function"
+      ) {
         if (!extent) {
           extent = geom.extent.clone()
         } else {
@@ -581,6 +586,7 @@ export const queryOwnersByRelationship = async (
       createSignalOptions(options?.signal)
     )
 
+    // Check abort immediately after async operation
     if (options?.signal?.aborted) {
       const abortError = new Error("AbortError")
       abortError.name = "AbortError"
@@ -589,6 +595,13 @@ export const queryOwnersByRelationship = async (
 
     if (!propertyResult?.records || propertyResult.records.length === 0) {
       return new Map()
+    }
+
+    // Check abort before processing records
+    if (options?.signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      throw abortError
     }
 
     propertyResult.records.forEach((record: FeatureDataRecord) => {
@@ -872,7 +885,6 @@ const processBatchOfProperties = async (params: {
 
   for (let i = 0; i < ownerData.length; i++) {
     const result = ownerData[i]
-    const validated = batch[i]
 
     if (result.error) {
       if (helpers.isAbortError(result.error)) {
@@ -881,6 +893,8 @@ const processBatchOfProperties = async (params: {
 
       if (currentRowCount + rows.length >= maxResults) break
 
+      // Use batch[i] for error case (no validated in error result)
+      const validated = batch[i]
       const propertyRows = buildPropertyRows({
         fnr: validated.fnr,
         propertyAttrs: validated.attrs,
@@ -927,7 +941,10 @@ const processBatchOfProperties = async (params: {
     rows.push(...rowsToAdd)
 
     if (rowsToAdd.length > 0) {
-      graphics.push({ graphic: validated.graphic, fnr: validated.fnr })
+      graphics.push({
+        graphic: validatedFromValue.graphic,
+        fnr: validatedFromValue.fnr,
+      })
     }
   }
 
@@ -960,23 +977,24 @@ const processBatchQuery = async (
 
   let ownersByFnr: Map<string, OwnerAttributes[]>
   const failedFnrs = new Set<string>()
-    try {
-      ownersByFnr = await helpers.queryOwnersByRelationship(
-        fnrsToQuery,
-        config.propertyDataSourceId,
-        config.ownerDataSourceId,
-        context.dsManager,
-        config.relationshipId,
-        { signal: context.signal }
-      )
-    } catch (error) {
-      if (helpers.isAbortError(error)) {
-        throw error as Error
-      }
-      console.error("Batch owner query failed for FNRs:", fnrsToQuery, error)
-      ownersByFnr = new Map()
-      fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)))
-    }  for (const { fnr, attrs, graphic } of validatedProperties) {
+  try {
+    ownersByFnr = await helpers.queryOwnersByRelationship(
+      fnrsToQuery,
+      config.propertyDataSourceId,
+      config.ownerDataSourceId,
+      context.dsManager,
+      config.relationshipId,
+      { signal: context.signal }
+    )
+  } catch (error) {
+    if (helpers.isAbortError(error)) {
+      throw error as Error
+    }
+    console.error("Batch owner query failed for FNRs:", fnrsToQuery, error)
+    ownersByFnr = new Map()
+    fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)))
+  }
+  for (const { fnr, attrs, graphic } of validatedProperties) {
     const owners = ownersByFnr.get(String(fnr)) || []
 
     if (owners.length > 0) {

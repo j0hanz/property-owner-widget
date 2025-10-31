@@ -98,9 +98,8 @@ const buildOwnerIdentityKey = (
     )
   }
   if (context.fnr !== undefined && context.fnr !== null) {
-    fallbackParts.push(
-      `fnr:${normalizeOwnerValue(String(context.fnr)).toLowerCase()}`
-    )
+    const normalizedFnr = String(context.fnr).toLowerCase()
+    fallbackParts.push(`fnr:${normalizedFnr}`)
   }
   if (owner.OBJECTID !== undefined && owner.OBJECTID !== null) {
     fallbackParts.push(`objectid:${String(owner.OBJECTID).toLowerCase()}`)
@@ -327,7 +326,6 @@ export const calculatePropertyUpdates = <
   const existingFnrKeys = new Set(
     existingProperties.map((row) => normalizeFnrKey(row.FNR))
   )
-  const existingRowIds = new Set(existingProperties.map((row) => row.id))
   const toAddIds = new Set<string>()
   const toggledFnrs = new Set<string>()
 

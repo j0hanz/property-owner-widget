@@ -123,17 +123,20 @@ export const useGraphicsLayer = (
   )
 
   const ensureGraphicsLayer = hooks.useEventCallback(
-    (view: __esri.MapView | null | undefined) => {
-      if (!modules || !view) return
+    (view: __esri.MapView | null | undefined): boolean => {
+      if (!modules || !view) return false
       if (!graphicsLayerRef.current) {
         graphicsLayerRef.current = new modules.GraphicsLayer({
           id: `${widgetId}-property-highlight-layer`,
           listMode: "hide",
         })
         view.map.add(graphicsLayerRef.current)
+        return true
       } else if (!view.map.findLayerById(graphicsLayerRef.current.id)) {
         view.map.add(graphicsLayerRef.current)
+        return true
       }
+      return false
     }
   )
 
@@ -181,7 +184,7 @@ export const useGraphicsLayer = (
       outlineWidth: number
     ) => {
       if (!modules || !graphic || !view) return
-      ensureGraphicsLayer(view)
+      const layerJustCreated = ensureGraphicsLayer(view)
 
       const layer = graphicsLayerRef.current
       if (!layer) return
@@ -198,7 +201,16 @@ export const useGraphicsLayer = (
       }
 
       removeGraphicsForFnr(fnr, normalizeFnrKey)
-      layer.add(highlightGraphic)
+      // Defer adding graphic if layer was just created to avoid potential rendering issues
+      if (layerJustCreated) {
+        requestAnimationFrame(() => {
+          if (graphicsLayerRef.current) {
+            layer.add(highlightGraphic)
+          }
+        })
+      } else {
+        layer.add(highlightGraphic)
+      }
 
       if (!fnr) return
 
@@ -294,8 +306,14 @@ export const useMapViewLifecycle = (params: {
 
     if (mapClickHandleRef.current) {
       mapClickHandleRef.current.remove()
+      mapClickHandleRef.current = null
     }
-    mapClickHandleRef.current = view.on("click", onMapClick)
+    try {
+      mapClickHandleRef.current = view.on("click", onMapClick)
+    } catch (error) {
+      console.error("Failed to register click handler", error)
+      mapClickHandleRef.current = null
+    }
   })
 
   const cleanupPreviousView = hooks.useEventCallback(() => {
@@ -342,8 +360,14 @@ export const useMapViewLifecycle = (params: {
       disablePopup(currentView)
       if (mapClickHandleRef.current) {
         mapClickHandleRef.current.remove()
+        mapClickHandleRef.current = null
       }
-      mapClickHandleRef.current = currentView.on("click", onMapClick)
+      try {
+        mapClickHandleRef.current = currentView.on("click", onMapClick)
+      } catch (error) {
+        console.error("Failed to reactivate click handler", error)
+        mapClickHandleRef.current = null
+      }
     }
   })
 
