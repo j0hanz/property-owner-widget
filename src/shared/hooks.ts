@@ -5,7 +5,12 @@ import {
   ESRI_MODULES_TO_LOAD,
   ABORT_CONTROLLER_POOL_SIZE,
 } from "../config/constants"
-import { popupSuppressionManager, buildHighlightSymbolJSON } from "./utils"
+import {
+  popupSuppressionManager,
+  buildHighlightSymbolJSON,
+  buildHighlightLineSymbolJSON,
+  buildHighlightMarkerSymbolJSON,
+} from "./utils"
 
 export const useEsriModules = () => {
   const [modules, setModules] = React.useState<EsriModules | null>(null)
@@ -35,9 +40,18 @@ export const useEsriModules = () => {
         const loadedModules = await loadArcGISJSAPIModules(
           ESRI_MODULES_TO_LOAD.slice()
         )
-        const [SimpleFillSymbol, Graphic, GraphicsLayer, Extent] = loadedModules
+        const [
+          SimpleFillSymbol,
+          SimpleLineSymbol,
+          SimpleMarkerSymbol,
+          Graphic,
+          GraphicsLayer,
+          Extent,
+        ] = loadedModules
         setModules({
           SimpleFillSymbol,
+          SimpleLineSymbol,
+          SimpleMarkerSymbol,
           Graphic,
           GraphicsLayer,
           Extent,
@@ -161,12 +175,64 @@ export const useGraphicsLayer = (
   )
 
   const createHighlightSymbol = (
+    graphic: __esri.Graphic | null | undefined,
     highlightColor: [number, number, number, number],
     outlineWidth: number
-  ): __esri.SimpleFillSymbol | null => {
-    if (!modules) return null
-    const symbolJSON = buildHighlightSymbolJSON(highlightColor, outlineWidth)
-    return new modules.SimpleFillSymbol(symbolJSON)
+  ):
+    | __esri.SimpleFillSymbol
+    | __esri.SimpleLineSymbol
+    | __esri.SimpleMarkerSymbol
+    | null => {
+    if (!modules || !graphic) return null
+
+    const geometry = graphic.geometry
+    if (!geometry) return null
+
+    const geometryType = geometry.type
+
+    if (geometryType === "polygon" || geometryType === "extent") {
+      const polygonJSON = buildHighlightSymbolJSON(highlightColor, outlineWidth)
+      return new modules.SimpleFillSymbol(polygonJSON)
+    }
+
+    if (geometryType === "polyline") {
+      const lineJSON = buildHighlightLineSymbolJSON(
+        highlightColor,
+        outlineWidth
+      )
+      return new modules.SimpleLineSymbol(lineJSON)
+    }
+
+    if (geometryType === "point" || geometryType === "multipoint") {
+      const markerJSON = buildHighlightMarkerSymbolJSON(
+        highlightColor,
+        outlineWidth
+      )
+      return new modules.SimpleMarkerSymbol(markerJSON)
+    }
+
+    if ((geometry as any)?.rings) {
+      const polygonJSON = buildHighlightSymbolJSON(highlightColor, outlineWidth)
+      return new modules.SimpleFillSymbol(polygonJSON)
+    }
+
+    if ((geometry as any)?.paths) {
+      const lineJSON = buildHighlightLineSymbolJSON(
+        highlightColor,
+        outlineWidth
+      )
+      return new modules.SimpleLineSymbol(lineJSON)
+    }
+
+    if ((geometry as any)?.points) {
+      const markerJSON = buildHighlightMarkerSymbolJSON(
+        highlightColor,
+        outlineWidth
+      )
+      return new modules.SimpleMarkerSymbol(markerJSON)
+    }
+
+    return null
   }
 
   const addGraphicsToMap = hooks.useEventCallback(
@@ -192,12 +258,17 @@ export const useGraphicsLayer = (
       if (!layer) return
 
       const fnr = extractFnr(graphic.attributes || null)
-      const symbol = createHighlightSymbol(highlightColor, outlineWidth)
+      const symbol = createHighlightSymbol(
+        graphic,
+        highlightColor,
+        outlineWidth
+      )
       console.log("Symbol and graphic details:", {
         fnr,
         hasSymbol: !!symbol,
-        symbolColor: symbol?.color,
-        symbolOutlineWidth: symbol?.outline?.width,
+        symbolColor: (symbol as any)?.color,
+        symbolOutlineWidth:
+          (symbol as any)?.outline?.width ?? (symbol as any)?.width ?? null,
         originalGeometry: graphic.geometry?.type,
       })
       if (!symbol) return

@@ -1,5 +1,7 @@
 export const ESRI_MODULES_TO_LOAD = [
   "esri/symbols/SimpleFillSymbol",
+  "esri/symbols/SimpleLineSymbol",
+  "esri/symbols/SimpleMarkerSymbol",
   "esri/Graphic",
   "esri/layers/GraphicsLayer",
   "esri/geometry/Extent",
@@ -25,6 +27,8 @@ export const HIGHLIGHT_SYMBOL_ALPHA = 0.4 // 40% opacity ensures underlying feat
 export const OUTLINE_WIDTH = 2 // 2px meets WCAG 1.4.11 non-text contrast 3:1 ratio.
 export const DEFAULT_MAX_RESULTS = 100
 export const OWNER_QUERY_CONCURRENCY = 5
+
+export const HIGHLIGHT_MARKER_SIZE = 12
 
 // AbortController pool size for efficient cancellation management
 // Size chosen to handle typical concurrent operations (property + owner queries)
