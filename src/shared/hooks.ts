@@ -184,7 +184,7 @@ export const useGraphicsLayer = (
       outlineWidth: number
     ) => {
       if (!modules || !graphic || !view) return
-      const layerJustCreated = ensureGraphicsLayer(view)
+      ensureGraphicsLayer(view)
 
       const layer = graphicsLayerRef.current
       if (!layer) return
@@ -201,16 +201,7 @@ export const useGraphicsLayer = (
       }
 
       removeGraphicsForFnr(fnr, normalizeFnrKey)
-      // Defer adding graphic if layer was just created to avoid potential rendering issues
-      if (layerJustCreated) {
-        requestAnimationFrame(() => {
-          if (graphicsLayerRef.current) {
-            layer.add(highlightGraphic)
-          }
-        })
-      } else {
-        layer.add(highlightGraphic)
-      }
+      layer.add(highlightGraphic)
 
       if (!fnr) return
 
