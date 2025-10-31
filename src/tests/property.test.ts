@@ -16,6 +16,8 @@ import {
   calculatePropertyUpdates,
   buildHighlightColor,
   buildHighlightSymbolJSON,
+  buildHighlightLineSymbolJSON,
+  buildHighlightMarkerSymbolJSON,
 } from "../shared/utils"
 import {
   isValidArcGISUrl,
@@ -230,6 +232,31 @@ describe("Property Widget - Highlight Styling", () => {
         style: "solid",
         color: [10, 20, 30, 1],
         width: 3,
+      },
+    })
+  })
+
+  it("should build line highlight symbol definition with configured width", () => {
+    const symbolJSON = buildHighlightLineSymbolJSON([100, 150, 200, 0.6], 5)
+
+    expect(symbolJSON).toMatchObject({
+      style: "solid",
+      color: [100, 150, 200, 0.6],
+      width: 5,
+    })
+  })
+
+  it("should build marker highlight symbol definition with outline", () => {
+    const symbolJSON = buildHighlightMarkerSymbolJSON([5, 15, 25, 0.8], 2, 14)
+
+    expect(symbolJSON).toMatchObject({
+      style: "circle",
+      color: [5, 15, 25, 0.8],
+      size: 14,
+      outline: {
+        style: "solid",
+        color: [5, 15, 25, 1],
+        width: 2,
       },
     })
   })

@@ -9,6 +9,7 @@ import {
   MAX_MASK_ASTERISKS,
   DEFAULT_HIGHLIGHT_COLOR,
   HIGHLIGHT_SYMBOL_ALPHA,
+  HIGHLIGHT_MARKER_SIZE,
 } from "../config/constants"
 
 /** Sanitize arbitrary HTML/text content */
@@ -215,6 +216,38 @@ export const buildHighlightSymbolJSON = (
   return {
     style: "solid",
     color: [r, g, b, a],
+    outline: {
+      style: "solid",
+      color: [r, g, b, 1],
+      width: outlineWidth,
+    },
+  }
+}
+
+export const buildHighlightLineSymbolJSON = (
+  highlightColor: [number, number, number, number],
+  outlineWidth: number
+): __esri.SimpleLineSymbolProperties => {
+  const [r, g, b, a] = highlightColor
+
+  return {
+    style: "solid",
+    color: [r, g, b, a],
+    width: outlineWidth,
+  }
+}
+
+export const buildHighlightMarkerSymbolJSON = (
+  highlightColor: [number, number, number, number],
+  outlineWidth: number,
+  size: number = HIGHLIGHT_MARKER_SIZE
+): __esri.SimpleMarkerSymbolProperties => {
+  const [r, g, b, a] = highlightColor
+
+  return {
+    style: "circle",
+    color: [r, g, b, a],
+    size,
     outline: {
       style: "solid",
       color: [r, g, b, 1],

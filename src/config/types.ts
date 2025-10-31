@@ -102,6 +102,12 @@ export interface EsriModules {
   SimpleFillSymbol: new (
     properties?: __esri.SimpleFillSymbolProperties
   ) => __esri.SimpleFillSymbol
+  SimpleLineSymbol: new (
+    properties?: __esri.SimpleLineSymbolProperties
+  ) => __esri.SimpleLineSymbol
+  SimpleMarkerSymbol: new (
+    properties?: __esri.SimpleMarkerSymbolProperties
+  ) => __esri.SimpleMarkerSymbol
   Graphic: new (properties?: __esri.GraphicProperties) => __esri.Graphic
   GraphicsLayer: new (
     properties?: __esri.GraphicsLayerProperties
