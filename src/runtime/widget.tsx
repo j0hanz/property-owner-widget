@@ -31,7 +31,6 @@ import type {
   PropertyWidgetState,
   GridRowData,
   SelectionGraphicsParams,
-  LoadingBlockProps,
 } from "../config/types"
 import { ErrorType } from "../config/enums"
 import { useWidgetStyles } from "../config/style"
@@ -41,7 +40,6 @@ import {
   usePopupManager,
   useMapViewLifecycle,
   useAbortControllerPool,
-  useDebouncedValue,
 } from "../shared/hooks"
 import {
   queryPropertyByPoint,
@@ -69,7 +67,6 @@ import {
 } from "../shared/utils"
 import {
   OUTLINE_WIDTH,
-  LOADING_VISIBILITY_DEBOUNCE_MS,
 } from "../config/constants"
 import {
   trackEvent,
@@ -157,17 +154,6 @@ const findUseDataSourceById = (
   return match ?? null
 }
 
-const LoadingBlock = ({ styles, translate, size = 32 }: LoadingBlockProps) => (
-  <div
-    css={styles.loadingInline}
-    role="status"
-    aria-live="polite"
-    aria-busy="true"
-  >
-    <Loading type={LoadingType.Donut} width={size} height={size} />
-    <div css={styles.loadingMessage}>{translate("loadingData")}</div>
-  </div>
-)
 
 // Error boundaries require class components in React (no functional equivalent)
 class PropertyWidgetErrorBoundary extends React.Component<
@@ -275,11 +261,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   })
   const isMountedRef = React.useRef(true)
 
-  const debouncedQueryLoading = useDebouncedValue(
-    state.isQueryInFlight,
-    LOADING_VISIBILITY_DEBOUNCE_MS
-  )
-  const showQueryLoading = state.isQueryInFlight || debouncedQueryLoading
   const hasSelectedProperties = state.selectedProperties.length > 0
 
   const renderConfiguredContent = hooks.useEventCallback(() => {
@@ -294,22 +275,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
     if (hasSelectedProperties) {
       return (
-        <>
-          <PropertyTable
-            data={state.selectedProperties}
-            columns={tableColumns()}
-            translate={translate}
-            styles={styles}
-          />
-          {showQueryLoading ? (
-            <LoadingBlock styles={styles} translate={translate} />
-          ) : null}
-        </>
+        <PropertyTable
+          data={state.selectedProperties}
+          columns={tableColumns()}
+          translate={translate}
+          styles={styles}
+        />
       )
-    }
-
-    if (showQueryLoading) {
-      return <LoadingBlock styles={styles} translate={translate} />
     }
 
     return (
@@ -1030,8 +1002,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       <div
         css={styles.body}
         role="main"
-        aria-busy={showQueryLoading}
-        aria-live={showQueryLoading ? "polite" : "off"}
       >
         {!isConfigured ? (
           <div css={styles.emptyState} role="status" aria-live="polite">
