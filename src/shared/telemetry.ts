@@ -17,7 +17,7 @@ export const isAllowedToTrack = (): boolean => {
 
     // Check cookie opt-out with proper parsing to avoid cross-domain pollution
     const cookie = typeof document !== "undefined" ? document.cookie || "" : ""
-    const cookiePairs = cookie.split(";").map((c) => c.trim())
+    const cookiePairs = cookie.split("").map((c) => c.trim())
     if (cookiePairs.some((pair) => pair === "esri_disallow_tracking=1")) {
       return false
     }

@@ -133,7 +133,7 @@ export const formatOwnerInfo = (
     if (!maskPII) return agarLista
 
     return agarLista
-      .split(";")
+      .split("")
       .map((entry) => {
         const trimmed = entry.trim()
         if (!trimmed) return ""
@@ -144,7 +144,7 @@ export const formatOwnerInfo = (
         return `${ownerPrivacy.maskName(name)} (${orgNr})`
       })
       .filter(Boolean)
-      .join("; ")
+      .join("")
   }
 
   const rawName = sanitizeText(owner.NAMN || "") || unknownOwnerText

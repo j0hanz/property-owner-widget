@@ -131,6 +131,7 @@ export const useGraphicsLayer = (
   modules: EsriModules | null,
   widgetId: string
 ) => {
+  const modulesRef = hooks.useLatest(modules)
   const graphicsLayerRef = React.useRef<__esri.GraphicsLayer | null>(null)
   const graphicsMapRef = React.useRef<Map<string | number, __esri.Graphic[]>>(
     new Map()
@@ -138,9 +139,10 @@ export const useGraphicsLayer = (
 
   const ensureGraphicsLayer = hooks.useEventCallback(
     (view: __esri.MapView | null | undefined): boolean => {
-      if (!modules || !view) return false
+      const currentModules = modulesRef.current
+      if (!currentModules || !view) return false
       if (!graphicsLayerRef.current) {
-        graphicsLayerRef.current = new modules.GraphicsLayer({
+        graphicsLayerRef.current = new currentModules.GraphicsLayer({
           id: `${widgetId}-property-highlight-layer`,
           listMode: "hide",
         })
@@ -183,7 +185,8 @@ export const useGraphicsLayer = (
     | __esri.SimpleLineSymbol
     | __esri.SimpleMarkerSymbol
     | null => {
-    if (!modules || !graphic) return null
+    const currentModules = modulesRef.current
+    if (!currentModules || !graphic) return null
 
     const geometry = graphic.geometry
     if (!geometry) return null
@@ -192,7 +195,7 @@ export const useGraphicsLayer = (
 
     if (geometryType === "polygon" || geometryType === "extent") {
       const polygonJSON = buildHighlightSymbolJSON(highlightColor, outlineWidth)
-      return new modules.SimpleFillSymbol(polygonJSON)
+      return new currentModules.SimpleFillSymbol(polygonJSON)
     }
 
     if (geometryType === "polyline") {
@@ -200,7 +203,7 @@ export const useGraphicsLayer = (
         highlightColor,
         outlineWidth
       )
-      return new modules.SimpleLineSymbol(lineJSON)
+      return new currentModules.SimpleLineSymbol(lineJSON)
     }
 
     if (geometryType === "point" || geometryType === "multipoint") {
@@ -208,12 +211,12 @@ export const useGraphicsLayer = (
         highlightColor,
         outlineWidth
       )
-      return new modules.SimpleMarkerSymbol(markerJSON)
+      return new currentModules.SimpleMarkerSymbol(markerJSON)
     }
 
     if ((geometry as any)?.rings) {
       const polygonJSON = buildHighlightSymbolJSON(highlightColor, outlineWidth)
-      return new modules.SimpleFillSymbol(polygonJSON)
+      return new currentModules.SimpleFillSymbol(polygonJSON)
     }
 
     if ((geometry as any)?.paths) {
@@ -221,7 +224,7 @@ export const useGraphicsLayer = (
         highlightColor,
         outlineWidth
       )
-      return new modules.SimpleLineSymbol(lineJSON)
+      return new currentModules.SimpleLineSymbol(lineJSON)
     }
 
     if ((geometry as any)?.points) {
@@ -229,7 +232,7 @@ export const useGraphicsLayer = (
         highlightColor,
         outlineWidth
       )
-      return new modules.SimpleMarkerSymbol(markerJSON)
+      return new currentModules.SimpleMarkerSymbol(markerJSON)
     }
 
     return null
@@ -244,14 +247,15 @@ export const useGraphicsLayer = (
       highlightColor: [number, number, number, number],
       outlineWidth: number
     ) => {
+      const currentModules = modulesRef.current
       console.log("addGraphicsToMap called:", {
-        hasModules: !!modules,
+        hasModules: !!currentModules,
         hasGraphic: !!graphic,
         hasView: !!view,
         hasGeometry: !!graphic?.geometry,
         geometryType: graphic?.geometry?.type,
       })
-      if (!modules || !graphic || !view) return
+      if (!currentModules || !graphic || !view) return
       ensureGraphicsLayer(view)
 
       const layer = graphicsLayerRef.current
