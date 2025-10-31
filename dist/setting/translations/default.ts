@@ -2,56 +2,52 @@ export default {
   configurationInstructions:
     "Configure the widget by providing layer URLs and display preferences.",
   mapWidgetTitle: "Map connection",
-  mapWidgetDescription:
-    "Select a map widget to enable property querying by clicking on the map. The widget will listen for map clicks and query property information at the clicked location.",
-  dataSourcesTitle: "Data sources",
+  mapWidgetDescription: "Link the map widget that triggers parcel lookups.",
   dataSourcesDescription:
-    "Validate that both property and owner layers expose matching FNR values and required attributes before publishing the widget.",
+    "Ensure property and owner layers share matching FNR fields.",
   propertyDataSourceLabel: "Property layer",
   propertyDataSourceDescription:
-    "Feature layer that stores parcel geometries and FNR identifiers used for selection and highlighting.",
+    "Parcel layer containing geometry and FNR values.",
   ownerDataSourceLabel: "Owner layer",
   ownerDataSourceDescription:
-    "Feature layer or table containing ownership details (NAMN, BOSTADR, ORGNR, etc.). Can be the same layer as the property source when attributes are combined.",
+    "Owner layer or table with NAMN and BOSTADR details.",
   displayOptionsTitle: "Display options",
   panelDisplaySettings: "Display behavior",
+  advancedSettingsTitle: "Advanced settings",
   panelHighlightSettings: "Highlight styling",
+  highlightColorLabelTooltip: "Set highlight color for parcels.",
+  highlightOpacityLabelTooltip: "Set fill opacity for highlighted parcels.",
   maxResultsLabel: "Maximum results",
-  maxResultsDescription:
-    "Limits the number of features requested per lookup to protect performance.",
+  maxResultsDescription: "Limit parcel queries to protect performance.",
   resetMaxResults: "Reset to default",
-  enableToggleRemovalLabel: "Enable toggle removal",
-  enableToggleRemovalDescription:
-    "Allow users to deselect properties by clicking them again on the map.",
-  enablePIIMaskingLabel: "Enable PII masking",
-  enablePIIMaskingDescription:
-    "Mask personally identifiable information (names, addresses) for privacy protection.",
+  enableToggleRemovalLabel: "Toggle removal",
+  enableToggleRemovalDescription: "Let users click a parcel again to clear it.",
+  enablePIIMaskingLabel: "PII masking",
+  enablePIIMaskingDescription: "Mask names and addresses inside the widget.",
   autoZoomOnSelectionLabel: "Auto zoom to results",
-  autoZoomOnSelectionDescription:
-    "Automatically zoom the map to the extent of the current selection after each successful query.",
-  highlightOptionsDescription:
-    "Customize how selected properties are emphasized on the map.",
+  autoZoomOnSelectionDescription: "Zoom to selected parcels after each query.",
+  highlightOptionsDescription: "Adjust how selected parcels appear on the map.",
   highlightColorLabel: "Highlight color",
   highlightOpacityLabel: "Fill opacity",
   highlightOutlineWidthLabel: "Outline width",
+  highlightOutlineWidthLabelTooltip:
+    "Set the outline width for highlighted parcels.",
   allowedHostsLabel: "Allowed hosts",
-  allowedHostsDescription:
-    "Add hostnames that should pass URL validation. Leave empty to allow all HTTPS ArcGIS services.",
+  allowedHostsDescription: "Whitelist HTTPS hosts that should pass URL checks.",
   allowedHostsPlaceholder: "lund.se",
   addAllowedHostLabel: "Add allowed host",
   allowedHostsListLabel: "Allowed host entries",
-  allowedHostsEmptyHint: "No allowed hosts added yet.",
+  allowedHostsEmptyHint: "No allowed hosts yet.",
   removeAllowedHostLabel: "Remove allowed host",
-  relationshipTitle: "Relationship configuration",
-  enableBatchOwnerQueryLabel: "Enable batch owner queries",
+  enableBatchOwnerQueryLabel: "Batch owner queries",
   enableBatchOwnerQueryDescription:
-    "Use relationship class to fetch all owners in a single query instead of individual requests. Requires relationship configuration in ArcGIS layer.",
+    "Use a relationship to fetch all owners in one request.",
   relationshipIdLabel: "Relationship ID",
   relationshipIdDescription:
-    "The relationship class ID that links property parcels to ownership records. Find this in your layer's REST API endpoint under 'relationships' array.",
+    "Relationship ID that links parcels to owner records.",
   relationshipIdPlaceholder: "e.g., 0, 1, 2",
   relationshipIdTooltip:
-    "Check /MapServer/[layerId]?f=json in your property layer URL to find available relationships.",
+    "Open /MapServer/[layerId]?f=json to list relationship IDs.",
   errorInvalidUrl: "Enter a valid ArcGIS REST service URL.",
   errorInvalidNumber: "Enter a whole number greater than zero.",
   errorMaxResultsInvalid: "Max results must be between 1 and 1000.",
