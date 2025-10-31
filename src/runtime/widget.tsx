@@ -588,6 +588,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             : null,
         })
 
+        console.log("=== FULL JSON RESPONSE ===")
+        console.log(JSON.stringify(propertyResults, null, 2))
+        console.log("=== END JSON RESPONSE ===")
+
         // Step 4: Process results and enrich with owner data
         const useBatchQuery =
           config.enableBatchOwnerQuery &&
