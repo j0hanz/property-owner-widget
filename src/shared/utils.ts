@@ -11,6 +11,8 @@ import {
   MIN_MASK_LENGTH,
   MAX_MASK_ASTERISKS,
   OWNER_QUERY_CONCURRENCY,
+  DEFAULT_HIGHLIGHT_COLOR,
+  HIGHLIGHT_SYMBOL_ALPHA,
 } from "../config/constants"
 
 /** Sanitize HTML content and normalize whitespace */
@@ -20,6 +22,9 @@ const sanitizeText = (str: string): string => {
   const text = doc.body.textContent || ""
   return text.replace(/[\s\u00A0\u200B]+/g, " ").trim()
 }
+
+/** Public helper to strip HTML tags and normalize whitespace */
+export const stripHtml = (value: string): string => sanitizeText(value)
 
 /** Mask text with minimum length validation */
 const maskText = (text: string, minLength: number): string => {
@@ -115,6 +120,35 @@ export const formatPropertyWithShare = (
   return trimmedShare ? `${property} (${trimmedShare})` : property
 }
 
+const HEX_COLOR_PATTERN = /^#?([0-9a-fA-F]{6})$/
+
+export const buildHighlightColor = (
+  color?: string,
+  opacity?: number
+): [number, number, number, number] => {
+  const fallbackOpacity = HIGHLIGHT_SYMBOL_ALPHA
+  const fallbackColor = DEFAULT_HIGHLIGHT_COLOR
+
+  const sanitized = typeof color === "string" ? color.trim() : ""
+  const match = sanitized ? HEX_COLOR_PATTERN.exec(sanitized) : null
+  const hex = match ? match[1] : fallbackColor.replace("#", "")
+
+  const r = parseInt(hex.substring(0, 2), 16)
+  const g = parseInt(hex.substring(2, 4), 16)
+  const b = parseInt(hex.substring(4, 6), 16)
+
+  const clampedOpacity = (() => {
+    if (typeof opacity !== "number" || !Number.isFinite(opacity)) {
+      return fallbackOpacity
+    }
+    if (opacity < 0) return 0
+    if (opacity > 1) return 1
+    return opacity
+  })()
+
+  return [r, g, b, clampedOpacity]
+}
+
 /** Reformat existing grid rows with new PII masking setting */
 export const reformatGridRows = (
   rows: GridRowData[],
@@ -169,7 +203,11 @@ const isHostAllowed = (
   allowedHosts?: readonly string[]
 ): boolean => {
   if (!allowedHosts || allowedHosts.length === 0) return true
-  return allowedHosts.some((h) => hostname === h || hostname.endsWith("." + h))
+  return allowedHosts.some((h) => {
+    if (hostname === h) return true
+    const suffix = "." + h
+    return hostname.endsWith(suffix)
+  })
 }
 
 /** Validate ArcGIS REST service URL with host allowlist enforcement */
@@ -587,7 +625,7 @@ const validateAndDeduplicateProperties = (
   extractFnr: (attrs: any) => string | number | null,
   maxResults?: number
 ): Array<{ fnr: string | number; attrs: any; graphic: __esri.Graphic }> => {
-  const processedFnrs = new Set<string | number>()
+  const processedFnrs = new Set<string>()
   const validatedProperties: Array<{
     fnr: string | number
     attrs: any
@@ -596,11 +634,16 @@ const validateAndDeduplicateProperties = (
 
   for (const propertyResult of propertyResults) {
     const validated = validatePropertyFeature(propertyResult, extractFnr)
-    if (validated && !processedFnrs.has(validated.fnr)) {
-      processedFnrs.add(validated.fnr)
-      validatedProperties.push(validated)
-      if (maxResults && validatedProperties.length >= maxResults) break
+    if (!validated) {
+      continue
     }
+    const fnrKey = normalizeFnrKey(validated.fnr)
+    if (processedFnrs.has(fnrKey)) {
+      continue
+    }
+    processedFnrs.add(fnrKey)
+    validatedProperties.push(validated)
+    if (maxResults && validatedProperties.length >= maxResults) break
   }
 
   return validatedProperties

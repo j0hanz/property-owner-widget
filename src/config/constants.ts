@@ -8,6 +8,7 @@ export const ESRI_MODULES_TO_LOAD = [
 ] as const
 
 export const GRID_COLUMN_KEYS = {
+  SELECT: "select",
   FASTIGHET: "FASTIGHET",
   BOSTADR: "BOSTADR",
 } as const
@@ -23,12 +24,6 @@ export const MIN_MASK_LENGTH = 3
 export const MAX_MASK_ASTERISKS = 3
 export const DEFAULT_HIGHLIGHT_COLOR = "#00B4D8"
 export const HIGHLIGHT_SYMBOL_ALPHA = 0.4 // 40% opacity ensures underlying features visible.
-export const HIGHLIGHT_COLOR_RGBA: [number, number, number, number] = [
-  0,
-  180,
-  216,
-  HIGHLIGHT_SYMBOL_ALPHA,
-]
 export const OUTLINE_WIDTH = 2 // 2px meets WCAG 1.4.11 non-text contrast 3:1 ratio.
 export const DEFAULT_MAX_RESULTS = 100
 export const OWNER_QUERY_CONCURRENCY = 5
@@ -36,8 +31,16 @@ export const OWNER_QUERY_CONCURRENCY = 5
 // Request deduplication timeout (ms) - prevents duplicate queries within this window
 export const QUERY_DEDUPLICATION_TIMEOUT = 300
 
+// Maximum cache size for query deduplication - prevents unbounded memory growth
+export const MAX_QUERY_CACHE_SIZE = 100
+
 // AbortController pool size for efficient cancellation management
+// Size chosen to handle typical concurrent operations (property + owner queries)
 export const ABORT_CONTROLLER_POOL_SIZE = 10
+
+// Debounce duration (ms) for stabilizing loading indicator visibility
+// 200ms balances perceived responsiveness vs flicker prevention
+export const LOADING_VISIBILITY_DEBOUNCE_MS = 200
 
 export const PROPERTY_QUERY_CACHE = new Map<string, InflightQuery>()
 export const OWNER_QUERY_CACHE = new Map<string, InflightQuery>()

@@ -12,6 +12,10 @@ export interface Config {
   enablePIIMasking: boolean
   relationshipId?: number
   enableBatchOwnerQuery: boolean
+  autoZoomOnSelection?: boolean
+  highlightColor?: string
+  highlightOpacity?: number
+  outlineWidth?: number
 }
 
 export type IMConfig = ImmutableObject<Config>
@@ -86,6 +90,7 @@ export interface ErrorState {
 export interface PropertyWidgetState {
   error: ErrorState | null
   selectedProperties: GridRowData[]
+  isQueryInFlight: boolean
 }
 
 export interface QueryResult {
@@ -233,4 +238,10 @@ export interface PropertyTableProps {
   columns: Array<ColumnDef<GridRowData, any>>
   translate: (key: string) => string
   styles: WidgetStyles
+}
+
+export interface LoadingBlockProps {
+  styles: WidgetStyles
+  translate: (key: string) => string
+  size?: number
 }

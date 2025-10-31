@@ -4,40 +4,59 @@ System.register([], function (e) {
       e({
         configurationInstructions:
           "Konfigurera widgeten genom att ange lager-URL:er och visningsinställningar.",
-        mapWidgetTitle: "Kartkoppling",
+        mapWidgetTitle: "Kartkonfiguration",
         mapWidgetDescription:
-          "Välj en kartwidget för att aktivera fastighetsfrågor genom att klicka på kartan. Widgeten kommer att lyssna efter kartklick och hämta fastighetsinformation vid den klickade platsen.",
-        dataSourcesTitle: "Datakällor",
+          "Välj en befintlig kartwidget för att aktivera fastighetssökning.",
         dataSourcesDescription:
-          "Välj ett objektlager som innehåller fastighets- och ägarinformation. Lagret måste ha FNR-fält för att identifiera fastigheter och ägarattribut (NAMN, BOSTADR, etc.).",
-        dataSourceLabel: "Objektlager",
-        dataSourceTooltip:
-          "Portal- eller tjänst-URL som innehåller fastighets- och ägarinformation.",
-        displayOptionsTitle: "Visningsalternativ",
+          "Säkerställ att fastighets- och ägarlager delar FNR-fält.",
+        propertyDataSourceLabel: "Fastighetslager",
+        propertyDataSourceDescription:
+          "Fastighetslager med geometri och FNR-värden.",
+        ownerDataSourceLabel: "Ägarlager",
+        ownerDataSourceDescription:
+          "Ägarlager eller tabell med NAMN- och BOSTADR-fält.",
+        panelDisplaySettings: "Visningsbeteende",
+        advancedSettingsTitle: "Avancerade inställningar",
+        panelHighlightSettings: "Markeringsstil",
+        highlightColorLabelTooltip:
+          "Välj färg för att markera valda fastigheter.",
+        highlightOpacityLabelTooltip:
+          "Ange fyllnadsopacitet för markerade fastigheter.",
         maxResultsLabel: "Maximalt antal resultat",
         maxResultsDescription:
-          "Begränsar hur många objekt som hämtas per sökning för att skydda prestandan.",
+          "Maximalt antal fastigheter som ska returneras per fråga.",
         resetMaxResults: "Återställ standardvärde",
-        enableToggleRemovalLabel: "Aktivera växlingsborttagning",
+        enableToggleRemovalLabel: "Växlingsborttagning",
         enableToggleRemovalDescription:
-          "Tillåt användare att avmarkera fastigheter genom att klicka på dem igen i kartan.",
-        enablePIIMaskingLabel: "Aktivera PII-maskning",
-        enablePIIMaskingDescription:
-          "Maskera personligt identifierbar information (namn, adresser) för integritetsskydd.",
+          "Tillåt ett nytt klick för att avmarkera fastigheten.",
+        enablePIIMaskingLabel: "PII-maskning",
+        enablePIIMaskingDescription: "Maskera namn och adresser i widgeten.",
+        autoZoomOnSelectionLabel: "Zooma till resultat",
+        autoZoomOnSelectionDescription: "Zomma till markerade fastigheter.",
+        highlightOptionsDescription:
+          "Styr hur markerade fastigheter visas på kartan.",
+        highlightColorLabel: "Markeringsfärg",
+        highlightOpacityLabel: "Fyllnadsopacitet",
+        highlightOutlineWidthLabel: "Linjebredd",
+        highlightOutlineWidthLabelTooltip:
+          "Ange linjebredden för markerade fastigheter.",
         allowedHostsLabel: "Tillåtna värdar",
         allowedHostsDescription:
-          "Lista över tillåtna värdnamn för URL-validering (en per rad). Lämna tomt för att tillåta alla HTTPS ArcGIS-tjänster.",
-        allowedHostsPlaceholder: "lund.se\narcgis.com\nesri.com",
-        relationshipTitle: "Relationskonfiguration",
-        enableBatchOwnerQueryLabel: "Aktivera batch-ägarsökningar",
+          "Tillåtna HTTPS-värdar som ska användas för tjänster.",
+        allowedHostsPlaceholder: "lund.se",
+        addAllowedHostLabel: "Lägg till tillåten värd",
+        allowedHostsListLabel: "Tillåtna värdposter",
+        allowedHostsEmptyHint: "Inga värdar tillåtna ännu.",
+        removeAllowedHostLabel: "Ta bort tillåten värd",
+        enableBatchOwnerQueryLabel: "Batch-ägarförfrågan",
         enableBatchOwnerQueryDescription:
-          "Använd relationsklass för att hämta alla ägare i en enda fråga istället för enskilda förfrågningar. Kräver relationskonfiguration i ArcGIS-lager.",
+          "Aktivera relation för att hämta alla ägare i en förfrågan.",
         relationshipIdLabel: "Relations-ID",
         relationshipIdDescription:
-          "Relationsklassens ID som länkar fastighetsskiften till ägaruppgifter. Hitta detta i ditt lagers REST API-slutpunkt under 'relationships'-arrayen.",
+          "ID för relationen mellan fastigheter och ägare.",
         relationshipIdPlaceholder: "t.ex. 0, 1, 2",
         relationshipIdTooltip:
-          "Kontrollera /MapServer/[layerId]?f=json i din fastighetslager-URL för att hitta tillgängliga relationer.",
+          "Öppna /MapServer/[layerId]?f=json för att se relations-ID.",
         errorInvalidUrl: "Ange en giltig ArcGIS REST-tjänst-URL.",
         errorInvalidNumber: "Ange ett heltal större än noll.",
         errorMaxResultsInvalid: "Max resultat måste vara mellan 1 och 1000.",

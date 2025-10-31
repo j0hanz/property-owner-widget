@@ -59,7 +59,11 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       },
       padding: spacing?.(1),
     }),
-    body: createFlex("column", { flex: "1 1 0", overflow: "auto" }),
+    body: createFlex("column", {
+      flex: "1 1 0",
+      overflow: "auto",
+      position: "relative",
+    }),
     tableContainer: createFlex("column", {
       flex: "1 1 0",
       overflow: "hidden",
@@ -118,6 +122,18 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       textAlign: "center",
       opacity: 0.7,
     }),
+    loadingInline: css({
+      marginBlockStart: spacing?.(2),
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing?.(1),
+    }),
+    loadingMessage: css({
+      fontFamily: typography?.body1?.fontFamily,
+      fontSize: typography?.body1?.fontSize,
+    }),
     loadingState: css({
       ...centeredFlex,
     }),
@@ -146,14 +162,81 @@ export const useWidgetStyles = (): WidgetStyles => {
 
 export const createSettingStyles = (theme: IMThemeVariables) => {
   const spacing = theme.sys.spacing
-  const colors = theme.sys.color
   const typography = theme.sys.typography
 
   return {
+    row: css({ width: "100%", margin: "16px 0 !important" }),
+    fullWidth: createFlex("column", {
+      inlineSize: "100%",
+      flex: "1 1 auto",
+      minInlineSize: 0,
+    }),
+    labelWithTooltip: createFlex("row", {
+      alignItems: "center",
+      gap: spacing?.(1),
+    }),
+    tooltipTrigger: css({
+      margin: "0 !important",
+      padding: "0 !important",
+      opacity: 0.6,
+      "&:hover": {
+        opacity: 1,
+      },
+    }),
     description: css({
-      fontSize: typography?.body1?.fontSize,
-      color: colors?.surface?.backgroundHint,
+      fontSize: typography?.body2?.fontSize,
       marginBlockStart: spacing?.(1),
+    }),
+    sliderWrap: createFlex("column", {
+      inlineSize: "100%",
+    }),
+    sliderTrack: createFlex("row", {
+      alignItems: "center",
+      inlineSize: "100%",
+      gap: spacing?.(2),
+    }),
+    sliderControl: css({
+      flex: "1 1 auto",
+      inlineSize: "100%",
+    }),
+    sliderValue: css({
+      textAlign: "right",
+      fontSize: typography?.label2?.fontSize,
+    }),
+    allowedHostInputRow: createFlex("row", {
+      inlineSize: "100%",
+      alignItems: "center",
+    }),
+    allowedHostInput: css({
+      flex: "1 1 auto",
+      inlineSize: "100%",
+      minInlineSize: 0,
+    }),
+    allowedHostList: createFlex("column", {
+      inlineSize: "100%",
+      ".input-wrapper": {
+        background: "transparent !important",
+        borderColor: "rgb(106, 106, 106) !important",
+      },
+      "&.disabled .input-wrapper, &.readonly .input-wrapper": {
+        background: "transparent !important",
+        borderColor: "rgb(106, 106, 106) !important",
+        opacity: 1,
+        color: "rgb(168, 168, 168)",
+        WebkitTextFillColor: "rgb(168, 168, 168)",
+      },
+    }),
+    addAllowedHostButton: css({
+      border: "none !important",
+    }),
+    allowedHostListRow: createFlex("row", {
+      inlineSize: "100%",
+      alignItems: "center",
+    }),
+    allowedHostListInput: css({
+      flex: "1 1 auto",
+      inlineSize: "100%",
+      minInlineSize: 0,
     }),
   } as const
 }

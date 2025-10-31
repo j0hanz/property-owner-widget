@@ -13,6 +13,7 @@ import type {
 import { buildFnrWhereClause, parseArcGISError, isAbortError } from "./utils"
 import {
   QUERY_DEDUPLICATION_TIMEOUT,
+  MAX_QUERY_CACHE_SIZE,
   PROPERTY_QUERY_CACHE,
   OWNER_QUERY_CACHE,
 } from "../config/constants"
@@ -51,6 +52,14 @@ const getOrCreateQuery = <T>(
     .finally(() => {
       setTimeout(() => cache.delete(key), QUERY_DEDUPLICATION_TIMEOUT)
     })
+
+  // Implement LRU eviction to prevent unbounded cache growth
+  if (cache.size >= MAX_QUERY_CACHE_SIZE) {
+    const firstKey = cache.keys().next().value
+    if (firstKey !== undefined) {
+      cache.delete(firstKey)
+    }
+  }
 
   cache.set(key, { promise, timestamp: now })
   return promise

@@ -14,5 +14,9 @@
 		"esri.com"
 	],
 	"enableBatchOwnerQuery": false,
-	"relationshipId": 0
+	"relationshipId": 0,
+	"autoZoomOnSelection": false,
+	"highlightColor": "#00B4D8",
+	"highlightOpacity": 0.4,
+	"outlineWidth": 2
 }

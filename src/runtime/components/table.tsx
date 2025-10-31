@@ -1,12 +1,19 @@
 /** @jsx jsx */
 import { React, jsx } from "jimu-core"
+import { Checkbox } from "jimu-ui"
 import { useReactTable, flexRender } from "@tanstack/react-table"
-import type { SortingState, ColumnFiltersState } from "@tanstack/react-table"
+import type {
+  SortingState,
+  ColumnFiltersState,
+  RowSelectionState,
+} from "@tanstack/react-table"
 import type { PropertyTableProps } from "../../config/types"
 import {
   createTableConfig,
+  createSelectColumn,
   getDefaultSorting,
   getDefaultColumnFilters,
+  getDefaultRowSelection,
   getRowId,
   getVisibleRows,
 } from "../../shared/config"
@@ -19,17 +26,27 @@ export const PropertyTable = (props: PropertyTableProps) => {
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
     getDefaultColumnFilters()
   )
+  const [rowSelection, setRowSelection] = React.useState<RowSelectionState>(
+    getDefaultRowSelection()
+  )
+
+  const columnsWithSelect = [
+    createSelectColumn(IndeterminateCheckbox),
+    ...columns,
+  ]
 
   const table = useReactTable({
     data,
-    columns,
+    columns: columnsWithSelect,
     getRowId,
     state: {
       sorting,
       columnFilters,
+      rowSelection,
     },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
+    onRowSelectionChange: setRowSelection,
     ...createTableConfig(),
   })
 
@@ -99,4 +116,13 @@ export const PropertyTable = (props: PropertyTableProps) => {
       </table>
     </div>
   )
+}
+
+const IndeterminateCheckbox = (props: {
+  checked?: boolean
+  indeterminate?: boolean
+  disabled?: boolean
+  onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void
+}) => {
+  return <Checkbox {...props} />
 }

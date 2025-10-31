@@ -8,6 +8,7 @@ import type {
   ColumnDef,
   SortingState,
   ColumnFiltersState,
+  RowSelectionState,
   Table,
   Row,
 } from "@tanstack/react-table"
@@ -15,6 +16,30 @@ import type { GridRowData } from "../config/types"
 import { GRID_COLUMN_KEYS } from "../config/constants"
 
 const columnHelper = createColumnHelper<GridRowData>()
+
+export const createSelectColumn = (
+  CheckboxComponent: any
+): ColumnDef<GridRowData, any> => {
+  return {
+    id: GRID_COLUMN_KEYS.SELECT,
+    header: ({ table }) => {
+      return CheckboxComponent({
+        checked: table.getIsAllRowsSelected(),
+        indeterminate: table.getIsSomeRowsSelected(),
+        onChange: table.getToggleAllRowsSelectedHandler(),
+      })
+    },
+    cell: ({ row }) => {
+      return CheckboxComponent({
+        checked: row.getIsSelected(),
+        disabled: !row.getCanSelect(),
+        onChange: row.getToggleSelectedHandler(),
+      })
+    },
+    enableSorting: false,
+    enableColumnFilter: false,
+  }
+}
 
 export const createPropertyTableColumns = (params: {
   translate: (key: string) => string
@@ -46,6 +71,7 @@ export const createTableConfig = () => ({
   enableColumnFilters: true,
   enableFilters: true,
   enableMultiSort: false,
+  enableRowSelection: true,
   getCoreRowModel: getCoreRowModel(),
   getSortedRowModel: getSortedRowModel(),
   getFilteredRowModel: getFilteredRowModel(),
@@ -54,6 +80,8 @@ export const createTableConfig = () => ({
 export const getDefaultSorting = (): SortingState => []
 
 export const getDefaultColumnFilters = (): ColumnFiltersState => []
+
+export const getDefaultRowSelection = (): RowSelectionState => ({})
 
 export const getRowId = (row: GridRowData): string => row.id
 

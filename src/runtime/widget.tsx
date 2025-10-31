@@ -14,9 +14,17 @@ import {
   type ImmutableObject,
 } from "jimu-core"
 import { JimuMapViewComponent } from "jimu-arcgis"
-import { Alert, Button, Loading, LoadingType, SVG } from "jimu-ui"
+import {
+  Alert,
+  Button,
+  Loading,
+  LoadingType,
+  SVG,
+  defaultMessages as jimuUIMessages,
+} from "jimu-ui"
 import { PropertyTable } from "./components/table"
 import { createPropertyTableColumns } from "../shared/config"
+import defaultMessages from "./translations/default"
 import type {
   IMConfig,
   ErrorBoundaryProps,
@@ -55,8 +63,11 @@ import {
   validateDataSources,
   cleanupRemovedGraphics,
   isValidationFailure,
+  buildHighlightColor,
 } from "../shared/utils"
-import { HIGHLIGHT_COLOR_RGBA, OUTLINE_WIDTH } from "../config/constants"
+import {
+  OUTLINE_WIDTH,
+} from "../config/constants"
 import {
   trackEvent,
   trackError,
@@ -99,6 +110,50 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
     console.log("syncSelectionGraphics: failed to sync graphics with state")
   }
 }
+
+const extractUseDataSourceId = (
+  useDataSource: ImmutableObject<UseDataSource> | null | undefined
+): string | null => {
+  if (!useDataSource) {
+    return null
+  }
+
+  const getId = (useDataSource as any)?.get
+  if (typeof getId === "function") {
+    return getId.call(useDataSource, "dataSourceId") ?? null
+  }
+
+  return (useDataSource as any)?.dataSourceId ?? null
+}
+
+const findUseDataSourceById = (
+  useDataSources: AllWidgetProps<IMConfig>["useDataSources"],
+  dataSourceId?: string
+): ImmutableObject<UseDataSource> | null => {
+  if (!dataSourceId || !useDataSources) {
+    return null
+  }
+
+  const collection = useDataSources as unknown as {
+    find: (
+      predicate: (candidate: ImmutableObject<UseDataSource>) => boolean
+    ) => ImmutableObject<UseDataSource> | undefined
+  }
+
+  if (typeof collection.find !== "function") {
+    return null
+  }
+
+  const match = collection.find((candidate) => {
+    if (!candidate) {
+      return false
+    }
+    return extractUseDataSourceId(candidate) === dataSourceId
+  })
+
+  return match ?? null
+}
+
 
 // Error boundaries require class components in React (no functional equivalent)
 class PropertyWidgetErrorBoundary extends React.Component<
@@ -147,7 +202,7 @@ class PropertyWidgetErrorBoundary extends React.Component<
 const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const { config, id, useMapWidgetIds } = props
   const styles = useWidgetStyles()
-  const translate = hooks.useTranslation()
+  const translate = hooks.useTranslation(jimuUIMessages, defaultMessages)
 
   const runtimeState = ReactRedux.useSelector(
     (state: IMState) => state.widgetsRuntimeInfo?.[id]?.state
@@ -166,58 +221,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     })
   })
 
-  const getUseDataSourceId = (
-    useDataSource: ImmutableObject<UseDataSource> | null | undefined
-  ): string | null => {
-    if (!useDataSource) {
-      return null
-    }
-
-    const getId = (useDataSource as any)?.get
-    if (typeof getId === "function") {
-      return getId.call(useDataSource, "dataSourceId") ?? null
-    }
-
-    return (useDataSource as any)?.dataSourceId ?? null
-  }
-
-  const getUseDataSourceById = (
-    dataSourceId?: string
-  ): ImmutableObject<UseDataSource> | null => {
-    if (!dataSourceId || !props.useDataSources) {
-      return null
-    }
-
-    const collection = props.useDataSources as unknown as {
-      find: (
-        predicate: (candidate: ImmutableObject<UseDataSource>) => boolean
-      ) => ImmutableObject<UseDataSource> | undefined
-    }
-
-    if (typeof collection.find !== "function") {
-      return null
-    }
-
-    const match = collection.find((candidate) => {
-      if (!candidate) {
-        return false
-      }
-
-      const getId = (candidate as any)?.get
-      if (typeof getId === "function") {
-        return getId.call(candidate, "dataSourceId") === dataSourceId
-      }
-
-      return (candidate as any)?.dataSourceId === dataSourceId
-    })
-
-    return match ?? null
-  }
-
-  const propertyUseDataSource = getUseDataSourceById(
+  const propertyUseDataSource = findUseDataSourceById(
+    props.useDataSources,
     config.propertyDataSourceId
   )
-  const ownerUseDataSource = getUseDataSourceById(config.ownerDataSourceId)
+  const ownerUseDataSource = findUseDataSourceById(
+    props.useDataSources,
+    config.ownerDataSourceId
+  )
+  const propertyUseDataSourceId = extractUseDataSourceId(propertyUseDataSource)
+  const ownerUseDataSourceId = extractUseDataSourceId(ownerUseDataSource)
 
   const {
     modules,
@@ -244,12 +257,61 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const [state, setState] = React.useState<PropertyWidgetState>({
     error: null,
     selectedProperties: [],
+    isQueryInFlight: false,
+  })
+  const isMountedRef = React.useRef(true)
+
+  const hasSelectedProperties = state.selectedProperties.length > 0
+
+  const renderConfiguredContent = hooks.useEventCallback(() => {
+    if (state.error) {
+      return (
+        <div css={styles.emptyState} role="alert" aria-live="assertive">
+          <Alert type="error" withIcon text={state.error.message} />
+          {state.error.details && <div>{state.error.details}</div>}
+        </div>
+      )
+    }
+
+    if (hasSelectedProperties) {
+      return (
+        <PropertyTable
+          data={state.selectedProperties}
+          columns={tableColumns()}
+          translate={translate}
+          styles={styles}
+        />
+      )
+    }
+
+    return (
+      <div css={styles.emptyState} role="status" aria-live="polite">
+        <SVG css={styles.svgState} src={mapSelect} width={100} height={100} />
+        <div css={styles.messageState}>
+          {translate("clickMapToSelectProperties")}
+        </div>
+      </div>
+    )
   })
 
   const maxResults = config.maxResults
   const toggleEnabled = config.enableToggleRemoval
   const piiMaskingEnabled = config.enablePIIMasking
   const mapWidgetId = useMapWidgetIds?.[0]
+  const autoZoomEnabled = !!config.autoZoomOnSelection
+  const highlightColorRgba = buildHighlightColor(
+    config.highlightColor,
+    config.highlightOpacity
+  )
+  const highlightOutlineWidth = (() => {
+    const width = config.outlineWidth
+    if (typeof width !== "number" || !Number.isFinite(width)) {
+      return OUTLINE_WIDTH
+    }
+    if (width < 0.5) return 0.5
+    if (width > 10) return 10
+    return width
+  })()
 
   hooks.useUpdateEffect(() => {
     setState((prev) => {
@@ -347,6 +409,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         ...prev,
         selectedProperties: [],
         error: null,
+        isQueryInFlight: false,
       }
     })
   })
@@ -409,9 +472,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   const setError = hooks.useEventCallback(
     (type: ErrorType, message: string, details?: string) => {
+      if (!isMountedRef.current) {
+        return
+      }
       setState((prev) => ({
         ...prev,
         error: { type, message, details },
+        isQueryInFlight: false,
       }))
     }
   )
@@ -472,6 +539,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       setState((prev) => ({
         ...prev,
         error: null,
+        isQueryInFlight: true,
       }))
 
       const controller = getController()
@@ -489,7 +557,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           if (isStaleRequest()) {
             return
           }
-          setState((prev) => ({ ...prev, loading: false }))
           tracker.failure("aborted")
           return
         }
@@ -631,8 +698,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
               extractFnr,
               normalizeFnrKey,
             },
-            highlightColor: HIGHLIGHT_COLOR_RGBA,
-            outlineWidth: OUTLINE_WIDTH,
+            highlightColor: highlightColorRgba,
+            outlineWidth: highlightOutlineWidth,
           }
 
           // Track toggle removals
@@ -652,6 +719,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           return {
             ...prev,
             selectedProperties: updatedRows,
+            isQueryInFlight: false,
           }
         })
 
@@ -672,6 +740,56 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         if (syncParams) {
           syncSelectionGraphics(syncParams)
+        }
+
+        if (
+          autoZoomEnabled &&
+          syncParams &&
+          syncParams.selectedRows.length > 0 &&
+          config.propertyDataSourceId
+        ) {
+          const view = getCurrentView()
+          if (view) {
+            const fnrsForZoom = Array.from(
+              new Set(
+                syncParams.selectedRows.map((row) =>
+                  row.FNR != null ? String(row.FNR) : null
+                )
+              )
+            ).filter((fnr): fnr is string => !!fnr)
+
+            if (fnrsForZoom.length > 0) {
+              const zoomController = getController()
+              try {
+                const extent = await queryExtentForProperties(
+                  fnrsForZoom,
+                  config.propertyDataSourceId,
+                  manager,
+                  { signal: zoomController.signal }
+                )
+
+                if (
+                  extent &&
+                  !zoomController.signal.aborted &&
+                  !isStaleRequestSnapshot()
+                ) {
+                  await view.goTo(extent.expand(1.2), { duration: 1000 })
+                  trackEvent({
+                    category: "Navigation",
+                    action: "auto_zoom_to_results",
+                    value: fnrsForZoom.length,
+                  })
+                }
+              } catch (error) {
+                if (!isAbortError(error)) {
+                  console.error("Auto zoom failed", error)
+                  trackError("auto_zoom", error)
+                }
+              } finally {
+                releaseController(zoomController)
+              }
+            }
+          }
         }
 
         tracker.success()
@@ -702,6 +820,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         tracker.failure("query_error")
         trackError("property_query", error)
       } finally {
+        if (isMountedRef.current && !isStaleRequest()) {
+          setState((prev) => ({
+            ...prev,
+            isQueryInFlight: false,
+          }))
+        }
         releaseController(controller)
       }
     }
@@ -716,6 +840,38 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       restorePopup,
       onMapClick: handleMapClick,
     })
+
+  hooks.useUpdateEffect(() => {
+    if (state.selectedProperties.length === 0) {
+      return
+    }
+
+    const graphicsToAdd = state.selectedProperties
+      .map((row) =>
+        row.graphic ? { graphic: row.graphic, fnr: row.FNR } : null
+      )
+      .filter(Boolean) as Array<{
+      graphic: __esri.Graphic
+      fnr: string | number
+    }>
+
+    if (graphicsToAdd.length === 0) {
+      return
+    }
+
+    syncSelectionGraphics({
+      graphicsToAdd,
+      selectedRows: state.selectedProperties,
+      getCurrentView,
+      helpers: {
+        addGraphicsToMap,
+        extractFnr,
+        normalizeFnrKey,
+      },
+      highlightColor: highlightColorRgba,
+      outlineWidth: highlightOutlineWidth,
+    })
+  }, [config.highlightColor, config.highlightOpacity, config.outlineWidth])
 
   hooks.useUpdateEffect(() => {
     const isOpening =
@@ -750,6 +906,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   ])
 
   hooks.useUnmount(() => {
+    isMountedRef.current = false
     abortAll()
     clearQueryCache()
   })
@@ -812,8 +969,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         />
       ) : null}
       {ownerUseDataSource &&
-      getUseDataSourceId(ownerUseDataSource) !==
-        getUseDataSourceId(propertyUseDataSource) ? (
+      ownerUseDataSourceId !== propertyUseDataSourceId ? (
         <DataSourceComponent
           key={`${id}-owner-ds`}
           useDataSource={ownerUseDataSource}
@@ -843,8 +999,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           </Button>
         </div>
       </div>
-      <div css={styles.body} role="main">
-        {!isConfigured && (
+      <div
+        css={styles.body}
+        role="main"
+      >
+        {!isConfigured ? (
           <div css={styles.emptyState} role="status" aria-live="polite">
             <SVG
               css={styles.svgState}
@@ -856,41 +1015,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
               {translate("widgetNotConfigured")}
             </div>
           </div>
+        ) : (
+          renderConfiguredContent()
         )}
-
-        {isConfigured && state.error && (
-          <div css={styles.emptyState} role="alert" aria-live="assertive">
-            <Alert type="error" withIcon text={state.error.message} />
-            {state.error.details && <div>{state.error.details}</div>}
-          </div>
-        )}
-
-        {isConfigured &&
-          !state.error &&
-          state.selectedProperties.length === 0 && (
-            <div css={styles.emptyState} role="status" aria-live="polite">
-              <SVG
-                css={styles.svgState}
-                src={mapSelect}
-                width={100}
-                height={100}
-              />
-              <div css={styles.messageState}>
-                {translate("clickMapToSelectProperties")}
-              </div>
-            </div>
-          )}
-
-        {isConfigured &&
-          !state.error &&
-          state.selectedProperties.length > 0 && (
-            <PropertyTable
-              data={state.selectedProperties}
-              columns={tableColumns()}
-              translate={translate}
-              styles={styles}
-            />
-          )}
       </div>
 
       <div css={styles.footer}>
@@ -910,7 +1037,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
 const Widget = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const styles = useWidgetStyles()
-  const translate = hooks.useTranslation()
+  const translate = hooks.useTranslation(jimuUIMessages, defaultMessages)
   return (
     <PropertyWidgetErrorBoundary styles={styles} translate={translate}>
       <WidgetContent {...props} />
