@@ -439,10 +439,24 @@ export const syncGraphicsWithState = (params: {
     selectedRows.map((row) => helpers.normalizeFnrKey(row.FNR))
   )
 
+  console.log("syncGraphicsWithState: processing graphics", {
+    graphicsToAddCount: graphicsToAdd.length,
+    selectedFnrsCount: selectedFnrs.size,
+    selectedFnrs: Array.from(selectedFnrs),
+  })
+
   graphicsToAdd.forEach(({ graphic, fnr }) => {
     const fnrKey = helpers.normalizeFnrKey(fnr)
+    console.log("Processing graphic:", {
+      fnr,
+      fnrKey,
+      hasGeometry: !!graphic?.geometry,
+      geometryType: graphic?.geometry?.type,
+      isInSelectedFnrs: selectedFnrs.has(fnrKey),
+    })
     if (!selectedFnrs.has(fnrKey)) return
 
+    console.log("Calling addGraphicsToMap for FNR:", fnrKey)
     helpers.addGraphicsToMap(
       graphic,
       view,

@@ -639,6 +639,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           rowsToProcessCount: rowsToProcess.length,
           graphicsToAddCount: graphicsToAdd.length,
           firstRow: rowsToProcess[0],
+          firstGraphic: graphicsToAdd[0],
+          firstGraphicHasGeometry: !!graphicsToAdd[0]?.graphic?.geometry,
+          firstGraphicGeometryType: graphicsToAdd[0]?.graphic?.geometry?.type,
         })
 
         if (controller.signal.aborted || isStaleRequest()) {
@@ -724,6 +727,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         }
 
         if (syncParams) {
+          console.log("About to sync graphics:", {
+            graphicsCount: syncParams.graphicsToAdd.length,
+            selectedRowsCount: syncParams.selectedRows.length,
+            highlightColor: syncParams.highlightColor,
+            outlineWidth: syncParams.outlineWidth,
+            hasView: !!getCurrentView(),
+          })
           syncSelectionGraphics(syncParams)
         }
 

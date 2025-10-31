@@ -178,6 +178,13 @@ export const useGraphicsLayer = (
       highlightColor: [number, number, number, number],
       outlineWidth: number
     ) => {
+      console.log("addGraphicsToMap called:", {
+        hasModules: !!modules,
+        hasGraphic: !!graphic,
+        hasView: !!view,
+        hasGeometry: !!graphic?.geometry,
+        geometryType: graphic?.geometry?.type,
+      })
       if (!modules || !graphic || !view) return
       ensureGraphicsLayer(view)
 
@@ -186,6 +193,13 @@ export const useGraphicsLayer = (
 
       const fnr = extractFnr(graphic.attributes || null)
       const symbol = createHighlightSymbol(highlightColor, outlineWidth)
+      console.log("Symbol and graphic details:", {
+        fnr,
+        hasSymbol: !!symbol,
+        symbolColor: symbol?.color,
+        symbolOutlineWidth: symbol?.outline?.width,
+        originalGeometry: graphic.geometry?.type,
+      })
       if (!symbol) return
 
       const highlightGraphic = graphic.clone()
@@ -195,6 +209,11 @@ export const useGraphicsLayer = (
         FNR: fnr,
       }
 
+      console.log("Adding graphic to layer:", {
+        layerId: layer.id,
+        graphicGeometry: highlightGraphic.geometry?.type,
+        graphicSymbol: !!highlightGraphic.symbol,
+      })
       removeGraphicsForFnr(fnr, normalizeFnrKey)
       layer.add(highlightGraphic)
 
