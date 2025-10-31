@@ -343,7 +343,12 @@ export const calculatePropertyUpdates = <
       continue
     }
 
-    if (existingRowIds.has(row.id) || toAddIds.has(row.id)) {
+    const afterRemoval = existingProperties.filter(
+      (existing) => !toRemove.has(normalizeFnrKey(existing.FNR))
+    )
+    const afterRemovalIds = new Set(afterRemoval.map((row) => row.id))
+
+    if (afterRemovalIds.has(row.id) || toAddIds.has(row.id)) {
       continue
     }
 

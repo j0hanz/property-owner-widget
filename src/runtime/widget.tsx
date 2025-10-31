@@ -321,7 +321,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       trackFeatureUsage("pii_masking_toggled", piiMaskingEnabled)
 
       const reformattedProperties = prev.selectedProperties.map((row) => {
-        if (!row.rawOwner) {
+        if (!row.rawOwner || typeof row.rawOwner !== "object") {
           return row
         }
         return {
@@ -532,7 +532,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       const requestId = requestIdRef.current + 1
       requestIdRef.current = requestId
-      const isStaleRequest = () => requestId !== requestIdRef.current
+      const requestIdSnapshot = requestId
+      const isStaleRequest = () => requestIdSnapshot !== requestIdRef.current
 
       setState((prev) => ({
         ...prev,
@@ -734,6 +735,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         if (
           autoZoomEnabled &&
           syncParams &&
+          syncParams.selectedRows &&
           syncParams.selectedRows.length > 0 &&
           config.propertyDataSourceId
         ) {

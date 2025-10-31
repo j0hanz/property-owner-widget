@@ -211,10 +211,11 @@ export const useGraphicsLayer = (
   const destroyGraphicsLayer = hooks.useEventCallback(
     (view: __esri.MapView | null | undefined) => {
       if (view && graphicsLayerRef.current) {
-        view.map?.remove(graphicsLayerRef.current)
-        graphicsLayerRef.current.destroy()
+        const layer = graphicsLayerRef.current
         graphicsLayerRef.current = null
         graphicsMapRef.current.clear()
+        view.map?.remove(layer)
+        layer.destroy()
       }
     }
   )

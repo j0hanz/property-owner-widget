@@ -509,7 +509,7 @@ export const queryExtentForProperties = async (
     result.records.forEach((record: FeatureDataRecord) => {
       const feature = record.getData()
       const geom = feature.geometry as __esri.Geometry
-      if (geom && geom.extent) {
+      if (geom && geom.extent && typeof geom.extent.clone === "function") {
         if (!extent) {
           extent = geom.extent.clone()
         } else {
@@ -602,6 +602,12 @@ export const queryOwnersByRelationship = async (
     relationshipQuery.objectIds = objectIds
     relationshipQuery.relationshipId = relationshipId
     relationshipQuery.outFields = ["*"]
+
+    if (options?.signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      throw abortError
+    }
 
     const result = await queryTask.executeRelationshipQuery(
       relationshipQuery,
@@ -954,25 +960,23 @@ const processBatchQuery = async (
 
   let ownersByFnr: Map<string, OwnerAttributes[]>
   const failedFnrs = new Set<string>()
-  try {
-    ownersByFnr = await helpers.queryOwnersByRelationship(
-      fnrsToQuery,
-      config.propertyDataSourceId,
-      config.ownerDataSourceId,
-      context.dsManager,
-      config.relationshipId,
-      { signal: context.signal }
-    )
-  } catch (error) {
-    if (helpers.isAbortError(error)) {
-      throw error as Error
-    }
-    console.error("Batch owner query failed:", error)
-    ownersByFnr = new Map()
-    fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)))
-  }
-
-  for (const { fnr, attrs, graphic } of validatedProperties) {
+    try {
+      ownersByFnr = await helpers.queryOwnersByRelationship(
+        fnrsToQuery,
+        config.propertyDataSourceId,
+        config.ownerDataSourceId,
+        context.dsManager,
+        config.relationshipId,
+        { signal: context.signal }
+      )
+    } catch (error) {
+      if (helpers.isAbortError(error)) {
+        throw error as Error
+      }
+      console.error("Batch owner query failed for FNRs:", fnrsToQuery, error)
+      ownersByFnr = new Map()
+      fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)))
+    }  for (const { fnr, attrs, graphic } of validatedProperties) {
     const owners = ownersByFnr.get(String(fnr)) || []
 
     if (owners.length > 0) {
