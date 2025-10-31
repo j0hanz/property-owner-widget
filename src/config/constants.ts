@@ -1,5 +1,3 @@
-import type { InflightQuery } from "./types"
-
 export const ESRI_MODULES_TO_LOAD = [
   "esri/symbols/SimpleFillSymbol",
   "esri/Graphic",
@@ -28,12 +26,6 @@ export const OUTLINE_WIDTH = 2 // 2px meets WCAG 1.4.11 non-text contrast 3:1 ra
 export const DEFAULT_MAX_RESULTS = 100
 export const OWNER_QUERY_CONCURRENCY = 5
 
-// Request deduplication timeout (ms) - prevents duplicate queries within this window
-export const QUERY_DEDUPLICATION_TIMEOUT = 300
-
-// Maximum cache size for query deduplication - prevents unbounded memory growth
-export const MAX_QUERY_CACHE_SIZE = 100
-
 // AbortController pool size for efficient cancellation management
 // Size chosen to handle typical concurrent operations (property + owner queries)
 export const ABORT_CONTROLLER_POOL_SIZE = 10
@@ -41,6 +33,3 @@ export const ABORT_CONTROLLER_POOL_SIZE = 10
 // Debounce duration (ms) for stabilizing loading indicator visibility
 // 200ms balances perceived responsiveness vs flicker prevention
 export const LOADING_VISIBILITY_DEBOUNCE_MS = 200
-
-export const PROPERTY_QUERY_CACHE = new Map<string, InflightQuery>()
-export const OWNER_QUERY_CACHE = new Map<string, InflightQuery>()

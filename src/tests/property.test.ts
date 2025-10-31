@@ -809,23 +809,20 @@ describe("Property Widget - Telemetry", () => {
   })
 })
 
-describe("Query Optimizations", () => {
-  it("should deduplicate concurrent queries with same parameters", async () => {
+describe("Query Controls", () => {
+  it("should expose clearQueryCache as a safe no-op", async () => {
     const { clearQueryCache } = await import("../shared/api")
 
-    clearQueryCache()
-
-    expect(clearQueryCache).toBeDefined()
     expect(typeof clearQueryCache).toBe("function")
+    expect(() => clearQueryCache()).not.toThrow()
   })
 
-  it("should use query deduplication timeout constant", () => {
-    const { QUERY_DEDUPLICATION_TIMEOUT } = require("../config/constants")
+  it("should remove deprecated query cache constants", () => {
+    const constants = require("../config/constants")
 
-    expect(QUERY_DEDUPLICATION_TIMEOUT).toBeDefined()
-    expect(typeof QUERY_DEDUPLICATION_TIMEOUT).toBe("number")
-    expect(QUERY_DEDUPLICATION_TIMEOUT).toBeGreaterThan(0)
-    expect(QUERY_DEDUPLICATION_TIMEOUT).toBeLessThanOrEqual(1000)
+    expect("QUERY_DEDUPLICATION_TIMEOUT" in constants).toBe(false)
+    expect("PROPERTY_QUERY_CACHE" in constants).toBe(false)
+    expect("OWNER_QUERY_CACHE" in constants).toBe(false)
   })
 
   it("should configure abort controller pool size", () => {

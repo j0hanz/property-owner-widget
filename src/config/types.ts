@@ -98,11 +98,6 @@ export interface QueryResult {
   propertyId: string | number
 }
 
-export interface InflightQuery {
-  promise: Promise<unknown>
-  timestamp: number
-}
-
 export interface EsriModules {
   SimpleFillSymbol: new (
     properties?: __esri.SimpleFillSymbolProperties

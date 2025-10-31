@@ -8,62 +8,8 @@ import type {
   PropertyAttributes,
   OwnerAttributes,
   QueryResult,
-  InflightQuery,
 } from "../config/types"
 import { buildFnrWhereClause, parseArcGISError, isAbortError } from "./utils"
-import {
-  QUERY_DEDUPLICATION_TIMEOUT,
-  MAX_QUERY_CACHE_SIZE,
-  PROPERTY_QUERY_CACHE,
-  OWNER_QUERY_CACHE,
-} from "../config/constants"
-
-const createQueryKey = (
-  type: "property" | "owner",
-  params: { [key: string]: any }
-): string => {
-  return `${type}:${JSON.stringify(params)}`
-}
-
-const getOrCreateQuery = <T>(
-  cache: Map<string, InflightQuery>,
-  key: string,
-  queryFn: () => Promise<T>,
-  signal?: AbortSignal
-): Promise<T> => {
-  const now = Date.now()
-  const existing = cache.get(key)
-
-  if (existing && now - existing.timestamp < QUERY_DEDUPLICATION_TIMEOUT) {
-    if (signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      return Promise.reject(abortError)
-    }
-    return existing.promise as Promise<T>
-  }
-
-  const promise = queryFn()
-    .catch((error) => {
-      const normalizedError =
-        error instanceof Error ? error : new Error(String(error))
-      throw normalizedError
-    })
-    .finally(() => {
-      setTimeout(() => cache.delete(key), QUERY_DEDUPLICATION_TIMEOUT)
-    })
-
-  // Implement LRU eviction to prevent unbounded cache growth
-  if (cache.size >= MAX_QUERY_CACHE_SIZE) {
-    const firstKey = cache.keys().next().value
-    if (firstKey !== undefined) {
-      cache.delete(firstKey)
-    }
-  }
-
-  cache.set(key, { promise, timestamp: now })
-  return promise
-}
 
 const createSignalOptions = (signal?: AbortSignal): any => {
   return signal ? { signal } : undefined
@@ -75,106 +21,90 @@ export const queryPropertyByPoint = async (
   dsManager: DataSourceManager,
   options?: { signal?: AbortSignal }
 ): Promise<QueryResult[]> => {
-  const queryKey = createQueryKey("property", {
-    x: Math.round(point.x * 100) / 100,
-    y: Math.round(point.y * 100) / 100,
-    wkid: point.spatialReference?.wkid,
-    dsId: dataSourceId,
-  })
+  try {
+    if (options?.signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      throw abortError
+    }
 
-  return getOrCreateQuery(
-    PROPERTY_QUERY_CACHE,
-    queryKey,
-    async () => {
-      try {
-        if (options?.signal?.aborted) {
-          const abortError = new Error("AbortError")
-          abortError.name = "AbortError"
-          throw abortError
-        }
+    const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
+    if (!ds) {
+      throw new Error("Property data source not found")
+    }
 
-        const ds = dsManager.getDataSource(
-          dataSourceId
-        ) as FeatureLayerDataSource
-        if (!ds) {
-          throw new Error("Property data source not found")
-        }
+    const layerUrl = ds.url
+    if (!layerUrl) {
+      throw new Error("Data source URL not available")
+    }
 
-        const layerUrl = ds.url
-        if (!layerUrl) {
-          throw new Error("Data source URL not available")
-        }
+    console.log("Querying layer:", {
+      dataSourceId,
+      url: layerUrl,
+      pointX: point.x,
+      pointY: point.y,
+      wkid: point.spatialReference?.wkid,
+    })
 
-        console.log("Querying layer:", {
-          dataSourceId,
-          url: layerUrl,
-          pointX: point.x,
-          pointY: point.y,
-          wkid: point.spatialReference?.wkid,
-        })
+    // Load FeatureLayer and Query classes
+    const [FeatureLayer, Query] = await loadArcGISJSAPIModules([
+      "esri/layers/FeatureLayer",
+      "esri/rest/support/Query",
+    ])
 
-        // Load FeatureLayer and Query classes
-        const [FeatureLayer, Query] = await loadArcGISJSAPIModules([
-          "esri/layers/FeatureLayer",
-          "esri/rest/support/Query",
-        ])
+    // Create a temporary FeatureLayer from the URL
+    const layer = new FeatureLayer({
+      url: layerUrl,
+    })
 
-        // Create a temporary FeatureLayer from the URL
-        const layer = new FeatureLayer({
-          url: layerUrl,
-        })
+    const query = new Query({
+      geometry: point,
+      returnGeometry: true,
+      outFields: ["*"],
+      spatialRelationship: "intersects",
+    })
 
-        const query = new Query({
-          geometry: point,
-          returnGeometry: true,
-          outFields: ["*"],
-          spatialRelationship: "intersects",
-        })
+    const result = await layer.queryFeatures(
+      query,
+      createSignalOptions(options?.signal)
+    )
 
-        const result = await layer.queryFeatures(
-          query,
-          createSignalOptions(options?.signal)
-        )
+    console.log("Query result:", {
+      featureCount: result?.features?.length || 0,
+      hasFeatures: !!(result?.features && result.features.length > 0),
+      firstFeature: result?.features?.[0]?.attributes,
+    })
 
-        console.log("Query result:", {
-          featureCount: result?.features?.length || 0,
-          hasFeatures: !!(result?.features && result.features.length > 0),
-          firstFeature: result?.features?.[0]?.attributes,
-        })
+    if (options?.signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      throw abortError
+    }
 
-        if (options?.signal?.aborted) {
-          const abortError = new Error("AbortError")
-          abortError.name = "AbortError"
-          throw abortError
-        }
+    if (!result?.features || result.features.length === 0) {
+      console.log("No features found at this location")
+      return []
+    }
 
-        if (!result?.features || result.features.length === 0) {
-          console.log("No features found at this location")
-          return []
-        }
-
-        const mappedResults = result.features.map((feature: __esri.Graphic) => {
-          return {
-            features: [feature],
-            propertyId: (feature.attributes as PropertyAttributes).FNR,
-          }
-        })
-
-        console.log("Mapped results:", {
-          count: mappedResults.length,
-          propertyIds: mappedResults.map((r) => r.propertyId),
-        })
-
-        return mappedResults
-      } catch (error) {
-        if (isAbortError(error)) {
-          throw error as Error
-        }
-        throw new Error(parseArcGISError(error, "Property query failed"))
+    const mappedResults = result.features.map((feature: __esri.Graphic) => {
+      return {
+        features: [feature],
+        propertyId: (feature.attributes as PropertyAttributes).FNR,
       }
-    },
-    options?.signal
-  )
+    })
+
+    console.log("Mapped results:", {
+      count: mappedResults.length,
+      propertyIds: mappedResults.map((r) => r.propertyId),
+    })
+
+    return mappedResults
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error as Error
+    }
+    throw new Error(parseArcGISError(error, "Property query failed"))
+  }
 }
 
 export const queryOwnerByFnr = async (
@@ -183,121 +113,105 @@ export const queryOwnerByFnr = async (
   dsManager: DataSourceManager,
   options?: { signal?: AbortSignal }
 ): Promise<__esri.Graphic[]> => {
-  const queryKey = createQueryKey("owner", {
-    fnr: String(fnr),
-    dsId: dataSourceId,
-  })
+  try {
+    if (options?.signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      throw abortError
+    }
 
-  return getOrCreateQuery(
-    OWNER_QUERY_CACHE,
-    queryKey,
-    async () => {
-      try {
-        if (options?.signal?.aborted) {
-          const abortError = new Error("AbortError")
-          abortError.name = "AbortError"
-          throw abortError
-        }
+    const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
+    if (!ds) {
+      throw new Error("Owner data source not found")
+    }
 
-        const ds = dsManager.getDataSource(
-          dataSourceId
-        ) as FeatureLayerDataSource
-        if (!ds) {
-          throw new Error("Owner data source not found")
-        }
+    const layerUrl = ds.url
+    const layerDef = (ds as any).getLayerDefinition?.()
+    console.log("Querying owner layer:", {
+      dataSourceId,
+      url: layerUrl,
+      fnr,
+      whereClause: buildFnrWhereClause(fnr),
+      layerName: layerDef?.name || "unknown",
+      layerFields: layerDef?.fields?.map((f: any) => f.name) || [],
+    })
 
-        const layerUrl = ds.url
-        const layerDef = (ds as any).getLayerDefinition?.()
-        console.log("Querying owner layer:", {
-          dataSourceId,
-          url: layerUrl,
-          fnr,
-          whereClause: buildFnrWhereClause(fnr),
-          layerName: layerDef?.name || "unknown",
-          layerFields: layerDef?.fields?.map((f: any) => f.name) || [],
-        })
+    const result = await ds.query(
+      {
+        where: buildFnrWhereClause(fnr),
+        returnGeometry: false,
+        outFields: ["*"],
+      },
+      createSignalOptions(options?.signal)
+    )
 
-        const result = await ds.query(
-          {
-            where: buildFnrWhereClause(fnr),
-            returnGeometry: false,
-            outFields: ["*"],
-          },
-          createSignalOptions(options?.signal)
-        )
+    console.log("Owner query result:", {
+      fnr,
+      recordCount: result?.records?.length || 0,
+      hasRecords: !!(result?.records && result.records.length > 0),
+      firstRecord: result?.records?.[0]?.getData(),
+    })
 
-        console.log("Owner query result:", {
-          fnr,
-          recordCount: result?.records?.length || 0,
-          hasRecords: !!(result?.records && result.records.length > 0),
-          firstRecord: result?.records?.[0]?.getData(),
-        })
+    if (options?.signal?.aborted) {
+      const abortError = new Error("AbortError")
+      abortError.name = "AbortError"
+      throw abortError
+    }
 
-        if (options?.signal?.aborted) {
-          const abortError = new Error("AbortError")
-          abortError.name = "AbortError"
-          throw abortError
-        }
+    if (!result?.records) {
+      console.log("⚠️ Owner query returned no records:", {
+        fnr,
+        dataSourceId,
+        url: layerUrl,
+        possibleCause: "FNR not found in owner layer or wrong layer configured",
+      })
+      return []
+    }
 
-        if (!result?.records) {
-          console.log("⚠️ Owner query returned no records:", {
-            fnr,
-            dataSourceId,
-            url: layerUrl,
-            possibleCause:
-              "FNR not found in owner layer or wrong layer configured",
-          })
-          return []
-        }
+    if (result.records.length === 0) {
+      console.log("⚠️ Owner query returned empty records array:", {
+        fnr,
+        dataSourceId,
+        url: layerUrl,
+        possibleCause: "No owner data for this FNR or querying wrong layer",
+      })
+    }
 
-        if (result.records.length === 0) {
-          console.log("⚠️ Owner query returned empty records array:", {
-            fnr,
-            dataSourceId,
-            url: layerUrl,
-            possibleCause: "No owner data for this FNR or querying wrong layer",
-          })
-        }
-
-        return result.records.map((record: FeatureDataRecord) => {
-          const data = record.getData()
-          const graphic: any = {
-            attributes: data, // The data IS the attributes
-          }
-
-          // Log ALL fields with their actual values to debug
-          const allFields: any = {}
-          Object.keys(data || {}).forEach((key) => {
-            allFields[key] = data[key]
-          })
-
-          console.log("Owner record processed - ALL FIELDS:", {
-            fnr,
-            allFieldsWithValues: allFields,
-            hasNAMN: "NAMN" in data,
-            hasBOSTADR: "BOSTADR" in data,
-            hasAGARLISTA: "AGARLISTA" in data,
-            NAMNvalue: data.NAMN,
-            BOSTADRvalue: data.BOSTADR,
-            AGARLISTAvalue: data.AGARLISTA,
-          })
-
-          return graphic as __esri.Graphic
-        })
-      } catch (error) {
-        if (isAbortError(error)) {
-          throw error as Error
-        }
-        throw new Error(parseArcGISError(error, "Owner query failed"))
+    return result.records.map((record: FeatureDataRecord) => {
+      const data = record.getData()
+      const graphic: any = {
+        attributes: data, // The data IS the attributes
       }
-    },
-    options?.signal
-  )
+
+      // Log ALL fields with their actual values to debug
+      const allFields: any = {}
+      Object.keys(data || {}).forEach((key) => {
+        allFields[key] = data[key]
+      })
+
+      console.log("Owner record processed - ALL FIELDS:", {
+        fnr,
+        allFieldsWithValues: allFields,
+        hasNAMN: "NAMN" in data,
+        hasBOSTADR: "BOSTADR" in data,
+        hasAGARLISTA: "AGARLISTA" in data,
+        NAMNvalue: data.NAMN,
+        BOSTADRvalue: data.BOSTADR,
+        AGARLISTAvalue: data.AGARLISTA,
+      })
+
+      return graphic as __esri.Graphic
+    })
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error as Error
+    }
+    throw new Error(parseArcGISError(error, "Owner query failed"))
+  }
 }
 
 export const clearQueryCache = () => {
-  PROPERTY_QUERY_CACHE.clear()
-  OWNER_QUERY_CACHE.clear()
+  // Query caching has been disabled to ensure fresh results on every request
 }
 
 export const queryExtentForProperties = async (

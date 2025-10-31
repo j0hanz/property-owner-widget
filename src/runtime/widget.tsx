@@ -65,9 +65,7 @@ import {
   isValidationFailure,
   buildHighlightColor,
 } from "../shared/utils"
-import {
-  OUTLINE_WIDTH,
-} from "../config/constants"
+import { OUTLINE_WIDTH } from "../config/constants"
 import {
   trackEvent,
   trackError,
@@ -153,7 +151,6 @@ const findUseDataSourceById = (
 
   return match ?? null
 }
-
 
 // Error boundaries require class components in React (no functional equivalent)
 class PropertyWidgetErrorBoundary extends React.Component<
@@ -263,7 +260,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   const hasSelectedProperties = state.selectedProperties.length > 0
 
-  const renderConfiguredContent = hooks.useEventCallback(() => {
+  const renderConfiguredContent = () => {
     if (state.error) {
       return (
         <div css={styles.emptyState} role="alert" aria-live="assertive">
@@ -292,7 +289,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         </div>
       </div>
     )
-  })
+  }
 
   const maxResults = config.maxResults
   const toggleEnabled = config.enableToggleRemoval
@@ -999,10 +996,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           </Button>
         </div>
       </div>
-      <div
-        css={styles.body}
-        role="main"
-      >
+      <div css={styles.body} role="main">
         {!isConfigured ? (
           <div css={styles.emptyState} role="status" aria-live="polite">
             <SVG
