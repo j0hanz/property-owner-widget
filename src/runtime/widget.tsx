@@ -637,6 +637,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           firstGraphicHasGeometry: !!graphicsToAdd[0]?.graphic?.geometry,
           firstGraphicGeometryType: graphicsToAdd[0]?.graphic?.geometry?.type,
         })
+        console.log("First row details:", {
+          FASTIGHET: rowsToProcess[0]?.FASTIGHET,
+          BOSTADR: rowsToProcess[0]?.BOSTADR,
+          FNR: rowsToProcess[0]?.FNR,
+          hasGraphic: !!rowsToProcess[0]?.graphic,
+        })
 
         if (controller.signal.aborted || isStaleRequest()) {
           if (isStaleRequest()) {
@@ -647,70 +653,67 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         }
 
         // Step 5: Calculate updates with toggle logic
-        let cleanupParams: {
-          updatedRows: GridRowData[]
-          previousRows: GridRowData[]
-        } | null = null
+        const { updatedRows, toRemove } = calculatePropertyUpdates(
+          rowsToProcess,
+          state.selectedProperties,
+          toggleEnabled,
+          maxResults
+        )
 
-        let syncParams: SelectionGraphicsParams | null = null
+        // Compute highlight values fresh from current config
+        const currentHighlightColor = buildHighlightColor(
+          config.highlightColor,
+          config.highlightOpacity
+        )
+        const currentOutlineWidth = (() => {
+          const width = config.outlineWidth
+          if (typeof width !== "number" || !Number.isFinite(width)) {
+            return OUTLINE_WIDTH
+          }
+          if (width < 0.5) return 0.5
+          if (width > 10) return 10
+          return width
+        })()
 
+        const syncParams: SelectionGraphicsParams = {
+          graphicsToAdd,
+          selectedRows: updatedRows,
+          getCurrentView,
+          helpers: {
+            addGraphicsToMap,
+            extractFnr,
+            normalizeFnrKey,
+          },
+          highlightColor: currentHighlightColor,
+          outlineWidth: currentOutlineWidth,
+        }
+
+        console.log("syncParams created before setState:", {
+          graphicsCount: syncParams.graphicsToAdd.length,
+          selectedRowsCount: syncParams.selectedRows.length,
+          highlightColor: currentHighlightColor,
+          outlineWidth: currentOutlineWidth,
+        })
+
+        // Track toggle removals
+        if (toRemove.size > 0) {
+          const removedRows = state.selectedProperties.filter((row) =>
+            toRemove.has(normalizeFnrKey(row.FNR))
+          )
+          if (removedRows.length > 0) {
+            trackEvent({
+              category: "Property",
+              action: "toggle_remove",
+              value: removedRows.length,
+            })
+          }
+        }
+
+        // Update state
         setState((prev) => {
           // Check staleness atomically within setState
           if (isStaleRequest()) {
             return prev
-          }
-          const { updatedRows, toRemove } = calculatePropertyUpdates(
-            rowsToProcess,
-            prev.selectedProperties,
-            toggleEnabled,
-            maxResults
-          )
-
-          cleanupParams = {
-            updatedRows,
-            previousRows: prev.selectedProperties,
-          }
-
-          // Compute highlight values fresh from current config
-          const currentHighlightColor = buildHighlightColor(
-            config.highlightColor,
-            config.highlightOpacity
-          )
-          const currentOutlineWidth = (() => {
-            const width = config.outlineWidth
-            if (typeof width !== "number" || !Number.isFinite(width)) {
-              return OUTLINE_WIDTH
-            }
-            if (width < 0.5) return 0.5
-            if (width > 10) return 10
-            return width
-          })()
-
-          syncParams = {
-            graphicsToAdd,
-            selectedRows: updatedRows,
-            getCurrentView,
-            helpers: {
-              addGraphicsToMap,
-              extractFnr,
-              normalizeFnrKey,
-            },
-            highlightColor: currentHighlightColor,
-            outlineWidth: currentOutlineWidth,
-          }
-
-          // Track toggle removals
-          if (toRemove.size > 0) {
-            const removedRows = prev.selectedProperties.filter((row) =>
-              toRemove.has(normalizeFnrKey(row.FNR))
-            )
-            if (removedRows.length > 0) {
-              trackEvent({
-                category: "Property",
-                action: "toggle_remove",
-                value: removedRows.length,
-              })
-            }
           }
 
           return {
@@ -722,29 +725,35 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         // Revalidate staleness before executing side effects
         if (isStaleRequest()) {
+          console.log(
+            "Request became stale after setState, aborting side effects"
+          )
           releaseController(controller)
           return
         }
 
-        if (cleanupParams) {
-          cleanupRemovedGraphics({
-            updatedRows: cleanupParams.updatedRows,
-            previousRows: cleanupParams.previousRows,
-            removeGraphicsForFnr,
-            normalizeFnrKey,
-          })
-        }
+        console.log("After setState - executing sync:", {
+          hasSyncParams: !!syncParams,
+          graphicsCount: syncParams.graphicsToAdd.length,
+        })
 
-        if (syncParams) {
-          console.log("About to sync graphics:", {
-            graphicsCount: syncParams.graphicsToAdd.length,
-            selectedRowsCount: syncParams.selectedRows.length,
-            highlightColor: syncParams.highlightColor,
-            outlineWidth: syncParams.outlineWidth,
-            hasView: !!getCurrentView(),
-          })
-          syncSelectionGraphics(syncParams)
-        }
+        // Cleanup removed graphics
+        cleanupRemovedGraphics({
+          updatedRows,
+          previousRows: state.selectedProperties,
+          removeGraphicsForFnr,
+          normalizeFnrKey,
+        })
+
+        // Sync graphics with map
+        console.log("About to sync graphics:", {
+          graphicsCount: syncParams.graphicsToAdd.length,
+          selectedRowsCount: syncParams.selectedRows.length,
+          highlightColor: syncParams.highlightColor,
+          outlineWidth: syncParams.outlineWidth,
+          hasView: !!getCurrentView(),
+        })
+        syncSelectionGraphics(syncParams)
 
         if (
           autoZoomEnabled &&
