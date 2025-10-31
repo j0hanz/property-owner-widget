@@ -130,13 +130,25 @@ export const formatOwnerInfo = (
 ): string => {
   if (owner.AGARLISTA && typeof owner.AGARLISTA === "string") {
     const agarLista = sanitizeText(owner.AGARLISTA)
-    if (!maskPII) return agarLista
 
-    return agarLista
-      .split("")
-      .map((entry) => {
-        const trimmed = entry.trim()
-        if (!trimmed) return ""
+    // Split, trim, and deduplicate entries
+    const seen = new Set<string>()
+    const uniqueEntries = agarLista
+      .split(";")
+      .map((entry) => entry.trim())
+      .filter((entry) => {
+        if (!entry) return false
+        if (seen.has(entry)) return false
+        seen.add(entry)
+        return true
+      })
+
+    // If PII masking is disabled, return deduplicated list as-is
+    if (!maskPII) return uniqueEntries.join("; ")
+
+    // Apply PII masking to each unique entry
+    return uniqueEntries
+      .map((trimmed) => {
         const match = trimmed.match(/^(.+?)\s*\(([^)]+)\)\s*$/)
         if (!match) return ownerPrivacy.maskName(trimmed)
         const name = match[1].trim()
@@ -144,7 +156,7 @@ export const formatOwnerInfo = (
         return `${ownerPrivacy.maskName(name)} (${orgNr})`
       })
       .filter(Boolean)
-      .join("")
+      .join("; ")
   }
 
   const rawName = sanitizeText(owner.NAMN || "") || unknownOwnerText
