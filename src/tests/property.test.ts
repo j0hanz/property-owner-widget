@@ -5,7 +5,6 @@ import {
   formatOwnerInfo,
   formatPropertyWithShare,
   createRowId,
-  isValidArcGISUrl,
   extractFnr,
   isAbortError,
   parseArcGISError,
@@ -15,10 +14,37 @@ import {
   isDuplicateProperty,
   shouldToggleRemove,
   calculatePropertyUpdates,
-  validateDataSources,
   buildHighlightColor,
+  buildHighlightSymbolJSON,
 } from "../shared/utils"
+import {
+  isValidArcGISUrl,
+  validateDataSources,
+  propertyQueryService,
+} from "../shared/api"
 import type { OwnerAttributes } from "../config/types"
+
+jest.mock("jimu-arcgis", () => ({
+  loadArcGISJSAPIModules: jest.fn((modules: string[]) => {
+    return Promise.resolve(
+      modules.map((moduleId) => {
+        if (moduleId === "esri/core/promiseUtils") {
+          return {
+            eachAlways: (promises: Array<Promise<any>>) =>
+              Promise.all(
+                promises.map((promise) =>
+                  promise
+                    .then((value) => ({ value }))
+                    .catch((error) => ({ error }))
+                )
+              ),
+          }
+        }
+        return {}
+      })
+    )
+  }),
+}))
 
 // Mock DOMParser for HTML stripping tests
 ;(globalThis as any).DOMParser = class DOMParser {
@@ -192,6 +218,20 @@ describe("Property Widget - Highlight Styling", () => {
   it("should clamp opacity and fall back to default color when invalid inputs provided", () => {
     const rgba = buildHighlightColor("not-a-color", 5)
     expect(rgba).toEqual([0, 180, 216, 1])
+  })
+
+  it("should build highlight symbol definition with solid fill and outline", () => {
+    const symbolJSON = buildHighlightSymbolJSON([10, 20, 30, 0.75], 3)
+
+    expect(symbolJSON).toMatchObject({
+      style: "solid",
+      color: [10, 20, 30, 0.75],
+      outline: {
+        style: "solid",
+        color: [10, 20, 30, 1],
+        width: 3,
+      },
+    })
   })
 })
 
@@ -528,6 +568,120 @@ describe("Property Widget - Performance", () => {
   })
 })
 
+describe("Property Widget - Owner Deduplication", () => {
+  const baseOwnerAttributes: OwnerAttributes = {
+    OBJECTID: 10,
+    FNR: "123",
+    UUID_FASTIGHET: "uuid-123",
+    FASTIGHET: "Property 1",
+    NAMN: "Owner One",
+    BOSTADR: "Street 1",
+    POSTNR: "12345",
+    POSTADR: "Town",
+    ORGNR: "556677-8899",
+    ANDEL: "1/1",
+  }
+
+  it("should deduplicate owner records when querying individually", async () => {
+    const propertyGraphic = {
+      attributes: {
+        FNR: "123",
+        OBJECTID: 1,
+        UUID_FASTIGHET: "uuid-123",
+        FASTIGHET: "Property 1",
+      },
+      geometry: {},
+    } as any
+
+    const duplicateOwnerGraphic = {
+      attributes: { ...baseOwnerAttributes },
+    } as any
+
+    const result = await propertyQueryService.processIndividual({
+      propertyResults: [{ features: [propertyGraphic] }],
+      config: {
+        ownerDataSourceId: "owner",
+        enablePIIMasking: false,
+      },
+      context: {
+        dsManager: {} as any,
+        maxResults: 10,
+        helpers: {
+          extractFnr: (attrs: any) => attrs?.FNR ?? null,
+          queryOwnerByFnr: () =>
+            Promise.resolve([
+              duplicateOwnerGraphic,
+              { attributes: { ...baseOwnerAttributes, OBJECTID: 11 } } as any,
+            ]),
+          queryOwnersByRelationship: () => Promise.resolve(new Map()),
+          createRowId,
+          formatPropertyWithShare,
+          formatOwnerInfo,
+          isAbortError,
+        },
+        messages: {
+          unknownOwner: "Unknown",
+          errorOwnerQueryFailed: "Owner query failed",
+          errorNoDataAvailable: "No data",
+        },
+      },
+    })
+
+    expect(result.rowsToProcess).toHaveLength(1)
+    expect(result.rowsToProcess[0].FNR).toBe("123")
+  })
+
+  it("should deduplicate owner records when using batch relationship queries", async () => {
+    const propertyGraphic = {
+      attributes: {
+        FNR: "123",
+        OBJECTID: 1,
+        UUID_FASTIGHET: "uuid-123",
+        FASTIGHET: "Property 1",
+      },
+      geometry: {},
+    } as any
+
+    const ownersMap = new Map<string, any[]>([
+      [
+        "123",
+        [{ ...baseOwnerAttributes }, { ...baseOwnerAttributes, OBJECTID: 11 }],
+      ],
+    ])
+
+    const result = await propertyQueryService.processBatch({
+      propertyResults: [{ features: [propertyGraphic] }],
+      config: {
+        propertyDataSourceId: "property",
+        ownerDataSourceId: "owner",
+        enablePIIMasking: false,
+        relationshipId: 0,
+      },
+      context: {
+        dsManager: {} as any,
+        maxResults: 10,
+        helpers: {
+          extractFnr: (attrs: any) => attrs?.FNR ?? null,
+          queryOwnerByFnr: () => Promise.resolve([]),
+          queryOwnersByRelationship: () => Promise.resolve(ownersMap),
+          createRowId,
+          formatPropertyWithShare,
+          formatOwnerInfo,
+          isAbortError,
+        },
+        messages: {
+          unknownOwner: "Unknown",
+          errorOwnerQueryFailed: "Owner query failed",
+          errorNoDataAvailable: "No data",
+        },
+      },
+    })
+
+    expect(result.rowsToProcess).toHaveLength(1)
+    expect(result.rowsToProcess[0].FASTIGHET).toContain("Property 1")
+  })
+})
+
 describe("Property Widget - Security Regression Tests", () => {
   it("should not leak PII in error messages", () => {
     const owner: OwnerAttributes = {
@@ -588,7 +742,7 @@ describe("Property Widget - Utility Helper Functions", () => {
   })
 
   it("should batch owner queries respecting concurrency limit", () => {
-    // Test that processPropertyResults batches owner queries with Promise.all
+    // Test that propertyQueryService batches owner queries with Promise.all
     // and respects OWNER_QUERY_CONCURRENCY cap
     // TODO: Mock helpers to verify batching and parallel execution
   })
@@ -814,7 +968,9 @@ describe("Query Controls", () => {
     const { clearQueryCache } = await import("../shared/api")
 
     expect(typeof clearQueryCache).toBe("function")
-    expect(() => clearQueryCache()).not.toThrow()
+    expect(() => {
+      clearQueryCache()
+    }).not.toThrow()
   })
 
   it("should remove deprecated query cache constants", () => {

@@ -281,7 +281,8 @@ const Setting = (
   )
 
   const handleRelationshipIdChange = hooks.useEventCallback((value: number) => {
-    setLocalRelationshipId(String(value))
+    const clamped = Math.max(0, Math.min(99, Math.round(value)))
+    setLocalRelationshipId(String(clamped))
   })
 
   const handleRelationshipIdBlur = hooks.useEventCallback(() => {

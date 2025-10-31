@@ -5,7 +5,7 @@ import {
   ESRI_MODULES_TO_LOAD,
   ABORT_CONTROLLER_POOL_SIZE,
 } from "../config/constants"
-import { popupSuppressionManager } from "./utils"
+import { popupSuppressionManager, buildHighlightSymbolJSON } from "./utils"
 
 export const useEsriModules = () => {
   const [modules, setModules] = React.useState<EsriModules | null>(null)
@@ -123,17 +123,20 @@ export const useGraphicsLayer = (
   )
 
   const ensureGraphicsLayer = hooks.useEventCallback(
-    (view: __esri.MapView | null | undefined) => {
-      if (!modules || !view) return
+    (view: __esri.MapView | null | undefined): boolean => {
+      if (!modules || !view) return false
       if (!graphicsLayerRef.current) {
         graphicsLayerRef.current = new modules.GraphicsLayer({
           id: `${widgetId}-property-highlight-layer`,
           listMode: "hide",
         })
         view.map.add(graphicsLayerRef.current)
+        return true
       } else if (!view.map.findLayerById(graphicsLayerRef.current.id)) {
         view.map.add(graphicsLayerRef.current)
+        return true
       }
+      return false
     }
   )
 
@@ -162,13 +165,8 @@ export const useGraphicsLayer = (
     outlineWidth: number
   ): __esri.SimpleFillSymbol | null => {
     if (!modules) return null
-    return new modules.SimpleFillSymbol({
-      color: highlightColor,
-      outline: {
-        color: [highlightColor[0], highlightColor[1], highlightColor[2], 1],
-        width: outlineWidth,
-      },
-    })
+    const symbolJSON = buildHighlightSymbolJSON(highlightColor, outlineWidth)
+    return new modules.SimpleFillSymbol(symbolJSON)
   }
 
   const addGraphicsToMap = hooks.useEventCallback(
@@ -180,6 +178,13 @@ export const useGraphicsLayer = (
       highlightColor: [number, number, number, number],
       outlineWidth: number
     ) => {
+      console.log("addGraphicsToMap called:", {
+        hasModules: !!modules,
+        hasGraphic: !!graphic,
+        hasView: !!view,
+        hasGeometry: !!graphic?.geometry,
+        geometryType: graphic?.geometry?.type,
+      })
       if (!modules || !graphic || !view) return
       ensureGraphicsLayer(view)
 
@@ -188,6 +193,13 @@ export const useGraphicsLayer = (
 
       const fnr = extractFnr(graphic.attributes || null)
       const symbol = createHighlightSymbol(highlightColor, outlineWidth)
+      console.log("Symbol and graphic details:", {
+        fnr,
+        hasSymbol: !!symbol,
+        symbolColor: symbol?.color,
+        symbolOutlineWidth: symbol?.outline?.width,
+        originalGeometry: graphic.geometry?.type,
+      })
       if (!symbol) return
 
       const highlightGraphic = graphic.clone()
@@ -197,6 +209,11 @@ export const useGraphicsLayer = (
         FNR: fnr,
       }
 
+      console.log("Adding graphic to layer:", {
+        layerId: layer.id,
+        graphicGeometry: highlightGraphic.geometry?.type,
+        graphicSymbol: !!highlightGraphic.symbol,
+      })
       removeGraphicsForFnr(fnr, normalizeFnrKey)
       layer.add(highlightGraphic)
 
@@ -211,10 +228,11 @@ export const useGraphicsLayer = (
   const destroyGraphicsLayer = hooks.useEventCallback(
     (view: __esri.MapView | null | undefined) => {
       if (view && graphicsLayerRef.current) {
-        view.map?.remove(graphicsLayerRef.current)
-        graphicsLayerRef.current.destroy()
+        const layer = graphicsLayerRef.current
         graphicsLayerRef.current = null
         graphicsMapRef.current.clear()
+        view.map?.remove(layer)
+        layer.destroy()
       }
     }
   )
@@ -293,8 +311,14 @@ export const useMapViewLifecycle = (params: {
 
     if (mapClickHandleRef.current) {
       mapClickHandleRef.current.remove()
+      mapClickHandleRef.current = null
     }
-    mapClickHandleRef.current = view.on("click", onMapClick)
+    try {
+      mapClickHandleRef.current = view.on("click", onMapClick)
+    } catch (error) {
+      console.error("Failed to register click handler", error)
+      mapClickHandleRef.current = null
+    }
   })
 
   const cleanupPreviousView = hooks.useEventCallback(() => {
@@ -341,8 +365,14 @@ export const useMapViewLifecycle = (params: {
       disablePopup(currentView)
       if (mapClickHandleRef.current) {
         mapClickHandleRef.current.remove()
+        mapClickHandleRef.current = null
       }
-      mapClickHandleRef.current = currentView.on("click", onMapClick)
+      try {
+        mapClickHandleRef.current = currentView.on("click", onMapClick)
+      } catch (error) {
+        console.error("Failed to reactivate click handler", error)
+        mapClickHandleRef.current = null
+      }
     }
   })
 

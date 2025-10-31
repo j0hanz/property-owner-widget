@@ -17,10 +17,15 @@ import { GRID_COLUMN_KEYS } from "../config/constants"
 
 const columnHelper = createColumnHelper<GridRowData>()
 
+let selectColumnCache: ColumnDef<GridRowData, any> | null = null
+
 export const createSelectColumn = (
   CheckboxComponent: any
 ): ColumnDef<GridRowData, any> => {
-  return {
+  if (selectColumnCache) {
+    return selectColumnCache
+  }
+  selectColumnCache = {
     id: GRID_COLUMN_KEYS.SELECT,
     header: ({ table }) => {
       return CheckboxComponent({
@@ -39,6 +44,7 @@ export const createSelectColumn = (
     enableSorting: false,
     enableColumnFilter: false,
   }
+  return selectColumnCache
 }
 
 export const createPropertyTableColumns = (params: {

@@ -83,7 +83,11 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       padding: spacing?.(1),
       textAlign: "left",
       borderBlockEnd: border,
-      fontWeight: 600,
+      borderInlineEnd: border,
+      "&:last-child": {
+        borderInlineEnd: "none",
+      },
+      fontWeight: 500,
       cursor: "pointer",
       userSelect: "none",
       "&:hover": {

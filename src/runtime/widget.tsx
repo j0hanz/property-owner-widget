@@ -25,6 +25,7 @@ import {
 import { PropertyTable } from "./components/table"
 import { createPropertyTableColumns } from "../shared/config"
 import defaultMessages from "./translations/default"
+import type { ColumnDef } from "@tanstack/react-table"
 import type {
   IMConfig,
   ErrorBoundaryProps,
@@ -47,6 +48,8 @@ import {
   clearQueryCache,
   queryExtentForProperties,
   queryOwnersByRelationship,
+  validateDataSources,
+  propertyQueryService,
 } from "../shared/api"
 import {
   formatOwnerInfo,
@@ -56,11 +59,8 @@ import {
   isAbortError,
   normalizeFnrKey,
   calculatePropertyUpdates,
-  processPropertyResults,
-  processPropertyResultsWithBatchQuery,
   validateMapClickInputs,
   syncGraphicsWithState,
-  validateDataSources,
   cleanupRemovedGraphics,
   isValidationFailure,
   buildHighlightColor,
@@ -274,7 +274,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       return (
         <PropertyTable
           data={state.selectedProperties}
-          columns={tableColumns()}
+          columns={tableColumns}
           translate={translate}
           styles={styles}
         />
@@ -322,7 +322,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       trackFeatureUsage("pii_masking_toggled", piiMaskingEnabled)
 
       const reformattedProperties = prev.selectedProperties.map((row) => {
-        if (!row.rawOwner) {
+        if (!row.rawOwner || typeof row.rawOwner !== "object") {
           return row
         }
         return {
@@ -356,8 +356,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       const removedProperties = prev.selectedProperties.slice(maxResults)
 
       removedProperties.forEach((prop) => {
-        const fnr = extractFnr(prop)
-        if (fnr) removeGraphicsForFnr(fnr)
+        const fnr = prop.FNR
+        if (fnr != null) {
+          removeGraphicsForFnr(fnr, normalizeFnrKey)
+        }
       })
 
       return {
@@ -385,11 +387,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     )
   }, [config.enableBatchOwnerQuery, config.relationshipId])
 
-  const tableColumns = hooks.useEventCallback(() =>
-    createPropertyTableColumns({
-      translate,
-    })
+  const tableColumnsRef = React.useRef<Array<ColumnDef<GridRowData, any>>>(
+    createPropertyTableColumns({ translate })
   )
+  const tableColumns = tableColumnsRef.current
 
   const handleClearAll = hooks.useEventCallback(() => {
     abortAll()
@@ -593,60 +594,54 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           config.relationshipId !== undefined &&
           config.propertyDataSourceId
 
-        const { rowsToProcess, graphicsToAdd } = useBatchQuery
-          ? await processPropertyResultsWithBatchQuery({
-              propertyResults,
-              config: {
-                propertyDataSourceId: config.propertyDataSourceId,
-                ownerDataSourceId: config.ownerDataSourceId,
-                enablePIIMasking: piiMaskingEnabled,
-                relationshipId: config.relationshipId,
-              },
-              dsManager: manager,
-              maxResults,
-              signal: controller.signal,
-              helpers: {
-                extractFnr,
-                queryOwnersByRelationship,
-                createRowId,
-                formatPropertyWithShare,
-                formatOwnerInfo,
-                isAbortError,
-              },
-              messages: {
-                unknownOwner: translate("unknownOwner"),
-                errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
-                errorNoDataAvailable: translate("errorNoDataAvailable"),
-              },
-            })
-          : await processPropertyResults({
-              propertyResults,
-              config: {
-                ownerDataSourceId: config.ownerDataSourceId,
-                enablePIIMasking: piiMaskingEnabled,
-              },
-              dsManager: manager,
-              maxResults,
-              signal: controller.signal,
-              helpers: {
-                extractFnr,
-                queryOwnerByFnr,
-                createRowId,
-                formatPropertyWithShare,
-                formatOwnerInfo,
-                isAbortError,
-              },
-              messages: {
-                unknownOwner: translate("unknownOwner"),
-                errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
-                errorNoDataAvailable: translate("errorNoDataAvailable"),
-              },
-            })
+        const processingContext = {
+          dsManager: manager,
+          maxResults,
+          signal: controller.signal,
+          helpers: {
+            extractFnr,
+            queryOwnerByFnr,
+            queryOwnersByRelationship,
+            createRowId,
+            formatPropertyWithShare,
+            formatOwnerInfo,
+            isAbortError,
+          },
+          messages: {
+            unknownOwner: translate("unknownOwner"),
+            errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
+            errorNoDataAvailable: translate("errorNoDataAvailable"),
+          },
+        }
+
+        const { rowsToProcess, graphicsToAdd } =
+          useBatchQuery && config.relationshipId !== undefined
+            ? await propertyQueryService.processBatch({
+                propertyResults,
+                config: {
+                  propertyDataSourceId: config.propertyDataSourceId,
+                  ownerDataSourceId: config.ownerDataSourceId,
+                  enablePIIMasking: piiMaskingEnabled,
+                  relationshipId: config.relationshipId,
+                },
+                context: processingContext,
+              })
+            : await propertyQueryService.processIndividual({
+                propertyResults,
+                config: {
+                  ownerDataSourceId: config.ownerDataSourceId,
+                  enablePIIMasking: piiMaskingEnabled,
+                },
+                context: processingContext,
+              })
 
         console.log("Processing complete:", {
           rowsToProcessCount: rowsToProcess.length,
           graphicsToAddCount: graphicsToAdd.length,
           firstRow: rowsToProcess[0],
+          firstGraphic: graphicsToAdd[0],
+          firstGraphicHasGeometry: !!graphicsToAdd[0]?.graphic?.geometry,
+          firstGraphicGeometryType: graphicsToAdd[0]?.graphic?.geometry?.type,
         })
 
         if (controller.signal.aborted || isStaleRequest()) {
@@ -657,7 +652,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           return
         }
 
-        // Step 5: Calculate updates with toggle logic (use snapshot)
+        // Step 5: Calculate updates with toggle logic
         let cleanupParams: {
           updatedRows: GridRowData[]
           previousRows: GridRowData[]
@@ -665,13 +660,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         let syncParams: SelectionGraphicsParams | null = null
 
-        // Capture requestId snapshot to prevent TOCTOU race condition
-        const requestIdSnapshot = requestIdRef.current
-        const isStaleRequestSnapshot = () => requestId !== requestIdSnapshot
-
         setState((prev) => {
-          // Check staleness using snapshot (atomic check)
-          if (isStaleRequestSnapshot()) {
+          // Check staleness atomically within setState
+          if (isStaleRequest()) {
             return prev
           }
           const { updatedRows, toRemove } = calculatePropertyUpdates(
@@ -720,8 +711,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           }
         })
 
-        // Revalidate staleness before executing side effects using snapshot
-        if (isStaleRequestSnapshot()) {
+        // Revalidate staleness before executing side effects
+        if (isStaleRequest()) {
           releaseController(controller)
           return
         }
@@ -736,12 +727,20 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         }
 
         if (syncParams) {
+          console.log("About to sync graphics:", {
+            graphicsCount: syncParams.graphicsToAdd.length,
+            selectedRowsCount: syncParams.selectedRows.length,
+            highlightColor: syncParams.highlightColor,
+            outlineWidth: syncParams.outlineWidth,
+            hasView: !!getCurrentView(),
+          })
           syncSelectionGraphics(syncParams)
         }
 
         if (
           autoZoomEnabled &&
           syncParams &&
+          syncParams.selectedRows &&
           syncParams.selectedRows.length > 0 &&
           config.propertyDataSourceId
         ) {
@@ -768,7 +767,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
                 if (
                   extent &&
                   !zoomController.signal.aborted &&
-                  !isStaleRequestSnapshot()
+                  !isStaleRequest()
                 ) {
                   await view.goTo(extent.expand(1.2), { duration: 1000 })
                   trackEvent({
@@ -781,6 +780,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
                 if (!isAbortError(error)) {
                   console.error("Auto zoom failed", error)
                   trackError("auto_zoom", error)
+                  // Reset query state on auto-zoom error
+                  if (isMountedRef.current && !isStaleRequest()) {
+                    setState((prev) => ({ ...prev, isQueryInFlight: false }))
+                  }
                 }
               } finally {
                 releaseController(zoomController)

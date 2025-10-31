@@ -6,8 +6,9 @@ import type {
   SortingState,
   ColumnFiltersState,
   RowSelectionState,
+  ColumnDef,
 } from "@tanstack/react-table"
-import type { PropertyTableProps } from "../../config/types"
+import type { PropertyTableProps, GridRowData } from "../../config/types"
 import {
   createTableConfig,
   createSelectColumn,
@@ -17,6 +18,15 @@ import {
   getRowId,
   getVisibleRows,
 } from "../../shared/config"
+
+const IndeterminateCheckbox = (props: {
+  checked?: boolean
+  indeterminate?: boolean
+  disabled?: boolean
+  onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void
+}) => {
+  return <Checkbox {...props} />
+}
 
 export const PropertyTable = (props: PropertyTableProps) => {
   const { data, columns, translate, styles } = props
@@ -30,10 +40,18 @@ export const PropertyTable = (props: PropertyTableProps) => {
     getDefaultRowSelection()
   )
 
-  const columnsWithSelect = [
-    createSelectColumn(IndeterminateCheckbox),
-    ...columns,
-  ]
+  const columnsWithSelectRef = React.useRef<Array<ColumnDef<GridRowData, any>>>(
+    [createSelectColumn(IndeterminateCheckbox), ...columns]
+  )
+
+  React.useEffect(() => {
+    columnsWithSelectRef.current = [
+      createSelectColumn(IndeterminateCheckbox),
+      ...columns,
+    ]
+  }, [columns])
+
+  const columnsWithSelect = columnsWithSelectRef.current
 
   const table = useReactTable({
     data,
@@ -116,13 +134,4 @@ export const PropertyTable = (props: PropertyTableProps) => {
       </table>
     </div>
   )
-}
-
-const IndeterminateCheckbox = (props: {
-  checked?: boolean
-  indeterminate?: boolean
-  disabled?: boolean
-  onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void
-}) => {
-  return <Checkbox {...props} />
 }
