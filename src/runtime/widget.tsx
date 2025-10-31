@@ -296,19 +296,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const piiMaskingEnabled = config.enablePIIMasking
   const mapWidgetId = useMapWidgetIds?.[0]
   const autoZoomEnabled = !!config.autoZoomOnSelection
-  const highlightColorRgba = buildHighlightColor(
-    config.highlightColor,
-    config.highlightOpacity
-  )
-  const highlightOutlineWidth = (() => {
-    const width = config.outlineWidth
-    if (typeof width !== "number" || !Number.isFinite(width)) {
-      return OUTLINE_WIDTH
-    }
-    if (width < 0.5) return 0.5
-    if (width > 10) return 10
-    return width
-  })()
+  const highlightColorConfig = config.highlightColor
+  const highlightOpacityConfig = config.highlightOpacity
+  const outlineWidthConfig = config.outlineWidth
 
   hooks.useUpdateEffect(() => {
     setState((prev) => {
@@ -681,6 +671,21 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             previousRows: prev.selectedProperties,
           }
 
+          // Compute highlight values fresh from current config
+          const currentHighlightColor = buildHighlightColor(
+            config.highlightColor,
+            config.highlightOpacity
+          )
+          const currentOutlineWidth = (() => {
+            const width = config.outlineWidth
+            if (typeof width !== "number" || !Number.isFinite(width)) {
+              return OUTLINE_WIDTH
+            }
+            if (width < 0.5) return 0.5
+            if (width > 10) return 10
+            return width
+          })()
+
           syncParams = {
             graphicsToAdd,
             selectedRows: updatedRows,
@@ -690,8 +695,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
               extractFnr,
               normalizeFnrKey,
             },
-            highlightColor: highlightColorRgba,
-            outlineWidth: highlightOutlineWidth,
+            highlightColor: currentHighlightColor,
+            outlineWidth: currentOutlineWidth,
           }
 
           // Track toggle removals
@@ -863,6 +868,20 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       return
     }
 
+    const currentHighlightColor = buildHighlightColor(
+      highlightColorConfig,
+      highlightOpacityConfig
+    )
+    const currentOutlineWidth = (() => {
+      const width = outlineWidthConfig
+      if (typeof width !== "number" || !Number.isFinite(width)) {
+        return OUTLINE_WIDTH
+      }
+      if (width < 0.5) return 0.5
+      if (width > 10) return 10
+      return width
+    })()
+
     syncSelectionGraphics({
       graphicsToAdd,
       selectedRows: state.selectedProperties,
@@ -872,10 +891,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         extractFnr,
         normalizeFnrKey,
       },
-      highlightColor: highlightColorRgba,
-      outlineWidth: highlightOutlineWidth,
+      highlightColor: currentHighlightColor,
+      outlineWidth: currentOutlineWidth,
     })
-  }, [config.highlightColor, config.highlightOpacity, config.outlineWidth])
+  }, [highlightColorConfig, highlightOpacityConfig, outlineWidthConfig])
 
   hooks.useUpdateEffect(() => {
     const isOpening =
