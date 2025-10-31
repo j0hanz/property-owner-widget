@@ -222,6 +222,18 @@ export interface BatchQueryConfig extends StandardQueryConfig {
   readonly relationshipId: number
 }
 
+export interface PropertyIndividualQueryParams {
+  readonly propertyResults: any[]
+  readonly config: StandardQueryConfig
+  readonly context: PropertyProcessingContext
+}
+
+export interface PropertyBatchQueryParams {
+  readonly propertyResults: any[]
+  readonly config: BatchQueryConfig
+  readonly context: PropertyProcessingContext
+}
+
 export type FlexDirection = "row" | "column"
 
 export interface StyleObject {

@@ -47,6 +47,8 @@ import {
   clearQueryCache,
   queryExtentForProperties,
   queryOwnersByRelationship,
+  validateDataSources,
+  propertyQueryService,
 } from "../shared/api"
 import {
   formatOwnerInfo,
@@ -56,11 +58,8 @@ import {
   isAbortError,
   normalizeFnrKey,
   calculatePropertyUpdates,
-  processPropertyResults,
-  processPropertyResultsWithBatchQuery,
   validateMapClickInputs,
   syncGraphicsWithState,
-  validateDataSources,
   cleanupRemovedGraphics,
   isValidationFailure,
   buildHighlightColor,
@@ -356,8 +355,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       const removedProperties = prev.selectedProperties.slice(maxResults)
 
       removedProperties.forEach((prop) => {
-        const fnr = extractFnr(prop)
-        if (fnr) removeGraphicsForFnr(fnr)
+        const fnr = prop.FNR
+        if (fnr != null) {
+          removeGraphicsForFnr(fnr, normalizeFnrKey)
+        }
       })
 
       return {
@@ -593,55 +594,46 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           config.relationshipId !== undefined &&
           config.propertyDataSourceId
 
-        const { rowsToProcess, graphicsToAdd } = useBatchQuery
-          ? await processPropertyResultsWithBatchQuery({
-              propertyResults,
-              config: {
-                propertyDataSourceId: config.propertyDataSourceId,
-                ownerDataSourceId: config.ownerDataSourceId,
-                enablePIIMasking: piiMaskingEnabled,
-                relationshipId: config.relationshipId,
-              },
-              dsManager: manager,
-              maxResults,
-              signal: controller.signal,
-              helpers: {
-                extractFnr,
-                queryOwnersByRelationship,
-                createRowId,
-                formatPropertyWithShare,
-                formatOwnerInfo,
-                isAbortError,
-              },
-              messages: {
-                unknownOwner: translate("unknownOwner"),
-                errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
-                errorNoDataAvailable: translate("errorNoDataAvailable"),
-              },
-            })
-          : await processPropertyResults({
-              propertyResults,
-              config: {
-                ownerDataSourceId: config.ownerDataSourceId,
-                enablePIIMasking: piiMaskingEnabled,
-              },
-              dsManager: manager,
-              maxResults,
-              signal: controller.signal,
-              helpers: {
-                extractFnr,
-                queryOwnerByFnr,
-                createRowId,
-                formatPropertyWithShare,
-                formatOwnerInfo,
-                isAbortError,
-              },
-              messages: {
-                unknownOwner: translate("unknownOwner"),
-                errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
-                errorNoDataAvailable: translate("errorNoDataAvailable"),
-              },
-            })
+        const processingContext = {
+          dsManager: manager,
+          maxResults,
+          signal: controller.signal,
+          helpers: {
+            extractFnr,
+            queryOwnerByFnr,
+            queryOwnersByRelationship,
+            createRowId,
+            formatPropertyWithShare,
+            formatOwnerInfo,
+            isAbortError,
+          },
+          messages: {
+            unknownOwner: translate("unknownOwner"),
+            errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
+            errorNoDataAvailable: translate("errorNoDataAvailable"),
+          },
+        }
+
+        const { rowsToProcess, graphicsToAdd } =
+          useBatchQuery && config.relationshipId !== undefined
+            ? await propertyQueryService.processBatch({
+                propertyResults,
+                config: {
+                  propertyDataSourceId: config.propertyDataSourceId,
+                  ownerDataSourceId: config.ownerDataSourceId,
+                  enablePIIMasking: piiMaskingEnabled,
+                  relationshipId: config.relationshipId,
+                },
+                context: processingContext,
+              })
+            : await propertyQueryService.processIndividual({
+                propertyResults,
+                config: {
+                  ownerDataSourceId: config.ownerDataSourceId,
+                  enablePIIMasking: piiMaskingEnabled,
+                },
+                context: processingContext,
+              })
 
         console.log("Processing complete:", {
           rowsToProcessCount: rowsToProcess.length,
