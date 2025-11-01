@@ -1,6 +1,5 @@
 import type {
   OwnerAttributes,
-  GridRowData,
   ValidationResult,
   SelectionGraphicsHelpers,
 } from "../config/types"
@@ -334,27 +333,17 @@ export const buildFnrWhereClause = (
 }
 
 export const cleanupRemovedGraphics = (params: {
-  updatedRows: GridRowData[]
-  previousRows: GridRowData[]
+  toRemove: Set<string>
   removeGraphicsForFnr: (
     fnr: string | number,
     normalize: (fnr: any) => string
   ) => void
   normalizeFnrKey: (fnr: any) => string
 }): void => {
-  const {
-    updatedRows,
-    previousRows,
-    removeGraphicsForFnr,
-    normalizeFnrKey: normalize,
-  } = params
-  const updatedFnrs = new Set(updatedRows.map((row) => normalize(row.FNR)))
+  const { toRemove, removeGraphicsForFnr, normalizeFnrKey: normalize } = params
 
-  previousRows.forEach((row) => {
-    const fnrKey = normalize(row.FNR)
-    if (!updatedFnrs.has(fnrKey)) {
-      removeGraphicsForFnr(row.FNR, normalize)
-    }
+  toRemove.forEach((fnrKey) => {
+    removeGraphicsForFnr(fnrKey, normalize)
   })
 }
 

@@ -246,16 +246,8 @@ export const validateDataSources = (params: {
     const propertyService = propertyUrl.split("/MapServer/")[0]
     const ownerService = ownerUrl.split("/MapServer/")[0]
     if (propertyService !== ownerService) {
-      console.warn(
-        "⚠️ Configuration Warning: Property and owner layers use different MapServer services",
-        {
-          propertyService,
-          ownerService,
-          propertyUrl,
-          ownerUrl,
-          recommendation:
-            "Both should typically use the same MapServer service with different layer indexes (e.g., layer 0 for properties, layer 1 for owners)",
-        }
+      console.log(
+        "Property and owner layers use different MapServer services. This is valid for distributed architectures but may indicate misconfiguration."
       )
     }
   }

@@ -739,8 +739,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         // Cleanup removed graphics
         cleanupRemovedGraphics({
-          updatedRows,
-          previousRows: state.selectedProperties,
+          toRemove,
           removeGraphicsForFnr,
           normalizeFnrKey,
         })
