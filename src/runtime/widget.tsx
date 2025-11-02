@@ -72,7 +72,7 @@ import {
   dataSourceHelpers,
   getValidatedOutlineWidth,
 } from "../shared/utils"
-import { EXPORT_FORMATS } from "../config/constants"
+import { EXPORT_FORMATS, HIGHLIGHT_MARKER_SIZE } from "../config/constants"
 import {
   trackEvent,
   trackError,
@@ -842,6 +842,113 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       restorePopup,
       onMapClick: handleMapClick,
     })
+
+  // Cursor point marker tracking
+  const cursorPointGraphicRef = React.useRef<__esri.Graphic | null>(null)
+  const pointerMoveHandleRef = React.useRef<__esri.Handle | null>(null)
+
+  const updateCursorPoint = hooks.useEventCallback(
+    (mapPoint: __esri.Point | null) => {
+      const view = getCurrentView()
+      if (!view || !modules || !modules.Graphic) return
+
+      const currentHighlightColor = buildHighlightColor(
+        highlightColorConfig,
+        highlightOpacityConfig
+      )
+      const currentOutlineWidth = getValidatedOutlineWidth(outlineWidthConfig)
+
+      ensureGraphicsLayer(view)
+      const layer = view.map.findLayerById(
+        `${id}-property-highlight-layer`
+      ) as __esri.GraphicsLayer
+
+      if (!layer) return
+
+      // Remove existing cursor point
+      if (cursorPointGraphicRef.current) {
+        layer.remove(cursorPointGraphicRef.current)
+        cursorPointGraphicRef.current = null
+      }
+
+      // Add new cursor point if mapPoint provided
+      if (mapPoint) {
+        const pointSymbol = {
+          type: "simple-marker",
+          style: "circle",
+          size: HIGHLIGHT_MARKER_SIZE,
+          color: currentHighlightColor,
+          outline: {
+            color: [
+              currentHighlightColor[0],
+              currentHighlightColor[1],
+              currentHighlightColor[2],
+              1,
+            ],
+            width: currentOutlineWidth,
+          },
+        }
+
+        const graphic = new modules.Graphic({
+          geometry: mapPoint,
+          symbol: pointSymbol as any,
+        })
+
+        layer.add(graphic)
+        cursorPointGraphicRef.current = graphic
+      }
+    }
+  )
+
+  // Setup pointer-move listener when widget is active
+  hooks.useUpdateEffect(() => {
+    const view = getCurrentView()
+    if (!view) return
+
+    const isActive =
+      runtimeState === WidgetState.Opened || runtimeState === WidgetState.Active
+
+    // Clean up existing handler
+    if (pointerMoveHandleRef.current) {
+      pointerMoveHandleRef.current.remove()
+      pointerMoveHandleRef.current = null
+      updateCursorPoint(null) // Remove cursor point
+    }
+
+    // Setup new handler if widget is active
+    if (isActive && modules) {
+      pointerMoveHandleRef.current = view.on("pointer-move", (event) => {
+        const screenPoint = { x: event.x, y: event.y }
+        const mapPoint = view.toMap(screenPoint)
+        if (mapPoint) {
+          updateCursorPoint(mapPoint)
+        }
+      })
+    }
+
+    return () => {
+      if (pointerMoveHandleRef.current) {
+        pointerMoveHandleRef.current.remove()
+        pointerMoveHandleRef.current = null
+      }
+      updateCursorPoint(null)
+    }
+  }, [
+    runtimeState,
+    modules,
+    highlightColorConfig,
+    highlightOpacityConfig,
+    outlineWidthConfig,
+  ])
+
+  // Cleanup cursor point on unmount
+  hooks.useUnmount(() => {
+    if (pointerMoveHandleRef.current) {
+      pointerMoveHandleRef.current.remove()
+      pointerMoveHandleRef.current = null
+    }
+    updateCursorPoint(null)
+  })
 
   hooks.useUpdateEffect(() => {
     if (state.selectedProperties.length === 0) {

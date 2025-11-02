@@ -24,13 +24,13 @@ export const QUERY_DEFAULTS = {
 } as const
 export const MIN_MASK_LENGTH = 3
 export const MAX_MASK_ASTERISKS = 3
-export const DEFAULT_HIGHLIGHT_COLOR = "#00B4D8"
-export const HIGHLIGHT_SYMBOL_ALPHA = 0.4 // 40% opacity ensures underlying features visible.
-export const OUTLINE_WIDTH = 2 // 2px meets WCAG 1.4.11 non-text contrast 3:1 ratio.
+export const DEFAULT_HIGHLIGHT_COLOR = "#b54900"
+export const HIGHLIGHT_SYMBOL_ALPHA = 0.5
+export const OUTLINE_WIDTH = 1
 export const DEFAULT_MAX_RESULTS = 100
 export const OWNER_QUERY_CONCURRENCY = 5
 
-export const HIGHLIGHT_MARKER_SIZE = 12
+export const HIGHLIGHT_MARKER_SIZE = 6
 
 // AbortController pool size for efficient cancellation management
 // Size chosen to handle concurrent operations: 1 property query + 5 owner queries + 1 zoom query + buffer

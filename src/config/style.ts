@@ -17,7 +17,7 @@ const createFlexAuto = (
   additionalStyles: StyleObject = {}
 ) => createFlex(direction, { flex: "0 0 auto", ...additionalStyles })
 
-const createBorder = (color?: string) => `1px solid ${color}`
+const createBorder = (color?: string) => `2px solid ${color}`
 
 export const createWidgetStyles = (theme: IMThemeVariables) => {
   const { spacing, color, typography } = theme.sys
