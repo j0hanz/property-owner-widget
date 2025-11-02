@@ -48,13 +48,14 @@ export const CURSOR_TOOLTIP_STYLE = {
   kerning: true,
 } as const
 
-// AbortController pool size for efficient cancellation management
 // Size matches OWNER_QUERY_CONCURRENCY to handle typical concurrent operations
 export const ABORT_CONTROLLER_POOL_SIZE = 5
 
-// Debounce duration (ms) for stabilizing loading indicator visibility
-// 200ms balances perceived responsiveness vs flicker prevention
+// Debounce duration for loading indicator visibility to prevent flicker
 export const LOADING_VISIBILITY_DEBOUNCE_MS = 200
+
+// Pixel tolerance for hover queries to improve usability
+export const HOVER_QUERY_TOLERANCE_PX = 10
 
 export const EXPORT_FORMATS: ExportFormatDefinition[] = [
   {

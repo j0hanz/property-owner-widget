@@ -268,7 +268,7 @@ export const useGraphicsLayer = (
   const removeGraphicsForFnr = hooks.useEventCallback(
     (fnr: string | number, normalizeFnrKey: (fnr: any) => string) => {
       const layer = graphicsLayerRef.current
-      if (!layer) return
+      if (!layer || fnr == null) return
       const fnrKey = normalizeFnrKey(fnr)
       const graphics = graphicsMapRef.current.get(fnrKey)
       if (graphics && graphics.length > 0) {

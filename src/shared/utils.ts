@@ -24,7 +24,7 @@ import {
 // ============================================================================
 
 /** Sanitize arbitrary HTML/text content */
-const sanitizeText = (value: string): string => {
+const stripHtmlInternal = (value: string): string => {
   if (!value) return ""
   const doc = new DOMParser().parseFromString(value, "text/html")
   const text = doc.body.textContent || ""
@@ -32,8 +32,8 @@ const sanitizeText = (value: string): string => {
 }
 
 export const textSanitizer = {
-  sanitize: sanitizeText,
-  stripHtml: (value: string) => sanitizeText(value),
+  sanitize: stripHtmlInternal,
+  stripHtml: (value: string) => stripHtmlInternal(value),
 }
 
 export const stripHtml = (value: string): string =>
@@ -61,7 +61,7 @@ export const logger = {
 // ============================================================================
 
 const maskText = (text: string, minLength: number): string => {
-  const normalized = sanitizeText(text)
+  const normalized = stripHtmlInternal(text)
   if (normalized.length < minLength) return "***"
   return normalized
 }
@@ -102,8 +102,8 @@ export const maskAddress = ownerPrivacy.maskAddress
 
 const normalizeOwnerValue = (value: unknown): string => {
   if (value === null || value === undefined) return ""
-  if (typeof value === "number") return sanitizeText(String(value))
-  if (typeof value === "string") return sanitizeText(value)
+  if (typeof value === "number") return stripHtmlInternal(String(value))
+  if (typeof value === "string") return stripHtmlInternal(value)
   return ""
 }
 
@@ -302,7 +302,7 @@ const maskOwnerListEntry = (entry: string): string => {
 }
 
 const formatOwnerList = (agarLista: string, maskPII: boolean): string => {
-  const sanitized = sanitizeText(String(agarLista))
+  const sanitized = stripHtmlInternal(String(agarLista))
   const uniqueEntries = deduplicateEntries(sanitized.split(";"))
 
   if (!maskPII) return uniqueEntries.join("; ")
@@ -318,19 +318,19 @@ const formatIndividualOwner = (
   maskPII: boolean,
   unknownOwnerText: string
 ): string => {
-  const rawName = sanitizeText(owner.NAMN || "") || unknownOwnerText
+  const rawName = stripHtmlInternal(owner.NAMN || "") || unknownOwnerText
   const namePart =
     maskPII && rawName !== unknownOwnerText
       ? ownerPrivacy.maskName(rawName)
       : rawName
 
-  const rawAddress = sanitizeText(owner.BOSTADR || "")
+  const rawAddress = stripHtmlInternal(owner.BOSTADR || "")
   const addressPart =
     maskPII && rawAddress ? ownerPrivacy.maskAddress(rawAddress) : rawAddress
 
-  const postalCode = sanitizeText(owner.POSTNR || "").replace(/\s+/g, "")
-  const city = sanitizeText(owner.POSTADR || "")
-  const orgNr = sanitizeText(owner.ORGNR || "")
+  const postalCode = stripHtmlInternal(owner.POSTNR || "").replace(/\s+/g, "")
+  const city = stripHtmlInternal(owner.POSTADR || "")
+  const orgNr = stripHtmlInternal(owner.ORGNR || "")
 
   const parts = [
     namePart,
@@ -642,42 +642,38 @@ export const calculatePropertyUpdates = <
   toggleEnabled: boolean,
   maxResults: number
 ): { toRemove: Set<string>; toAdd: T[]; updatedRows: T[] } => {
-  // Precompute normalized FNR keys for efficiency
-  const existingFnrKeys = existingProperties.map((r) => normalizeFnrKey(r.FNR))
-  const processFnrKeys = rowsToProcess.map((r) => normalizeFnrKey(r.FNR))
-
+  // Build optimized Map structures for O(1) lookups
   const existingByFnr = new Map<string, T[]>()
-  const remainingIds = new Set<string>()
+  const existingById = new Map<string, T>()
 
-  existingProperties.forEach((row, idx) => {
-    const fnrKey = existingFnrKeys[idx]
+  existingProperties.forEach((row) => {
+    const fnrKey = normalizeFnrKey(row.FNR)
     const existingGroup = existingByFnr.get(fnrKey)
     if (existingGroup) {
       existingGroup.push(row)
     } else {
       existingByFnr.set(fnrKey, [row])
     }
-    remainingIds.add(row.id)
+    existingById.set(row.id, row)
   })
 
   const toRemove = new Set<string>()
   const toAdd: T[] = []
   const addedIds = new Set<string>()
 
-  rowsToProcess.forEach((row, idx) => {
-    const fnrKey = processFnrKeys[idx]
+  // Single-pass processing with Map lookups
+  rowsToProcess.forEach((row) => {
+    const fnrKey = normalizeFnrKey(row.FNR)
+
     if (toggleEnabled && !toRemove.has(fnrKey)) {
       const existingGroup = existingByFnr.get(fnrKey)
       if (existingGroup && existingGroup.length > 0) {
         toRemove.add(fnrKey)
-        existingGroup.forEach((existing) => {
-          remainingIds.delete(existing.id)
-        })
         return
       }
     }
 
-    if (remainingIds.has(row.id) || addedIds.has(row.id)) {
+    if (existingById.has(row.id) || addedIds.has(row.id)) {
       return
     }
 
@@ -685,9 +681,14 @@ export const calculatePropertyUpdates = <
     addedIds.add(row.id)
   })
 
-  const updatedRows = existingProperties.filter(
-    (row) => !toRemove.has(normalizeFnrKey(row.FNR))
-  )
+  // Efficient filtering using Set lookup
+  const updatedRows =
+    toRemove.size > 0
+      ? existingProperties.filter(
+          (row) => !toRemove.has(normalizeFnrKey(row.FNR))
+        )
+      : existingProperties.slice()
+
   updatedRows.push(...toAdd)
 
   if (updatedRows.length > maxResults) {

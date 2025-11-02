@@ -67,6 +67,7 @@ import {
   cleanupRemovedGraphics,
   isValidationFailure,
   buildHighlightColor,
+  buildHighlightSymbolJSON,
   computeWidgetsToClose,
   dataSourceHelpers,
   getValidatedOutlineWidth,
@@ -76,7 +77,11 @@ import {
   abortHelpers,
 } from "../shared/utils"
 import type { CursorGraphicsState } from "../shared/utils"
-import { EXPORT_FORMATS, CURSOR_TOOLTIP_STYLE } from "../config/constants"
+import {
+  EXPORT_FORMATS,
+  CURSOR_TOOLTIP_STYLE,
+  HOVER_QUERY_TOLERANCE_PX,
+} from "../config/constants"
 import {
   trackEvent,
   trackError,
@@ -223,6 +228,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   } | null>(null)
   const [isHoverQueryActive, setIsHoverQueryActive] = React.useState(false)
   const hoverQueryAbortRef = React.useRef<AbortController | null>(null)
+  const lastHoverQueryPointRef = React.useRef<{ x: number; y: number } | null>(
+    null
+  )
+  const HOVER_QUERY_TOLERANCE_PX_VALUE = HOVER_QUERY_TOLERANCE_PX
 
   const hasSelectedProperties = state.selectedProperties.length > 0
   const hasSelectedRows = state.rowSelectionIds.size > 0
@@ -677,6 +686,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         if (isValidationFailure(dsValidation)) {
           setIsHoverQueryActive(false)
+          if (hoverQueryAbortRef.current) {
+            hoverQueryAbortRef.current = null
+          }
           return
         }
         const { manager } = dsValidation.data
@@ -737,17 +749,39 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         setHoverTooltipData({ fastighet, bostadr })
         setIsHoverQueryActive(false)
       } catch (error) {
-        if (isAbortError(error)) return
+        if (isAbortError(error)) {
+          hoverQueryAbortRef.current = null
+          return
+        }
 
         logger.debug("Hover query failed", { error })
         setHoverTooltipData(null)
         setIsHoverQueryActive(false)
+      } finally {
+        if (hoverQueryAbortRef.current === controller) {
+          hoverQueryAbortRef.current = null
+        }
       }
     }
   )
 
-  // Throttled version of hover query
-  const throttledHoverQuery = useThrottle(queryPropertyAtPoint, 100)
+  // Throttled version of hover query with spatial tolerance
+  const throttledHoverQuery = useThrottle(
+    (mapPoint: __esri.Point, screenPoint: { x: number; y: number }) => {
+      // Skip query if within tolerance of last query point
+      if (lastHoverQueryPointRef.current) {
+        const dx = screenPoint.x - lastHoverQueryPointRef.current.x
+        const dy = screenPoint.y - lastHoverQueryPointRef.current.y
+        const distance = Math.sqrt(dx * dx + dy * dy)
+        if (distance < HOVER_QUERY_TOLERANCE_PX_VALUE) {
+          return
+        }
+      }
+      lastHoverQueryPointRef.current = screenPoint
+      queryPropertyAtPoint(mapPoint)
+    },
+    100
+  )
 
   const updateCursorPoint = hooks.useEventCallback(
     (mapPoint: __esri.Point | null) => {
@@ -849,8 +883,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             })
           }
 
-          // Trigger throttled hover query (fires periodically during movement)
-          throttledHoverQuery(mapPoint)
+          // Trigger throttled hover query with spatial tolerance
+          throttledHoverQuery(mapPoint, screenPoint)
         } else {
           lastCursorPointRef.current = null
           pendingMapPointRef.current = null
@@ -863,6 +897,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       pointerLeaveHandleRef.current = view.on("pointer-leave", () => {
         lastCursorPointRef.current = null
         pendingMapPointRef.current = null
+        lastHoverQueryPointRef.current = null
         if (rafIdRef.current !== null) {
           cancelAnimationFrame(rafIdRef.current)
           rafIdRef.current = null
@@ -938,22 +973,22 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     updateCursorPoint(lastCursorPointRef.current)
   }, [hoverTooltipData, isHoverQueryActive])
 
-  // Sync selection graphics when highlight config changes
+  // Sync selection graphics when highlight config changes (incremental update)
   const debouncedSyncGraphics = useDebounce(() => {
     if (state.selectedProperties.length === 0) {
       return
     }
 
-    const graphicsToAdd = state.selectedProperties
-      .map((row) =>
-        row.graphic ? { graphic: row.graphic, fnr: row.FNR } : null
-      )
-      .filter(Boolean) as Array<{
-      graphic: __esri.Graphic
-      fnr: string | number
-    }>
+    const view = getCurrentView()
+    if (!view || !modules) {
+      return
+    }
 
-    if (graphicsToAdd.length === 0) {
+    const layer = view.map.findLayerById(
+      `${id}-property-highlight-layer`
+    ) as __esri.GraphicsLayer | null
+
+    if (!layer) {
       return
     }
 
@@ -963,17 +998,42 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     )
     const currentOutlineWidth = getValidatedOutlineWidth(outlineWidthConfig)
 
-    syncSelectionGraphics({
-      graphicsToAdd,
-      selectedRows: state.selectedProperties,
-      getCurrentView,
-      helpers: {
-        addGraphicsToMap,
-        extractFnr,
-        normalizeFnrKey,
-      },
-      highlightColor: currentHighlightColor,
-      outlineWidth: currentOutlineWidth,
+    // Incremental symbol update: modify existing graphics instead of rebuilding
+    const selectedFnrKeys = new Set(
+      state.selectedProperties.map((row) => normalizeFnrKey(row.FNR))
+    )
+
+    layer.graphics.forEach((graphic: __esri.Graphic) => {
+      if (!graphic || !graphic.geometry) return
+      const fnr = extractFnr(graphic.attributes)
+      if (!fnr) return
+
+      const fnrKey = normalizeFnrKey(fnr)
+      if (!selectedFnrKeys.has(fnrKey)) return
+
+      // Update symbol properties in place
+      const geometry = graphic.geometry
+      if (!geometry) return
+
+      const symbolJSON = buildHighlightSymbolJSON(
+        currentHighlightColor,
+        currentOutlineWidth,
+        geometry.type as "polygon" | "polyline" | "point"
+      )
+
+      if (geometry.type === "polygon" || geometry.type === "extent") {
+        graphic.symbol = new modules.SimpleFillSymbol(
+          symbolJSON as __esri.SimpleFillSymbolProperties
+        )
+      } else if (geometry.type === "polyline") {
+        graphic.symbol = new modules.SimpleLineSymbol(
+          symbolJSON as __esri.SimpleLineSymbolProperties
+        )
+      } else if (geometry.type === "point" || geometry.type === "multipoint") {
+        graphic.symbol = new modules.SimpleMarkerSymbol(
+          symbolJSON as __esri.SimpleMarkerSymbolProperties
+        )
+      }
     })
   }, 100)
 
