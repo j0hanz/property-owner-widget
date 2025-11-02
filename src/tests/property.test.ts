@@ -18,6 +18,7 @@ import {
   buildHighlightSymbolJSON,
   buildTooltipSymbol,
   syncCursorGraphics,
+  updateRawPropertyResults,
 } from "../shared/utils"
 import {
   isValidArcGISUrl,
@@ -910,6 +911,91 @@ describe("Property Widget - Utility Helper Functions", () => {
     expect(symbol.color).toBe(CURSOR_TOOLTIP_STYLE.textColor)
     expect(symbol.haloColor).toBe(CURSOR_TOOLTIP_STYLE.haloColor)
     expect(symbol.font.family).toBe(CURSOR_TOOLTIP_STYLE.fontFamily)
+  })
+
+  it("should map property query results to each owner row for export", () => {
+    const propertyResult = {
+      features: [
+        {
+          attributes: {
+            FNR: "123",
+            OBJECTID: 42,
+            UUID_FASTIGHET: "uuid-123",
+            FASTIGHET: "Property 1",
+          },
+          geometry: {},
+        },
+      ],
+    }
+
+    const ownerRowA: GridRowData = {
+      id: createRowId("123", 1),
+      FNR: "123",
+      UUID_FASTIGHET: "uuid-123",
+      FASTIGHET: "Property 1",
+      BOSTADR: "Owner 1",
+    }
+
+    const ownerRowB: GridRowData = {
+      id: createRowId("123", 2),
+      FNR: "123",
+      UUID_FASTIGHET: "uuid-123",
+      FASTIGHET: "Property 1",
+      BOSTADR: "Owner 2",
+    }
+
+    const updated = updateRawPropertyResults(
+      new Map(),
+      [ownerRowA, ownerRowB],
+      [propertyResult],
+      new Set(),
+      [],
+      normalizeFnrKey
+    )
+
+    expect(updated.size).toBe(2)
+    expect(updated.get(ownerRowA.id)).toBe(propertyResult)
+    expect(updated.get(ownerRowB.id)).toBe(propertyResult)
+  })
+
+  it("should remove raw property results for deselected properties", () => {
+    const propertyResult = {
+      features: [
+        {
+          attributes: {
+            FNR: "456",
+            OBJECTID: 100,
+            UUID_FASTIGHET: "uuid-456",
+            FASTIGHET: "Property 2",
+          },
+          geometry: {},
+        },
+      ],
+    }
+
+    const ownerRow: GridRowData = {
+      id: createRowId("456", 1),
+      FNR: "456",
+      UUID_FASTIGHET: "uuid-456",
+      FASTIGHET: "Property 2",
+      BOSTADR: "Owner A",
+    }
+
+    const prev = new Map<string, any>([[ownerRow.id, propertyResult]])
+    const toRemove = new Set<string>([normalizeFnrKey(ownerRow.FNR)])
+
+    const updated = updateRawPropertyResults(
+      prev,
+      [],
+      [],
+      toRemove,
+      [ownerRow],
+      normalizeFnrKey
+    )
+
+    expect(prev.has(ownerRow.id)).toBe(true)
+    expect(updated.has(ownerRow.id)).toBe(false)
+    expect(updated.size).toBe(0)
   })
 
   it("should create and clear cursor graphics through sync helper", () => {

@@ -886,14 +886,38 @@ export const updateRawPropertyResults = (
 ): Map<string, any> => {
   const updated = new Map(prev)
 
+  const propertyResultsByFnr = new Map<string, any>()
+  propertyResults.forEach((result) => {
+    const feature = result?.features?.[0]
+    const attributes = feature?.attributes as
+      | { FNR?: string | number; fnr?: string | number }
+      | undefined
+    const fnrValue = attributes?.FNR ?? attributes?.fnr
+    if (fnrValue != null) {
+      propertyResultsByFnr.set(normalizeFnrKey(fnrValue), result)
+    }
+  })
+
+  let fallbackIndex = 0
+
   const selectedByFnr = new Map<string, string>()
   selectedProperties.forEach((row) => {
     selectedByFnr.set(normalizeFnrKey(row.FNR), row.id)
   })
 
-  rowsToProcess.forEach((row, index) => {
-    if (index < propertyResults.length) {
-      updated.set(row.id, propertyResults[index])
+  rowsToProcess.forEach((row) => {
+    const fnrKey = normalizeFnrKey(row.FNR)
+    let propertyResult = propertyResultsByFnr.get(fnrKey)
+
+    if (!propertyResult && propertyResults.length > 0) {
+      const fallback =
+        propertyResults[Math.min(fallbackIndex, propertyResults.length - 1)]
+      fallbackIndex += 1
+      propertyResult = fallback
+    }
+
+    if (propertyResult) {
+      updated.set(row.id, propertyResult)
     }
   })
 
