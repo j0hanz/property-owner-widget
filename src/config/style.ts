@@ -79,7 +79,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       zIndex: 1,
     }),
     th: css({
-      padding: spacing?.(0.5),
+      padding: spacing?.(1),
       textAlign: "left",
       borderBlockEnd: border,
       borderInlineEnd: border,
@@ -97,7 +97,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       },
     }),
     td: css({
-      padding: spacing?.(0.5),
+      padding: spacing?.(1),
       borderInlineEnd: border,
       "&:last-child": {
         borderInlineEnd: "none",

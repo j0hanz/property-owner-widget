@@ -181,12 +181,17 @@ export interface EsriModules {
 
 export interface CursorTooltipStyle {
   readonly textColor: string
-  readonly haloColor: string
-  readonly haloSize: number
+  readonly backgroundColor: string
   readonly fontFamily: string
   readonly fontSize: number
   readonly fontWeight: __esri.FontProperties["weight"]
-  readonly offset: number
+  readonly verticalAlignment: __esri.TextSymbolProperties["verticalAlignment"]
+  readonly horizontalAlignment: __esri.TextSymbolProperties["horizontalAlignment"]
+  readonly yoffset: number
+  readonly xoffset: number
+  readonly lineWidth: number
+  readonly lineHeight: number
+  readonly kerning: boolean
 }
 
 export interface UrlErrors {

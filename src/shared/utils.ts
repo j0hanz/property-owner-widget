@@ -173,15 +173,19 @@ export const buildTooltipSymbol = (
   return new modules.TextSymbol({
     text: sanitized,
     color: style.textColor,
-    haloColor: style.haloColor,
-    haloSize: style.haloSize,
-    xoffset: style.offset,
-    yoffset: style.offset,
+    backgroundColor: style.backgroundColor,
+    horizontalAlignment: style.horizontalAlignment,
+    verticalAlignment: style.verticalAlignment,
+    xoffset: style.xoffset,
+    yoffset: style.yoffset,
+    lineWidth: style.lineWidth,
+    lineHeight: style.lineHeight,
     font: {
       family: style.fontFamily,
       size: style.fontSize,
       weight: style.fontWeight,
     },
+    kerning: style.kerning,
   } as __esri.TextSymbolProperties)
 }
 
@@ -191,7 +195,6 @@ export const syncCursorGraphics = ({
   mapPoint,
   tooltipText,
   highlightColor,
-  outlineWidth,
   existing,
   style = CURSOR_TOOLTIP_STYLE,
 }: {
@@ -234,7 +237,7 @@ export const syncCursorGraphics = ({
         color: highlightColor,
         outline: {
           color: [highlightColor[0], highlightColor[1], highlightColor[2], 1],
-          width: outlineWidth,
+          width: 2.5,
         },
       } as any,
     })
