@@ -963,6 +963,7 @@ describe("Property Widget - Utility Helper Functions", () => {
     expect(state.tooltipGraphic).toBeInstanceOf(MockGraphic)
     expect(state.tooltipGraphic?.symbol).toBeInstanceOf(MockTextSymbol)
     expect((state.tooltipGraphic?.symbol as MockTextSymbol).text).toBe("FAST-1")
+    expect(state.lastTooltipText).toBe("FAST-1")
 
     const clearedState = syncCursorGraphics({
       modules,
@@ -977,6 +978,87 @@ describe("Property Widget - Utility Helper Functions", () => {
 
     expect(layer.remove).toHaveBeenCalledTimes(2)
     expect(clearedState).toBeNull()
+  })
+
+  it("should only update symbol when tooltip text changes (performance optimization)", () => {
+    class MockTextSymbol {
+      text: string
+      constructor(props: any) {
+        this.text = props.text
+      }
+    }
+
+    class MockGraphic {
+      geometry: any
+      symbol: any
+      constructor(props: any) {
+        this.geometry = props.geometry
+        this.symbol = props.symbol
+      }
+    }
+
+    const modules = {
+      Graphic: MockGraphic,
+      TextSymbol: MockTextSymbol,
+    } as any
+
+    const layer = {
+      add: jest.fn(),
+      remove: jest.fn(),
+    } as any
+
+    const mapPoint1 = { x: 1, y: 2 } as any
+    const mapPoint2 = { x: 3, y: 4 } as any
+    const highlightColor: [number, number, number, number] = [0, 180, 216, 0.4]
+
+    // Initial render with tooltip
+    const state1 = syncCursorGraphics({
+      modules,
+      layer,
+      mapPoint: mapPoint1,
+      tooltipText: "Property A",
+      highlightColor,
+      outlineWidth: 2,
+      existing: null,
+      style: CURSOR_TOOLTIP_STYLE,
+    })
+
+    expect(state1?.lastTooltipText).toBe("Property A")
+    const originalSymbol = state1?.tooltipGraphic?.symbol
+
+    // Move cursor but keep same tooltip text - symbol should NOT be recreated
+    const state2 = syncCursorGraphics({
+      modules,
+      layer,
+      mapPoint: mapPoint2,
+      tooltipText: "Property A",
+      highlightColor,
+      outlineWidth: 2,
+      existing: state1,
+      style: CURSOR_TOOLTIP_STYLE,
+    })
+
+    expect(state2?.lastTooltipText).toBe("Property A")
+    expect(state2?.tooltipGraphic?.symbol).toBe(originalSymbol) // Same symbol reference
+    expect(state2?.tooltipGraphic?.geometry).toBe(mapPoint2) // Position updated
+
+    // Change tooltip text - symbol SHOULD be recreated
+    const state3 = syncCursorGraphics({
+      modules,
+      layer,
+      mapPoint: mapPoint2,
+      tooltipText: "Property B",
+      highlightColor,
+      outlineWidth: 2,
+      existing: state2,
+      style: CURSOR_TOOLTIP_STYLE,
+    })
+
+    expect(state3?.lastTooltipText).toBe("Property B")
+    expect(state3?.tooltipGraphic?.symbol).not.toBe(originalSymbol) // New symbol created
+    expect((state3?.tooltipGraphic?.symbol as MockTextSymbol).text).toBe(
+      "Property B"
+    )
   })
 })
 

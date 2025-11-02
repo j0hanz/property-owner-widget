@@ -441,9 +441,7 @@ const Setting = (
   }, [config.outlineWidth])
 
   hooks.useEffectOnce(() => {
-    if (useMapWidgetIds && useMapWidgetIds.length > 0) {
-      console.log("Property Widget: Map configured on mount", useMapWidgetIds)
-    }
+    // Settings panel mounted
   })
 
   const hasMapSelection =

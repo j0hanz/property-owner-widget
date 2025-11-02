@@ -251,18 +251,6 @@ export const validateDataSources = (params: {
     return ownerUrlValidation
   }
 
-  const propertyUrl = getDataSourceUrl(propertyDs)
-  const ownerUrl = getDataSourceUrl(ownerDs)
-  if (propertyUrl && ownerUrl) {
-    const propertyService = propertyUrl.split("/MapServer/")[0]
-    const ownerService = ownerUrl.split("/MapServer/")[0]
-    if (propertyService !== ownerService) {
-      console.log(
-        "Property Widget: Property and owner layers use different MapServer services. This is valid for distributed architectures but may indicate misconfiguration."
-      )
-    }
-  }
-
   return { valid: true, data: { manager: dsManager } }
 }
 
@@ -284,14 +272,6 @@ export const queryPropertyByPoint = async (
     if (!layerUrl) {
       throw new Error("Data source URL not available")
     }
-
-    console.log("Property Widget: Querying layer", {
-      dataSourceId,
-      url: layerUrl,
-      pointX: point.x,
-      pointY: point.y,
-      wkid: point.spatialReference?.wkid,
-    })
 
     if (!cachedFeatureLayerCtor || !cachedQueryCtor) {
       const [FeatureLayer, Query] = await loadArcGISJSAPIModules([
@@ -328,16 +308,9 @@ export const queryPropertyByPoint = async (
       createSignalOptions(options?.signal)
     )
 
-    console.log("Property Widget: Query result", {
-      featureCount: result?.features?.length || 0,
-      hasFeatures: !!(result?.features && result.features.length > 0),
-      firstFeature: result?.features?.[0]?.attributes,
-    })
-
     abortHelpers.throwIfAborted(options?.signal)
 
     if (!result?.features || result.features.length === 0) {
-      console.log("Property Widget: No features found at this location")
       return []
     }
 
@@ -606,7 +579,6 @@ const deduplicateOwnerEntries = (
       seen.add(identityKey)
       uniqueOwners.push(attrs)
     } catch (error) {
-      console.warn("Failed to generate identity key for owner entry", error)
       uniqueOwners.push(attrs)
     }
   })
@@ -914,11 +886,7 @@ const processBatchQuery = async (
     if (helpers.isAbortError(error)) {
       throw error as Error
     }
-    console.error(
-      "Property Widget: Batch owner query failed for FNRs",
-      fnrsToQuery,
-      error
-    )
+    console.error("Batch owner query failed", error)
     ownersByFnr = new Map()
     fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)))
   }

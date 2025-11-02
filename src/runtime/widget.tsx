@@ -48,6 +48,7 @@ import {
   useMapViewLifecycle,
   useAbortControllerPool,
   useDebounce,
+  useThrottle,
 } from "../shared/hooks"
 import {
   queryPropertyByPoint,
@@ -105,13 +106,10 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
 
   const view = getCurrentView()
   if (!view) {
-    console.log(
-      "syncSelectionGraphics: no active view, deferring graphics sync"
-    )
     return
   }
 
-  const success = syncGraphicsWithState({
+  syncGraphicsWithState({
     graphicsToAdd,
     selectedRows,
     view,
@@ -119,12 +117,6 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
     highlightColor,
     outlineWidth,
   })
-
-  if (!success) {
-    console.log(
-      "Property Widget: syncSelectionGraphics - failed to sync graphics with state"
-    )
-  }
 }
 
 // Error boundaries require class components in React (no functional equivalent)
@@ -142,11 +134,6 @@ class PropertyWidgetErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.log(
-      this.props.translate("errorBoundaryConsoleLog"),
-      error,
-      errorInfo
-    )
     trackError("error_boundary", error, errorInfo.componentStack)
   }
 
@@ -182,15 +169,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const prevRuntimeState = hooks.usePrevious(runtimeState)
 
   hooks.useEffectOnce(() => {
-    console.log("Property Widget: Initial mount", {
-      propertyDataSourceId: config.propertyDataSourceId,
-      ownerDataSourceId: config.ownerDataSourceId,
-      mapWidgetId: useMapWidgetIds?.[0],
-      hasDataSources: !!(
-        config.propertyDataSourceId && config.ownerDataSourceId
-      ),
-      runtimeState,
-    })
+    // Widget mounted
   })
 
   const propertyUseDataSource = dataSourceHelpers.findById(
@@ -298,11 +277,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     setState((prev) => {
       if (prev.selectedProperties.length === 0) return prev
 
-      console.log(
-        "PII masking toggled:",
-        piiMaskingEnabled,
-        "- reformatting existing data"
-      )
       trackFeatureUsage("pii_masking_toggled", piiMaskingEnabled)
 
       const reformattedProperties = prev.selectedProperties.map((row) => {
@@ -327,9 +301,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     setState((prev) => {
       if (prev.selectedProperties.length <= maxResults) return prev
 
-      console.log(
-        `Max results changed to ${maxResults}, trimming from ${prev.selectedProperties.length} properties`
-      )
       trackEvent({
         category: "Property",
         action: "max_results_trim",
@@ -354,17 +325,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   }, [maxResults])
 
   hooks.useUpdateEffect(() => {
-    console.log("Toggle removal mode changed:", toggleEnabled)
     trackFeatureUsage("toggle_removal_changed", toggleEnabled)
   }, [toggleEnabled])
 
   hooks.useUpdateEffect(() => {
-    console.log(
-      "Batch owner query mode changed:",
-      config.enableBatchOwnerQuery,
-      "relationshipId:",
-      config.relationshipId
-    )
     trackFeatureUsage(
       "batch_owner_query_changed",
       config.enableBatchOwnerQuery ?? false
@@ -429,10 +393,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           return Boolean(targetInfo?.isClassLoaded)
         })
         if (safeTargets.length) {
-          console.log(
-            `Property Widget: Closing ${safeTargets.length} other widget(s)`,
-            safeTargets
-          )
           trackEvent({
             category: "Widget",
             action: "close_other_widgets",
@@ -442,9 +402,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         }
       }
     } catch (err) {
-      if (!isAbortError(err)) {
-        console.error("closeOtherWidgets error", err)
-      }
+      // Silent fail - non-critical error
     }
   })
 
@@ -464,14 +422,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   const handleExport = hooks.useEventCallback((format: ExportFormat) => {
     if (!hasSelectedRows) {
-      console.log("Property Widget: Export skipped - no rows selected")
       return
     }
 
     if (!state.rawPropertyResults || state.rawPropertyResults.size === 0) {
-      console.log(
-        "Property Widget: Export skipped - no raw property data available"
-      )
       return
     }
 
@@ -488,9 +442,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     })
 
     if (selectedRawData.length === 0) {
-      console.log(
-        "Property Widget: Export skipped - no matching raw data for selected rows"
-      )
       return
     }
 
@@ -505,14 +456,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         definition: formatDefinition,
       })
     } catch (error) {
-      console.error(`Export ${format} failed`, error)
+      console.error("Export failed", error)
     }
   })
 
   const handleExportFormatSelect = hooks.useEventCallback(
     (format: ExportFormat) => {
       if (!["json", "csv", "geojson"].includes(format)) {
-        console.error("Property Widget: Invalid export format", format)
         return
       }
       handleExport(format)
@@ -533,12 +483,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   )
 
   const handlePropertyDataSourceFailed = hooks.useEventCallback(() => {
-    console.error("Property Widget: Property data source creation failed")
     setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
   })
 
   const handleOwnerDataSourceFailed = hooks.useEventCallback(() => {
-    console.error("Property Widget: Owner data source creation failed")
     setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
   })
 
@@ -819,6 +767,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const pointerMoveHandleRef = React.useRef<__esri.Handle | null>(null)
   const pointerLeaveHandleRef = React.useRef<__esri.Handle | null>(null)
   const lastCursorPointRef = React.useRef<__esri.Point | null>(null)
+  const cachedLayerRef = React.useRef<__esri.GraphicsLayer | null>(null)
+  const rafIdRef = React.useRef<number | null>(null)
+  const pendingMapPointRef = React.useRef<__esri.Point | null>(null)
   const cursorTooltipNoPropertyText = translate("cursorTooltipNoProperty")
   const cursorTooltipFormatText = translate("cursorTooltipFormat")
   const tooltipNoPropertyRef = hooks.useLatest(cursorTooltipNoPropertyText)
@@ -828,15 +779,18 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const outlineWidthConfigRef = hooks.useLatest(outlineWidthConfig)
 
   const clearCursorGraphics = hooks.useEventCallback(() => {
-    const view = getCurrentView()
+    // Cancel any pending RAF update
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current)
+      rafIdRef.current = null
+    }
+    pendingMapPointRef.current = null
+
     if (!cursorGraphicsStateRef.current) {
       return
     }
 
-    const layer = view?.map?.findLayerById(
-      `${id}-property-highlight-layer`
-    ) as __esri.GraphicsLayer
-
+    const layer = cachedLayerRef.current
     if (layer) {
       if (cursorGraphicsStateRef.current.pointGraphic) {
         layer.remove(cursorGraphicsStateRef.current.pointGraphic)
@@ -945,16 +899,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
   )
 
-  // Debounced hover query (50ms delay to avoid excessive queries)
-  const debouncedHoverQuery = useDebounce(queryPropertyAtPoint, 50)
+  // Throttled version of hover query
+  const throttledHoverQuery = useThrottle(queryPropertyAtPoint, 100)
 
   const updateCursorPoint = hooks.useEventCallback(
     (mapPoint: __esri.Point | null) => {
-      const view = getCurrentView()
-      if (!view) {
-        if (!mapPoint) {
-          clearCursorGraphics()
-        }
+      if (!mapPoint) {
+        clearCursorGraphics()
         return
       }
 
@@ -963,11 +914,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         return
       }
 
-      ensureGraphicsLayer(view)
-      const layer = view.map.findLayerById(
-        `${id}-property-highlight-layer`
-      ) as __esri.GraphicsLayer | null
-
+      const layer = cachedLayerRef.current
       if (!layer) {
         clearCursorGraphics()
         return
@@ -1030,23 +977,36 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
     // Setup new handler if widget is active
     if (canTrackCursor) {
-      let lastMoveTime = 0
-      const THROTTLE_MS = 100
-      pointerMoveHandleRef.current = view.on("pointer-move", (event) => {
-        const now = Date.now()
-        if (now - lastMoveTime < THROTTLE_MS) return // Skip intermediate events
-        lastMoveTime = now
+      // Cache layer reference to avoid repeated DOM queries
+      ensureGraphicsLayer(view)
+      cachedLayerRef.current = view.map.findLayerById(
+        `${id}-property-highlight-layer`
+      ) as __esri.GraphicsLayer | null
 
+      pointerMoveHandleRef.current = view.on("pointer-move", (event) => {
         const screenPoint = { x: event.x, y: event.y }
         const mapPoint = view.toMap(screenPoint)
+
         if (mapPoint) {
           lastCursorPointRef.current = mapPoint
-          updateCursorPoint(mapPoint)
+          pendingMapPointRef.current = mapPoint
 
-          // Trigger debounced hover query
-          debouncedHoverQuery(mapPoint)
+          // Use RAF to batch graphic updates at 60fps
+          if (rafIdRef.current === null) {
+            rafIdRef.current = requestAnimationFrame(() => {
+              rafIdRef.current = null
+              const point = pendingMapPointRef.current
+              if (point) {
+                updateCursorPoint(point)
+              }
+            })
+          }
+
+          // Trigger throttled hover query (fires periodically during movement)
+          throttledHoverQuery(mapPoint)
         } else {
           lastCursorPointRef.current = null
+          pendingMapPointRef.current = null
           updateCursorPoint(null)
           setHoverTooltipData(null)
           setIsHoverQueryActive(false)
@@ -1055,19 +1015,29 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       pointerLeaveHandleRef.current = view.on("pointer-leave", () => {
         lastCursorPointRef.current = null
+        pendingMapPointRef.current = null
+        if (rafIdRef.current !== null) {
+          cancelAnimationFrame(rafIdRef.current)
+          rafIdRef.current = null
+        }
         updateCursorPoint(null)
         setHoverTooltipData(null)
         setIsHoverQueryActive(false)
-        debouncedHoverQuery.cancel()
       })
     } else {
       lastCursorPointRef.current = null
+      pendingMapPointRef.current = null
+      cachedLayerRef.current = null
       clearCursorGraphics()
       setHoverTooltipData(null)
       setIsHoverQueryActive(false)
     }
 
     return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current)
+        rafIdRef.current = null
+      }
       if (pointerMoveHandleRef.current) {
         pointerMoveHandleRef.current.remove()
         pointerMoveHandleRef.current = null
@@ -1080,9 +1050,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         hoverQueryAbortRef.current.abort()
         hoverQueryAbortRef.current = null
       }
-      debouncedHoverQuery.cancel()
       setHoverTooltipData(null)
       setIsHoverQueryActive(false)
+      pendingMapPointRef.current = null
+      cachedLayerRef.current = null
       if (!canTrackCursor) {
         lastCursorPointRef.current = null
       }
@@ -1092,6 +1063,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   // Cleanup cursor point on unmount
   hooks.useUnmount(() => {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current)
+      rafIdRef.current = null
+    }
     if (pointerMoveHandleRef.current) {
       pointerMoveHandleRef.current.remove()
       pointerMoveHandleRef.current = null
@@ -1104,7 +1079,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       hoverQueryAbortRef.current.abort()
       hoverQueryAbortRef.current = null
     }
-    debouncedHoverQuery.cancel()
+    pendingMapPointRef.current = null
+    cachedLayerRef.current = null
     lastCursorPointRef.current = null
     clearCursorGraphics()
   })
@@ -1167,7 +1143,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         typeof prevRuntimeState === "undefined")
 
     if (isOpening && modules) {
-      console.log("Property Widget: Reactivating on open from controller")
       const currentView = getCurrentView()
       if (currentView) {
         reactivateMapView()
@@ -1176,10 +1151,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           action: "widget_reopened",
           label: "from_controller",
         })
-      } else {
-        console.log(
-          "Property Widget: Map view not ready yet, will activate on next view change"
-        )
       }
     }
   }, [

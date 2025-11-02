@@ -37,18 +37,10 @@ export const stripHtml = (value: string): string =>
 
 export const logger = {
   debug: (context: string, data?: { [key: string]: any }) => {
-    if (data) {
-      console.log(`Property Widget: ${context}`, data)
-    } else {
-      console.log(`Property Widget: ${context}`)
-    }
+    // Debug logging disabled in production
   },
   warn: (context: string, data?: { [key: string]: any }) => {
-    if (data) {
-      console.log(`Property Widget: ⚠️ ${context}`, data)
-    } else {
-      console.log(`Property Widget: ⚠️ ${context}`)
-    }
+    // Warning logging disabled in production
   },
   error: (context: string, error: unknown, data?: { [key: string]: any }) => {
     console.error(`Property Widget: ${context}`, error, data || {})
@@ -153,6 +145,7 @@ export const ownerIdentity = {
 export interface CursorGraphicsState {
   pointGraphic: __esri.Graphic | null
   tooltipGraphic: __esri.Graphic | null
+  lastTooltipText: string | null
 }
 
 export const buildTooltipSymbol = (
@@ -215,6 +208,7 @@ export const syncCursorGraphics = ({
   const next: CursorGraphicsState = {
     pointGraphic: existing?.pointGraphic ?? null,
     tooltipGraphic: existing?.tooltipGraphic ?? null,
+    lastTooltipText: existing?.lastTooltipText ?? null,
   }
 
   if (!next.pointGraphic) {
@@ -237,25 +231,36 @@ export const syncCursorGraphics = ({
   }
 
   if (tooltipText) {
-    const symbol = buildTooltipSymbol(modules, tooltipText, style)
-    if (symbol) {
-      if (!next.tooltipGraphic) {
-        next.tooltipGraphic = new modules.Graphic({
-          geometry: mapPoint,
-          symbol,
-        })
-        layer.add(next.tooltipGraphic)
-      } else {
-        next.tooltipGraphic.geometry = mapPoint
-        next.tooltipGraphic.symbol = symbol
+    // Only rebuild symbol if text actually changed (performance optimization)
+    const textChanged = next.lastTooltipText !== tooltipText
+
+    if (textChanged) {
+      const symbol = buildTooltipSymbol(modules, tooltipText, style)
+      if (symbol) {
+        if (!next.tooltipGraphic) {
+          next.tooltipGraphic = new modules.Graphic({
+            geometry: mapPoint,
+            symbol,
+          })
+          layer.add(next.tooltipGraphic)
+        } else {
+          next.tooltipGraphic.geometry = mapPoint
+          next.tooltipGraphic.symbol = symbol
+        }
+        next.lastTooltipText = tooltipText
+      } else if (next.tooltipGraphic) {
+        layer.remove(next.tooltipGraphic)
+        next.tooltipGraphic = null
+        next.lastTooltipText = null
       }
     } else if (next.tooltipGraphic) {
-      layer.remove(next.tooltipGraphic)
-      next.tooltipGraphic = null
+      // Text hasn't changed, just update position
+      next.tooltipGraphic.geometry = mapPoint
     }
   } else if (next.tooltipGraphic) {
     layer.remove(next.tooltipGraphic)
     next.tooltipGraphic = null
+    next.lastTooltipText = null
   }
 
   return next
@@ -685,9 +690,6 @@ export const syncGraphicsWithState = (params: {
   } = params
 
   if (!view) {
-    console.log(
-      "Property Widget: syncGraphicsWithState - view is null or undefined, cannot sync graphics"
-    )
     return false
   }
 
@@ -695,24 +697,10 @@ export const syncGraphicsWithState = (params: {
     selectedRows.map((row) => helpers.normalizeFnrKey(row.FNR))
   )
 
-  console.log("Property Widget: syncGraphicsWithState - processing graphics", {
-    graphicsToAddCount: graphicsToAdd.length,
-    selectedFnrsCount: selectedFnrs.size,
-    selectedFnrs: Array.from(selectedFnrs),
-  })
-
   graphicsToAdd.forEach(({ graphic, fnr }) => {
     const fnrKey = helpers.normalizeFnrKey(fnr)
-    console.log("Property Widget: Processing graphic", {
-      fnr,
-      fnrKey,
-      hasGeometry: !!graphic?.geometry,
-      geometryType: graphic?.geometry?.type,
-      isInSelectedFnrs: selectedFnrs.has(fnrKey),
-    })
     if (!selectedFnrs.has(fnrKey)) return
 
-    console.log("Property Widget: Calling addGraphicsToMap for FNR", fnrKey)
     helpers.addGraphicsToMap(
       graphic,
       view,

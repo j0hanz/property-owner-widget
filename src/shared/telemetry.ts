@@ -40,11 +40,9 @@ export const trackEvent = (event: TelemetryEvent): void => {
   if (!isAllowedToTrack()) return
 
   try {
-    if (isAllowedToTrack()) {
-      console.log("[Property Widget Telemetry]", event)
-    }
+    // Event tracking implementation here (silent)
   } catch (error) {
-    console.log("Telemetry tracking failed", error)
+    // Silent fail for telemetry
   }
 }
 
@@ -67,7 +65,7 @@ export const trackPerformance = (metric: PerformanceMetric): void => {
       })
     }
   } catch (error) {
-    console.log("Performance tracking failed", error)
+    // Silent fail for telemetry
   }
 }
 
@@ -90,7 +88,7 @@ export const trackError = (
       label: details ? `${errorMessage}: ${details}` : errorMessage,
     })
   } catch (trackingError) {
-    console.log("Error tracking failed", trackingError)
+    // Silent fail for telemetry
   }
 }
 

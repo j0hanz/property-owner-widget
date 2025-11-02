@@ -193,10 +193,6 @@ export const exportData = (
       label: "success",
       value: rowCount,
     })
-
-    console.log(
-      `Exported ${rowCount} properties to ${finalFilename} (${blob.size} bytes)`
-    )
   } catch (error) {
     console.error("Export failed:", error)
     trackError(`export_${format}`, error)

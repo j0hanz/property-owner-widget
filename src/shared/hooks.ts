@@ -222,12 +222,7 @@ export const useGraphicsLayer = (
         symbolJSON as __esri.SimpleMarkerSymbolProperties
       )
     }
-
     // Unsupported geometry type
-    console.warn(
-      "Property Widget: Unexpected geometry type for highlight symbol",
-      geometryType
-    )
     return null
   }
 
@@ -241,13 +236,6 @@ export const useGraphicsLayer = (
       outlineWidth: number
     ) => {
       const currentModules = modulesRef.current
-      console.log("Property Widget: addGraphicsToMap called", {
-        hasModules: !!currentModules,
-        hasGraphic: !!graphic,
-        hasView: !!view,
-        hasGeometry: !!graphic?.geometry,
-        geometryType: graphic?.geometry?.type,
-      })
       if (!currentModules || !graphic || !view) return
       ensureGraphicsLayer(view)
 
@@ -260,14 +248,6 @@ export const useGraphicsLayer = (
         highlightColor,
         outlineWidth
       )
-      console.log("Property Widget: Symbol and graphic details", {
-        fnr,
-        hasSymbol: !!symbol,
-        symbolColor: (symbol as any)?.color,
-        symbolOutlineWidth:
-          (symbol as any)?.outline?.width ?? (symbol as any)?.width ?? null,
-        originalGeometry: graphic.geometry?.type,
-      })
       if (!symbol) return
 
       // Create a new graphic with the highlight symbol
@@ -279,11 +259,6 @@ export const useGraphicsLayer = (
           : { FNR: fnr },
       })
 
-      console.log("Property Widget: Adding graphic to layer", {
-        layerId: layer.id,
-        graphicGeometry: highlightGraphic.geometry?.type,
-        graphicSymbol: !!highlightGraphic.symbol,
-      })
       removeGraphicsForFnr(fnr, normalizeFnrKey)
       layer.add(highlightGraphic)
 
@@ -380,7 +355,6 @@ export const useMapViewLifecycle = (params: {
   const mapClickHandleRef = React.useRef<__esri.Handle | null>(null)
 
   const setupMapView = hooks.useEventCallback((view: __esri.MapView) => {
-    console.log("Property Widget: Setting up map view with click handler")
     disablePopup(view)
     ensureGraphicsLayer(view)
 
@@ -391,7 +365,7 @@ export const useMapViewLifecycle = (params: {
     try {
       mapClickHandleRef.current = view.on("click", onMapClick)
     } catch (error) {
-      console.error("Failed to register click handler", error)
+      console.error("Failed to register map click handler", error)
       mapClickHandleRef.current = null
     }
   })
@@ -412,31 +386,25 @@ export const useMapViewLifecycle = (params: {
   const onActiveViewChange = hooks.useEventCallback((jimuMapView: any) => {
     const view = jimuMapView?.view
     if (!view) {
-      console.log("Property Widget: No view in jimuMapView")
       return
     }
 
     const previousView = jimuMapViewRef.current?.view
     if (previousView && previousView !== view) {
-      console.log("Property Widget: Cleaning up previous view")
       cleanupPreviousView()
     }
 
-    console.log("Property Widget: Storing jimuMapView reference")
     jimuMapViewRef.current = jimuMapView
 
     // If modules are ready, setup immediately. Otherwise, wait for modules.
     if (modules) {
       setupMapView(view)
-    } else {
-      console.log("Property Widget: Map view ready, waiting for modules")
     }
   })
 
   const reactivateMapView = hooks.useEventCallback(() => {
     const currentView = jimuMapViewRef.current?.view
     if (currentView && modules) {
-      console.log("Property Widget: Reactivating existing map view")
       disablePopup(currentView)
       if (mapClickHandleRef.current) {
         mapClickHandleRef.current.remove()
@@ -445,7 +413,7 @@ export const useMapViewLifecycle = (params: {
       try {
         mapClickHandleRef.current = currentView.on("click", onMapClick)
       } catch (error) {
-        console.error("Failed to reactivate click handler", error)
+        console.error("Failed to reactivate map click handler", error)
         mapClickHandleRef.current = null
       }
     }
@@ -472,9 +440,6 @@ export const useMapViewLifecycle = (params: {
   // Setup map view when modules become ready (if map view is already available)
   hooks.useUpdateEffect(() => {
     if (modules && jimuMapViewRef.current?.view && !mapClickHandleRef.current) {
-      console.log(
-        "Property Widget: Modules loaded, setting up deferred map view"
-      )
       setupMapView(jimuMapViewRef.current.view)
     }
   }, [modules, setupMapView])
@@ -614,6 +579,63 @@ export const useNumericValidator = (
     }))
     return result.valid
   })
+}
+
+export const useThrottle = <T extends (...args: any[]) => void>(
+  callback: T,
+  delay: number
+): ((...args: Parameters<T>) => void) => {
+  const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0
+  const lastCallTimeRef = React.useRef<number>(0)
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingArgsRef = React.useRef<Parameters<T> | null>(null)
+  const mountedRef = React.useRef(true)
+  const callbackRef = hooks.useLatest(callback)
+
+  const execute = hooks.useEventCallback((args: Parameters<T>) => {
+    if (!mountedRef.current) return
+    lastCallTimeRef.current = Date.now()
+    pendingArgsRef.current = null
+    try {
+      callbackRef.current(...args)
+    } catch (error) {
+      console.error("Throttled function error:", error)
+    }
+  })
+
+  const throttled = hooks.useEventCallback((...args: Parameters<T>) => {
+    const now = Date.now()
+    const timeSinceLastCall = now - lastCallTimeRef.current
+
+    if (timeSinceLastCall >= safeDelay) {
+      // Execute immediately if enough time has passed
+      execute(args)
+    } else {
+      // Schedule execution for remaining time
+      pendingArgsRef.current = args
+      if (!timeoutRef.current) {
+        const remainingTime = safeDelay - timeSinceLastCall
+        timeoutRef.current = setTimeout(() => {
+          timeoutRef.current = null
+          if (pendingArgsRef.current && mountedRef.current) {
+            execute(pendingArgsRef.current)
+          }
+        }, remainingTime)
+      }
+    }
+  })
+
+  hooks.useEffectOnce(() => {
+    return () => {
+      mountedRef.current = false
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+    }
+  })
+
+  return throttled
 }
 
 export const useDebounce = <T extends (...args: any[]) => void>(
