@@ -230,21 +230,21 @@ const Setting = (
     localToggleRemoval,
     setLocalToggleRemoval,
     updateConfig,
-    'enableToggleRemoval'
+    "enableToggleRemoval"
   )
 
   const handlePIIMaskingChange = useSwitchConfigHandler(
     localPIIMasking,
     setLocalPIIMasking,
     updateConfig,
-    'enablePIIMasking'
+    "enablePIIMasking"
   )
 
   const handleBatchOwnerQueryChange = useSwitchConfigHandler(
     localBatchOwnerQuery,
     setLocalBatchOwnerQuery,
     updateConfig,
-    'enableBatchOwnerQuery'
+    "enableBatchOwnerQuery"
   )
 
   const handleRelationshipIdChange = hooks.useEventCallback((value: number) => {
@@ -314,7 +314,7 @@ const Setting = (
     localHighlightOpacity,
     setLocalHighlightOpacity,
     updateConfig,
-    'highlightOpacity',
+    "highlightOpacity",
     opacityHelpers.fromPercent
   )
 
@@ -322,7 +322,7 @@ const Setting = (
     localOutlineWidth,
     setLocalOutlineWidth,
     updateConfig,
-    'outlineWidth',
+    "outlineWidth",
     outlineWidthHelpers.normalize
   )
 

@@ -32,6 +32,14 @@ const createSignalOptions = (signal?: AbortSignal): any => {
   return signal ? { signal } : undefined
 }
 
+let cachedFeatureLayerCtor:
+  | (new (props: __esri.FeatureLayerProperties) => __esri.FeatureLayer)
+  | null = null
+let cachedQueryCtor:
+  | (new (props: __esri.QueryProperties) => __esri.Query)
+  | null = null
+const featureLayerCache = new Map<string, __esri.FeatureLayer>()
+
 // =============================================================================
 // URL AND DATASOURCE VALIDATION HELPERS
 // =============================================================================
@@ -283,18 +291,30 @@ export const queryPropertyByPoint = async (
       wkid: point.spatialReference?.wkid,
     })
 
-    // Load FeatureLayer and Query classes
-    const [FeatureLayer, Query] = await loadArcGISJSAPIModules([
-      "esri/layers/FeatureLayer",
-      "esri/rest/support/Query",
-    ])
+    if (!cachedFeatureLayerCtor || !cachedQueryCtor) {
+      const [FeatureLayer, Query] = await loadArcGISJSAPIModules([
+        "esri/layers/FeatureLayer",
+        "esri/rest/support/Query",
+      ])
+      cachedFeatureLayerCtor = FeatureLayer as typeof __esri.FeatureLayer
+      cachedQueryCtor = Query as typeof __esri.Query
+    }
 
-    // Create a temporary FeatureLayer from the URL
-    const layer = new FeatureLayer({
-      url: layerUrl,
-    })
+    const FeatureLayerCtor = cachedFeatureLayerCtor
+    const QueryCtor = cachedQueryCtor
+    if (!FeatureLayerCtor || !QueryCtor) {
+      throw new Error("Property query modules failed to load")
+    }
 
-    const query = new Query({
+    let layer = featureLayerCache.get(layerUrl)
+    if (!layer) {
+      layer = new FeatureLayerCtor({
+        url: layerUrl,
+      })
+      featureLayerCache.set(layerUrl, layer)
+    }
+
+    const query = new QueryCtor({
       geometry: point,
       returnGeometry: true,
       outFields: ["*"],
@@ -436,7 +456,18 @@ export const queryOwnerByFnr = async (
 }
 
 export const clearQueryCache = () => {
-  // Query caching has been disabled to ensure fresh results on every request
+  featureLayerCache.forEach((layer) => {
+    try {
+      layer.destroy()
+    } catch (error) {
+      logger.warn("Failed to destroy cached FeatureLayer", {
+        error,
+      })
+    }
+  })
+  featureLayerCache.clear()
+  cachedFeatureLayerCtor = null
+  cachedQueryCtor = null
 }
 
 export const queryOwnersByRelationship = async (
@@ -882,7 +913,11 @@ const processBatchQuery = async (
     if (helpers.isAbortError(error)) {
       throw error as Error
     }
-    console.error("Property Widget: Batch owner query failed for FNRs", fnrsToQuery, error)
+    console.error(
+      "Property Widget: Batch owner query failed for FNRs",
+      fnrsToQuery,
+      error
+    )
     ownersByFnr = new Map()
     fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)))
   }

@@ -21,9 +21,75 @@ import {
   isValidArcGISUrl,
   validateDataSources,
   propertyQueryService,
+  queryPropertyByPoint,
+  clearQueryCache,
 } from "../shared/api"
 import { convertToCSV, convertToGeoJSON, exportData } from "../shared/export"
 import type { OwnerAttributes, GridRowData } from "../config/types"
+
+const mockFeatureLayerInstances: MockFeatureLayer[] = []
+let featureLayerCtorCount = 0
+let mockQueryFeaturesResponse: any = {
+  features: [
+    {
+      attributes: {
+        FNR: "123",
+        OBJECTID: 1,
+        UUID_FASTIGHET: "uuid-123",
+        FASTIGHET: "Test 1:1",
+      },
+    },
+  ],
+}
+
+class MockFeatureLayer {
+  url: string
+  destroyed = false
+  queryFeatures = jest.fn((_query: any) =>
+    Promise.resolve(mockQueryFeaturesResponse)
+  )
+  destroy = jest.fn(() => {
+    this.destroyed = true
+  })
+
+  constructor(options: { url: string }) {
+    this.url = options.url
+    featureLayerCtorCount += 1
+    mockFeatureLayerInstances.push(this)
+  }
+}
+
+class MockQuery {
+  geometry: any
+  returnGeometry: boolean
+  outFields: string[]
+  spatialRelationship: string
+
+  constructor(params: {
+    geometry: any
+    returnGeometry: boolean
+    outFields: string[]
+    spatialRelationship: string
+  }) {
+    this.geometry = params.geometry
+    this.returnGeometry = params.returnGeometry
+    this.outFields = params.outFields
+    this.spatialRelationship = params.spatialRelationship
+  }
+}
+
+const resetMockFeatureLayerState = () => {
+  featureLayerCtorCount = 0
+  mockFeatureLayerInstances.length = 0
+}
+
+const setMockQueryFeaturesResponse = (response: any) => {
+  mockQueryFeaturesResponse = response
+}
+
+const getFeatureLayerCtorCount = () => featureLayerCtorCount
+
+const getMockFeatureLayerInstances = () => mockFeatureLayerInstances
 
 jest.mock("jimu-arcgis", () => ({
   loadArcGISJSAPIModules: jest.fn((modules: string[]) => {
@@ -40,6 +106,12 @@ jest.mock("jimu-arcgis", () => ({
                 )
               ),
           }
+        }
+        if (moduleId === "esri/layers/FeatureLayer") {
+          return MockFeatureLayer
+        }
+        if (moduleId === "esri/rest/support/Query") {
+          return MockQuery
         }
         return {}
       })
@@ -993,13 +1065,90 @@ describe("Property Widget - Telemetry", () => {
 })
 
 describe("Query Controls", () => {
-  it("should expose clearQueryCache as a safe no-op", async () => {
-    const { clearQueryCache } = await import("../shared/api")
+  const createDefaultQueryResponse = () => ({
+    features: [
+      {
+        attributes: {
+          FNR: "123",
+          OBJECTID: 1,
+          UUID_FASTIGHET: "uuid-123",
+          FASTIGHET: "Test 1:1",
+        },
+      },
+    ],
+  })
 
-    expect(typeof clearQueryCache).toBe("function")
+  const createMockDsManager = (url: string) =>
+    ({
+      getDataSource: jest.fn(() => ({ url })),
+    }) as any
+
+  beforeEach(() => {
+    resetMockFeatureLayerState()
+    setMockQueryFeaturesResponse(createDefaultQueryResponse())
+    clearQueryCache()
+  })
+
+  afterEach(() => {
+    clearQueryCache()
+  })
+
+  it("should clear cached FeatureLayers without errors", async () => {
+    const dsManager = createMockDsManager(
+      "https://example.com/arcgis/rest/services/Parcels/MapServer/0"
+    )
+    const point: any = { x: 10, y: 20, spatialReference: { wkid: 3006 } }
+
+    await queryPropertyByPoint(point, "property", dsManager)
+    expect(getFeatureLayerCtorCount()).toBe(1)
+
     expect(() => {
       clearQueryCache()
     }).not.toThrow()
+
+    getMockFeatureLayerInstances().forEach((instance) => {
+      expect(instance.destroy).toHaveBeenCalledTimes(1)
+      expect(instance.destroyed).toBe(true)
+    })
+  })
+
+  it("should reuse cached FeatureLayer instances across property queries", async () => {
+    const dsManager = createMockDsManager(
+      "https://example.com/arcgis/rest/services/Parcels/MapServer/0"
+    )
+    const point: any = { x: 0, y: 0, spatialReference: { wkid: 3006 } }
+
+    const firstResult = await queryPropertyByPoint(point, "property", dsManager)
+    const secondResult = await queryPropertyByPoint(
+      point,
+      "property",
+      dsManager
+    )
+
+    expect(firstResult.length).toBe(1)
+    expect(secondResult.length).toBe(1)
+    expect(getFeatureLayerCtorCount()).toBe(1)
+  })
+
+  it("should destroy cached FeatureLayers before creating new ones after clear", async () => {
+    const dsManager = createMockDsManager(
+      "https://example.com/arcgis/rest/services/Parcels/MapServer/0"
+    )
+    const point: any = { x: 5, y: 15, spatialReference: { wkid: 3006 } }
+
+    await queryPropertyByPoint(point, "property", dsManager)
+    const cachedInstancesBeforeClear = getMockFeatureLayerInstances().slice()
+    expect(cachedInstancesBeforeClear.length).toBe(1)
+
+    clearQueryCache()
+
+    cachedInstancesBeforeClear.forEach((instance) => {
+      expect(instance.destroy).toHaveBeenCalledTimes(1)
+      expect(instance.destroyed).toBe(true)
+    })
+
+    await queryPropertyByPoint(point, "property", dsManager)
+    expect(getFeatureLayerCtorCount()).toBe(2)
   })
 
   it("should remove deprecated query cache constants", () => {

@@ -564,7 +564,7 @@ export const useNumericConfigHandler = (
   })
 
   const handleBlur = hooks.useEventCallback(() => {
-    (debounce as any).cancel?.()
+    ;(debounce as any).cancel?.()
     const isValid = validate(localValue)
     if (isValid) {
       const num = parseInt(localValue, 10)
@@ -596,7 +596,7 @@ export const useSliderConfigHandler = <T extends number>(
   normalizer: (rawValue: number) => T
 ) => {
   return hooks.useEventCallback((evt: React.ChangeEvent<HTMLInputElement>) => {
-    const rawValue = Number.parseFloat(evt?.target?.value ?? '')
+    const rawValue = Number.parseFloat(evt?.target?.value ?? "")
     if (!Number.isFinite(rawValue)) {
       return
     }

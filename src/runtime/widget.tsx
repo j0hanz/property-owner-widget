@@ -118,7 +118,9 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   })
 
   if (!success) {
-    console.log("Property Widget: syncSelectionGraphics - failed to sync graphics with state")
+    console.log(
+      "Property Widget: syncSelectionGraphics - failed to sync graphics with state"
+    )
   }
 }
 
@@ -458,7 +460,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
 
     if (!state.rawPropertyResults || state.rawPropertyResults.size === 0) {
-      console.log("Property Widget: Export skipped - no raw property data available")
+      console.log(
+        "Property Widget: Export skipped - no raw property data available"
+      )
       return
     }
 
@@ -475,7 +479,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     })
 
     if (selectedRawData.length === 0) {
-      console.log("Property Widget: Export skipped - no matching raw data for selected rows")
+      console.log(
+        "Property Widget: Export skipped - no matching raw data for selected rows"
+      )
       return
     }
 
@@ -966,7 +972,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         highlightColorConfigRef.current,
         highlightOpacityConfigRef.current
       )
-      const currentOutlineWidth = getValidatedOutlineWidth(outlineWidthConfigRef.current)
+      const currentOutlineWidth = getValidatedOutlineWidth(
+        outlineWidthConfigRef.current
+      )
 
       ensureGraphicsLayer(view)
       const layer = view.map.findLayerById(
@@ -1139,10 +1147,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       }
       updateCursorPoint(null)
     }
-  }, [
-    runtimeState,
-    modules,
-  ])
+  }, [runtimeState, modules])
 
   // Cleanup cursor point on unmount
   hooks.useUnmount(() => {
@@ -1166,10 +1171,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   hooks.useUpdateEffect(() => {
     if (!lastCursorPointRef.current) return
     updateCursorPoint(lastCursorPointRef.current)
-  }, [
-    hoverTooltipData,
-    isHoverQueryActive,
-  ])
+  }, [hoverTooltipData, isHoverQueryActive])
 
   hooks.useUpdateEffect(() => {
     if (state.selectedProperties.length === 0) {

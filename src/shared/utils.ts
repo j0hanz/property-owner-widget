@@ -455,45 +455,50 @@ export const calculatePropertyUpdates = <
   toggleEnabled: boolean,
   maxResults: number
 ): { toRemove: Set<string>; toAdd: T[]; updatedRows: T[] } => {
+  const existingByFnr = new Map<string, T[]>()
+  const remainingIds = new Set<string>()
+
+  existingProperties.forEach((row) => {
+    const fnrKey = normalizeFnrKey(row.FNR)
+    const existingGroup = existingByFnr.get(fnrKey)
+    if (existingGroup) {
+      existingGroup.push(row)
+    } else {
+      existingByFnr.set(fnrKey, [row])
+    }
+    remainingIds.add(row.id)
+  })
+
   const toRemove = new Set<string>()
   const toAdd: T[] = []
+  const addedIds = new Set<string>()
 
-  const existingFnrKeys = new Set(
-    existingProperties.map((row) => normalizeFnrKey(row.FNR))
-  )
-  const toAddIds = new Set<string>()
-  const toggledFnrs = new Set<string>()
-
-  for (const row of rowsToProcess) {
+  rowsToProcess.forEach((row) => {
     const fnrKey = normalizeFnrKey(row.FNR)
-    if (
-      toggleEnabled &&
-      existingFnrKeys.has(fnrKey) &&
-      !toggledFnrs.has(fnrKey)
-    ) {
-      toRemove.add(fnrKey)
-      toggledFnrs.add(fnrKey)
-      continue
+    if (toggleEnabled && !toRemove.has(fnrKey)) {
+      const existingGroup = existingByFnr.get(fnrKey)
+      if (existingGroup && existingGroup.length > 0) {
+        toRemove.add(fnrKey)
+        existingGroup.forEach((existing) => {
+          remainingIds.delete(existing.id)
+        })
+        return
+      }
     }
 
-    const afterRemoval = existingProperties.filter(
-      (existing) => !toRemove.has(normalizeFnrKey(existing.FNR))
-    )
-    const afterRemovalIds = new Set(afterRemoval.map((row) => row.id))
-
-    if (afterRemovalIds.has(row.id) || toAddIds.has(row.id)) {
-      continue
+    if (remainingIds.has(row.id) || addedIds.has(row.id)) {
+      return
     }
 
     toAdd.push(row)
-    toAddIds.add(row.id)
-  }
+    addedIds.add(row.id)
+  })
 
-  const afterRemoval = existingProperties.filter(
+  const updatedRows = existingProperties.filter(
     (row) => !toRemove.has(normalizeFnrKey(row.FNR))
   )
+  updatedRows.push(...toAdd)
 
-  const updatedRows = [...afterRemoval, ...toAdd]
   if (updatedRows.length > maxResults) {
     updatedRows.length = maxResults
   }
@@ -648,6 +653,11 @@ export const updateRawPropertyResults = (
 ): Map<string, any> => {
   const updated = new Map(prev)
 
+  const selectedByFnr = new Map<string, string>()
+  selectedProperties.forEach((row) => {
+    selectedByFnr.set(normalizeFnrKey(row.FNR), row.id)
+  })
+
   rowsToProcess.forEach((row, index) => {
     if (index < propertyResults.length) {
       updated.set(row.id, propertyResults[index])
@@ -655,11 +665,9 @@ export const updateRawPropertyResults = (
   })
 
   toRemove.forEach((removedKey) => {
-    const removedRow = selectedProperties.find(
-      (row) => normalizeFnrKey(row.FNR) === removedKey
-    )
-    if (removedRow) {
-      updated.delete(removedRow.id)
+    const removedId = selectedByFnr.get(removedKey)
+    if (removedId) {
+      updated.delete(removedId)
     }
   })
 
