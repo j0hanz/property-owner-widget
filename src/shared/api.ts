@@ -24,6 +24,7 @@ import {
   normalizeFnrKey,
   normalizeHostList,
   abortHelpers,
+  logger,
 } from "./utils"
 import { OWNER_QUERY_CONCURRENCY } from "../config/constants"
 
@@ -247,7 +248,7 @@ export const validateDataSources = (params: {
     const ownerService = ownerUrl.split("/MapServer/")[0]
     if (propertyService !== ownerService) {
       console.log(
-        "Property and owner layers use different MapServer services. This is valid for distributed architectures but may indicate misconfiguration."
+        "Property Widget: Property and owner layers use different MapServer services. This is valid for distributed architectures but may indicate misconfiguration."
       )
     }
   }
@@ -274,7 +275,7 @@ export const queryPropertyByPoint = async (
       throw new Error("Data source URL not available")
     }
 
-    console.log("Querying layer:", {
+    console.log("Property Widget: Querying layer", {
       dataSourceId,
       url: layerUrl,
       pointX: point.x,
@@ -305,7 +306,7 @@ export const queryPropertyByPoint = async (
       createSignalOptions(options?.signal)
     )
 
-    console.log("Query result:", {
+    console.log("Property Widget: Query result", {
       featureCount: result?.features?.length || 0,
       hasFeatures: !!(result?.features && result.features.length > 0),
       firstFeature: result?.features?.[0]?.attributes,
@@ -314,7 +315,7 @@ export const queryPropertyByPoint = async (
     abortHelpers.throwIfAborted(options?.signal)
 
     if (!result?.features || result.features.length === 0) {
-      console.log("No features found at this location")
+      console.log("Property Widget: No features found at this location")
       return []
     }
 
@@ -325,7 +326,7 @@ export const queryPropertyByPoint = async (
       }
     })
 
-    console.log("Mapped results:", {
+    logger.debug("Mapped results", {
       count: mappedResults.length,
       propertyIds: mappedResults.map((r) => r.propertyId),
     })
@@ -355,7 +356,7 @@ export const queryOwnerByFnr = async (
 
     const layerUrl = ds.url
     const layerDef = (ds as any).getLayerDefinition?.()
-    console.log("Querying owner layer:", {
+    logger.debug("Querying owner layer", {
       dataSourceId,
       url: layerUrl,
       fnr,
@@ -373,7 +374,7 @@ export const queryOwnerByFnr = async (
       createSignalOptions(options?.signal)
     )
 
-    console.log("Owner query result:", {
+    logger.debug("Owner query result", {
       fnr,
       recordCount: result?.records?.length || 0,
       hasRecords: !!(result?.records && result.records.length > 0),
@@ -383,7 +384,7 @@ export const queryOwnerByFnr = async (
     abortHelpers.throwIfAborted(options?.signal)
 
     if (!result?.records) {
-      console.log("⚠️ Owner query returned no records:", {
+      logger.warn("Owner query returned no records", {
         fnr,
         dataSourceId,
         url: layerUrl,
@@ -393,7 +394,7 @@ export const queryOwnerByFnr = async (
     }
 
     if (result.records.length === 0) {
-      console.log("⚠️ Owner query returned empty records array:", {
+      logger.warn("Owner query returned empty records array", {
         fnr,
         dataSourceId,
         url: layerUrl,
@@ -413,7 +414,7 @@ export const queryOwnerByFnr = async (
         allFields[key] = data[key]
       })
 
-      console.log("Owner record processed - ALL FIELDS:", {
+      console.log("Property Widget: Owner record processed - ALL FIELDS", {
         fnr,
         allFieldsWithValues: allFields,
         hasNAMN: "NAMN" in data,
@@ -881,7 +882,7 @@ const processBatchQuery = async (
     if (helpers.isAbortError(error)) {
       throw error as Error
     }
-    console.error("Batch owner query failed for FNRs:", fnrsToQuery, error)
+    console.error("Property Widget: Batch owner query failed for FNRs", fnrsToQuery, error)
     ownersByFnr = new Map()
     fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)))
   }

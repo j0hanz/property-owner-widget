@@ -28,6 +28,26 @@ export const textSanitizer = {
 export const stripHtml = (value: string): string =>
   textSanitizer.stripHtml(value)
 
+export const logger = {
+  debug: (context: string, data?: { [key: string]: any }) => {
+    if (data) {
+      console.log(`Property Widget: ${context}`, data)
+    } else {
+      console.log(`Property Widget: ${context}`)
+    }
+  },
+  warn: (context: string, data?: { [key: string]: any }) => {
+    if (data) {
+      console.log(`Property Widget: ⚠️ ${context}`, data)
+    } else {
+      console.log(`Property Widget: ⚠️ ${context}`)
+    }
+  },
+  error: (context: string, error: unknown, data?: { [key: string]: any }) => {
+    console.error(`Property Widget: ${context}`, error, data || {})
+  },
+}
+
 const maskText = (text: string, minLength: number): string => {
   const normalized = sanitizeText(text)
   if (normalized.length < minLength) return "***"
@@ -528,7 +548,7 @@ export const syncGraphicsWithState = (params: {
 
   if (!view) {
     console.log(
-      "syncGraphicsWithState: view is null or undefined, cannot sync graphics"
+      "Property Widget: syncGraphicsWithState - view is null or undefined, cannot sync graphics"
     )
     return false
   }
@@ -537,7 +557,7 @@ export const syncGraphicsWithState = (params: {
     selectedRows.map((row) => helpers.normalizeFnrKey(row.FNR))
   )
 
-  console.log("syncGraphicsWithState: processing graphics", {
+  console.log("Property Widget: syncGraphicsWithState - processing graphics", {
     graphicsToAddCount: graphicsToAdd.length,
     selectedFnrsCount: selectedFnrs.size,
     selectedFnrs: Array.from(selectedFnrs),
@@ -545,7 +565,7 @@ export const syncGraphicsWithState = (params: {
 
   graphicsToAdd.forEach(({ graphic, fnr }) => {
     const fnrKey = helpers.normalizeFnrKey(fnr)
-    console.log("Processing graphic:", {
+    console.log("Property Widget: Processing graphic", {
       fnr,
       fnrKey,
       hasGeometry: !!graphic?.geometry,
@@ -554,7 +574,7 @@ export const syncGraphicsWithState = (params: {
     })
     if (!selectedFnrs.has(fnrKey)) return
 
-    console.log("Calling addGraphicsToMap for FNR:", fnrKey)
+    console.log("Property Widget: Calling addGraphicsToMap for FNR", fnrKey)
     helpers.addGraphicsToMap(
       graphic,
       view,
@@ -568,6 +588,83 @@ export const syncGraphicsWithState = (params: {
 }
 
 export { isValidationSuccess, isValidationFailure } from "../config/types"
+
+interface ProcessPropertyQueryParams {
+  propertyResults: any[]
+  config: {
+    propertyDataSourceId: string
+    ownerDataSourceId: string
+    enablePIIMasking: boolean
+    relationshipId?: number
+    enableBatchOwnerQuery?: boolean
+  }
+  processingContext: any
+  services: {
+    processBatch: (params: any) => Promise<any>
+    processIndividual: (params: any) => Promise<any>
+  }
+}
+
+export const processPropertyQueryResults = async (
+  params: ProcessPropertyQueryParams
+): Promise<{ rowsToProcess: any[]; graphicsToAdd: any[] }> => {
+  const { propertyResults, config, processingContext, services } = params
+
+  const useBatchQuery =
+    config.enableBatchOwnerQuery &&
+    config.relationshipId !== undefined &&
+    config.propertyDataSourceId
+
+  if (useBatchQuery && config.relationshipId !== undefined) {
+    return await services.processBatch({
+      propertyResults,
+      config: {
+        propertyDataSourceId: config.propertyDataSourceId,
+        ownerDataSourceId: config.ownerDataSourceId,
+        enablePIIMasking: config.enablePIIMasking,
+        relationshipId: config.relationshipId,
+      },
+      context: processingContext,
+    })
+  }
+
+  return await services.processIndividual({
+    propertyResults,
+    config: {
+      ownerDataSourceId: config.ownerDataSourceId,
+      enablePIIMasking: config.enablePIIMasking,
+    },
+    context: processingContext,
+  })
+}
+
+export const updateRawPropertyResults = (
+  prev: Map<string, any>,
+  rowsToProcess: any[],
+  propertyResults: any[],
+  toRemove: Set<string>,
+  selectedProperties: any[],
+  normalizeFnrKey: (fnr: any) => string
+): Map<string, any> => {
+  const updated = new Map(prev)
+
+  rowsToProcess.forEach((row, index) => {
+    if (index < propertyResults.length) {
+      updated.set(row.id, propertyResults[index])
+    }
+  })
+
+  toRemove.forEach((removedKey) => {
+    const removedRow = selectedProperties.find(
+      (row) => normalizeFnrKey(row.FNR) === removedKey
+    )
+    if (removedRow) {
+      updated.delete(removedRow.id)
+    }
+  })
+
+  return updated
+}
 
 /** Computes list of widget IDs that should be closed when this widget opens */
 export const computeWidgetsToClose = (

@@ -34,8 +34,8 @@ export const OWNER_QUERY_CONCURRENCY = 5
 export const HIGHLIGHT_MARKER_SIZE = 6
 
 // AbortController pool size for efficient cancellation management
-// Size chosen to handle concurrent operations: 1 property query + 5 owner queries + 1 zoom query + buffer
-export const ABORT_CONTROLLER_POOL_SIZE = 10
+// Size matches OWNER_QUERY_CONCURRENCY to handle typical concurrent operations
+export const ABORT_CONTROLLER_POOL_SIZE = 5
 
 // Debounce duration (ms) for stabilizing loading indicator visibility
 // 200ms balances perceived responsiveness vs flicker prevention

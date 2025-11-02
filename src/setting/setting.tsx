@@ -36,6 +36,8 @@ import {
   useBooleanConfigValue,
   useUpdateConfig,
   useDebounce,
+  useSwitchConfigHandler,
+  useSliderConfigHandler,
 } from "../shared/hooks"
 import {
   validateNumericRange,
@@ -224,28 +226,25 @@ const Setting = (
     }
   })
 
-  const handleToggleRemovalChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      const checked = evt.target.checked
-      setLocalToggleRemoval(checked)
-      updateConfig("enableToggleRemoval", checked)
-    }
+  const handleToggleRemovalChange = useSwitchConfigHandler(
+    localToggleRemoval,
+    setLocalToggleRemoval,
+    updateConfig,
+    'enableToggleRemoval'
   )
 
-  const handlePIIMaskingChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      const checked = evt.target.checked
-      setLocalPIIMasking(checked)
-      updateConfig("enablePIIMasking", checked)
-    }
+  const handlePIIMaskingChange = useSwitchConfigHandler(
+    localPIIMasking,
+    setLocalPIIMasking,
+    updateConfig,
+    'enablePIIMasking'
   )
 
-  const handleBatchOwnerQueryChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      const checked = evt.target.checked
-      setLocalBatchOwnerQuery(checked)
-      updateConfig("enableBatchOwnerQuery", checked)
-    }
+  const handleBatchOwnerQueryChange = useSwitchConfigHandler(
+    localBatchOwnerQuery,
+    setLocalBatchOwnerQuery,
+    updateConfig,
+    'enableBatchOwnerQuery'
   )
 
   const handleRelationshipIdChange = hooks.useEventCallback((value: number) => {
@@ -311,34 +310,20 @@ const Setting = (
     updateConfig("highlightColor", nextColor)
   })
 
-  const handleHighlightOpacityChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      const rawValue = Number.parseFloat(evt?.target?.value ?? "")
-      if (!Number.isFinite(rawValue)) {
-        return
-      }
-      const nextOpacity = opacityHelpers.fromPercent(rawValue)
-      if (Math.abs(localHighlightOpacity - nextOpacity) < 0.0001) {
-        return
-      }
-      setLocalHighlightOpacity(nextOpacity)
-      updateConfig("highlightOpacity", nextOpacity)
-    }
+  const handleHighlightOpacityChange = useSliderConfigHandler(
+    localHighlightOpacity,
+    setLocalHighlightOpacity,
+    updateConfig,
+    'highlightOpacity',
+    opacityHelpers.fromPercent
   )
 
-  const handleOutlineWidthChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      const rawValue = Number.parseFloat(evt?.target?.value ?? "")
-      if (!Number.isFinite(rawValue)) {
-        return
-      }
-      const nextWidth = outlineWidthHelpers.normalize(rawValue)
-      if (Math.abs(localOutlineWidth - nextWidth) < 0.0001) {
-        return
-      }
-      setLocalOutlineWidth(nextWidth)
-      updateConfig("outlineWidth", nextWidth)
-    }
+  const handleOutlineWidthChange = useSliderConfigHandler(
+    localOutlineWidth,
+    setLocalOutlineWidth,
+    updateConfig,
+    'outlineWidth',
+    outlineWidthHelpers.normalize
   )
 
   const handlePropertyDataSourceChange = hooks.useEventCallback(

@@ -269,7 +269,7 @@ export const useGraphicsLayer = (
       outlineWidth: number
     ) => {
       const currentModules = modulesRef.current
-      console.log("addGraphicsToMap called:", {
+      console.log("Property Widget: addGraphicsToMap called", {
         hasModules: !!currentModules,
         hasGraphic: !!graphic,
         hasView: !!view,
@@ -288,7 +288,7 @@ export const useGraphicsLayer = (
         highlightColor,
         outlineWidth
       )
-      console.log("Symbol and graphic details:", {
+      console.log("Property Widget: Symbol and graphic details", {
         fnr,
         hasSymbol: !!symbol,
         symbolColor: (symbol as any)?.color,
@@ -305,7 +305,7 @@ export const useGraphicsLayer = (
         FNR: fnr,
       }
 
-      console.log("Adding graphic to layer:", {
+      console.log("Property Widget: Adding graphic to layer", {
         layerId: layer.id,
         graphicGeometry: highlightGraphic.geometry?.type,
         graphicSymbol: !!highlightGraphic.symbol,
@@ -547,6 +547,65 @@ export const useUpdateConfig = (
       id,
       config: config.set ? config.set(key, value) : { ...config, [key]: value },
     })
+  })
+}
+
+export const useNumericConfigHandler = (
+  localValue: string,
+  setLocalValue: (val: string) => void,
+  validate: (val: string) => boolean,
+  updateConfig: (key: string, value: any) => void,
+  configKey: string,
+  debounce: (val: string) => void
+) => {
+  const handleChange = hooks.useEventCallback((value: number) => {
+    setLocalValue(String(value))
+    debounce(String(value))
+  })
+
+  const handleBlur = hooks.useEventCallback(() => {
+    (debounce as any).cancel?.()
+    const isValid = validate(localValue)
+    if (isValid) {
+      const num = parseInt(localValue, 10)
+      updateConfig(configKey, num)
+    }
+  })
+
+  return { handleChange, handleBlur }
+}
+
+export const useSwitchConfigHandler = (
+  localValue: boolean,
+  setLocalValue: (val: boolean) => void,
+  updateConfig: (key: string, value: any) => void,
+  configKey: string
+) => {
+  return hooks.useEventCallback((evt: React.ChangeEvent<HTMLInputElement>) => {
+    const checked = evt.target.checked
+    setLocalValue(checked)
+    updateConfig(configKey, checked)
+  })
+}
+
+export const useSliderConfigHandler = <T extends number>(
+  localValue: T,
+  setLocalValue: (val: T) => void,
+  updateConfig: (key: string, value: any) => void,
+  configKey: string,
+  normalizer: (rawValue: number) => T
+) => {
+  return hooks.useEventCallback((evt: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = Number.parseFloat(evt?.target?.value ?? '')
+    if (!Number.isFinite(rawValue)) {
+      return
+    }
+    const nextValue = normalizer(rawValue)
+    if (Math.abs(localValue - nextValue) < 0.0001) {
+      return
+    }
+    setLocalValue(nextValue)
+    updateConfig(configKey, nextValue)
   })
 }
 

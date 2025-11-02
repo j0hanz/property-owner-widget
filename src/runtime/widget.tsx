@@ -73,6 +73,9 @@ import {
   computeWidgetsToClose,
   dataSourceHelpers,
   getValidatedOutlineWidth,
+  processPropertyQueryResults,
+  updateRawPropertyResults,
+  logger,
 } from "../shared/utils"
 import { EXPORT_FORMATS, HIGHLIGHT_MARKER_SIZE } from "../config/constants"
 import {
@@ -115,7 +118,7 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   })
 
   if (!success) {
-    console.log("syncSelectionGraphics: failed to sync graphics with state")
+    console.log("Property Widget: syncSelectionGraphics - failed to sync graphics with state")
   }
 }
 
@@ -450,12 +453,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   const handleExport = hooks.useEventCallback((format: ExportFormat) => {
     if (!hasSelectedRows) {
-      console.log("Export skipped: no rows selected")
+      console.log("Property Widget: Export skipped - no rows selected")
       return
     }
 
     if (!state.rawPropertyResults || state.rawPropertyResults.size === 0) {
-      console.log("Export skipped: no raw property data available")
+      console.log("Property Widget: Export skipped - no raw property data available")
       return
     }
 
@@ -472,7 +475,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     })
 
     if (selectedRawData.length === 0) {
-      console.log("Export skipped: no matching raw data for selected rows")
+      console.log("Property Widget: Export skipped - no matching raw data for selected rows")
       return
     }
 
@@ -494,7 +497,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const handleExportFormatSelect = hooks.useEventCallback(
     (format: ExportFormat) => {
       if (!["json", "csv", "geojson"].includes(format)) {
-        console.error("Invalid export format:", format)
+        console.error("Property Widget: Invalid export format", format)
         return
       }
       handleExport(format)
@@ -515,12 +518,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   )
 
   const handlePropertyDataSourceFailed = hooks.useEventCallback(() => {
-    console.error("Property data source creation failed")
+    console.error("Property Widget: Property data source creation failed")
     setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
   })
 
   const handleOwnerDataSourceFailed = hooks.useEventCallback(() => {
-    console.error("Owner data source creation failed")
+    console.error("Property Widget: Owner data source creation failed")
     setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
   })
 
@@ -597,7 +600,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             releaseController(controller)
             return
           }
-          console.log("No property results returned from query")
+          logger.debug("No property results returned from query")
           tracker.success()
           trackEvent({
             category: "Query",
@@ -608,7 +611,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           return
         }
 
-        console.log("Property results received:", {
+        logger.debug("Property results received", {
           count: propertyResults.length,
           firstResult: propertyResults[0],
           firstResultStructure: propertyResults[0]
@@ -623,58 +626,47 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             : null,
         })
 
-        console.log("=== FULL JSON RESPONSE ===")
+        logger.debug("=== FULL JSON RESPONSE ===")
         console.log(JSON.stringify(propertyResults, null, 2))
-        console.log("=== END JSON RESPONSE ===")
+        logger.debug("=== END JSON RESPONSE ===")
 
         // Step 4: Process results and enrich with owner data
-        const useBatchQuery =
-          config.enableBatchOwnerQuery &&
-          config.relationshipId !== undefined &&
-          config.propertyDataSourceId
-
-        const processingContext = {
-          dsManager: manager,
-          maxResults,
-          signal: controller.signal,
-          helpers: {
-            extractFnr,
-            queryOwnerByFnr,
-            queryOwnersByRelationship,
-            createRowId,
-            formatPropertyWithShare,
-            formatOwnerInfo,
-            isAbortError,
-          },
-          messages: {
-            unknownOwner: translate("unknownOwner"),
-            errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
-            errorNoDataAvailable: translate("errorNoDataAvailable"),
-          },
-        }
-
         const { rowsToProcess, graphicsToAdd } =
-          useBatchQuery && config.relationshipId !== undefined
-            ? await propertyQueryService.processBatch({
-                propertyResults,
-                config: {
-                  propertyDataSourceId: config.propertyDataSourceId,
-                  ownerDataSourceId: config.ownerDataSourceId,
-                  enablePIIMasking: piiMaskingEnabled,
-                  relationshipId: config.relationshipId,
-                },
-                context: processingContext,
-              })
-            : await propertyQueryService.processIndividual({
-                propertyResults,
-                config: {
-                  ownerDataSourceId: config.ownerDataSourceId,
-                  enablePIIMasking: piiMaskingEnabled,
-                },
-                context: processingContext,
-              })
+          await processPropertyQueryResults({
+            propertyResults,
+            config: {
+              propertyDataSourceId: config.propertyDataSourceId,
+              ownerDataSourceId: config.ownerDataSourceId,
+              enablePIIMasking: piiMaskingEnabled,
+              relationshipId: config.relationshipId,
+              enableBatchOwnerQuery: config.enableBatchOwnerQuery,
+            },
+            processingContext: {
+              dsManager: manager,
+              maxResults,
+              signal: controller.signal,
+              helpers: {
+                extractFnr,
+                queryOwnerByFnr,
+                queryOwnersByRelationship,
+                createRowId,
+                formatPropertyWithShare,
+                formatOwnerInfo,
+                isAbortError,
+              },
+              messages: {
+                unknownOwner: translate("unknownOwner"),
+                errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
+                errorNoDataAvailable: translate("errorNoDataAvailable"),
+              },
+            },
+            services: {
+              processBatch: propertyQueryService.processBatch,
+              processIndividual: propertyQueryService.processIndividual,
+            },
+          })
 
-        console.log("Processing complete:", {
+        logger.debug("Processing complete", {
           rowsToProcessCount: rowsToProcess.length,
           graphicsToAddCount: graphicsToAdd.length,
           firstRow: rowsToProcess[0],
@@ -682,7 +674,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           firstGraphicHasGeometry: !!graphicsToAdd[0]?.graphic?.geometry,
           firstGraphicGeometryType: graphicsToAdd[0]?.graphic?.geometry?.type,
         })
-        console.log("First row details:", {
+        logger.debug("First row details", {
           FASTIGHET: rowsToProcess[0]?.FASTIGHET,
           BOSTADR: rowsToProcess[0]?.BOSTADR,
           FNR: rowsToProcess[0]?.FNR,
@@ -729,7 +721,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           outlineWidth: currentOutlineWidth,
         }
 
-        console.log("syncParams created before setState:", {
+        logger.debug("syncParams created before setState", {
           graphicsCount: syncParams.graphicsToAdd.length,
           selectedRowsCount: syncParams.selectedRows.length,
           highlightColor: currentHighlightColor,
@@ -757,22 +749,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             return prev
           }
 
-          const updatedRawResults = new Map(prev.rawPropertyResults || [])
-
-          rowsToProcess.forEach((row, index) => {
-            if (index < propertyResults.length) {
-              updatedRawResults.set(row.id, propertyResults[index])
-            }
-          })
-
-          toRemove.forEach((removedKey) => {
-            const removedRow = prev.selectedProperties.find(
-              (row) => normalizeFnrKey(row.FNR) === removedKey
-            )
-            if (removedRow) {
-              updatedRawResults.delete(removedRow.id)
-            }
-          })
+          const updatedRawResults = updateRawPropertyResults(
+            prev.rawPropertyResults || new Map(),
+            rowsToProcess,
+            propertyResults,
+            toRemove,
+            prev.selectedProperties,
+            normalizeFnrKey
+          )
 
           return {
             ...prev,
@@ -782,7 +766,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           }
         })
 
-        console.log("After setState - executing sync:", {
+        logger.debug("After setState - executing sync", {
           hasSyncParams: !!syncParams,
           graphicsCount: syncParams.graphicsToAdd.length,
         })
@@ -795,7 +779,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         })
 
         // Sync graphics with map
-        console.log("About to sync graphics:", {
+        logger.debug("About to sync graphics", {
           graphicsCount: syncParams.graphicsToAdd.length,
           selectedRowsCount: syncParams.selectedRows.length,
           highlightColor: syncParams.highlightColor,
@@ -821,8 +805,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           tracker.failure("aborted")
           return
         }
-        console.error("Property query error:", error)
-        console.error("Error details:", {
+        logger.error("Property query error:", error, {
           message: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack : undefined,
           propertyDsId: config.propertyDataSourceId,
@@ -863,6 +846,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const cursorTooltipFormatText = translate("cursorTooltipFormat")
   const tooltipNoPropertyRef = hooks.useLatest(cursorTooltipNoPropertyText)
   const tooltipFormatRef = hooks.useLatest(cursorTooltipFormatText)
+  const highlightColorConfigRef = hooks.useLatest(highlightColorConfig)
+  const highlightOpacityConfigRef = hooks.useLatest(highlightOpacityConfig)
+  const outlineWidthConfigRef = hooks.useLatest(outlineWidthConfig)
 
   // Hover query function - queries property at cursor position
   const queryPropertyAtPoint = hooks.useEventCallback(
@@ -955,15 +941,15 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         if (isAbortError(error)) {
           return
         }
-        console.log("Hover query failed:", error)
+        logger.debug("Hover query failed", { error })
         setHoverTooltipData(null)
         setIsHoverQueryActive(false)
       }
     }
   )
 
-  // Debounced hover query (250ms delay to avoid excessive queries)
-  const debouncedHoverQuery = useDebounce(queryPropertyAtPoint, 250)
+  // Debounced hover query (50ms delay to avoid excessive queries)
+  const debouncedHoverQuery = useDebounce(queryPropertyAtPoint, 50)
 
   const updateCursorPoint = hooks.useEventCallback(
     (mapPoint: __esri.Point | null) => {
@@ -977,10 +963,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       }
 
       const currentHighlightColor = buildHighlightColor(
-        highlightColorConfig,
-        highlightOpacityConfig
+        highlightColorConfigRef.current,
+        highlightOpacityConfigRef.current
       )
-      const currentOutlineWidth = getValidatedOutlineWidth(outlineWidthConfig)
+      const currentOutlineWidth = getValidatedOutlineWidth(outlineWidthConfigRef.current)
 
       ensureGraphicsLayer(view)
       const layer = view.map.findLayerById(
@@ -1105,15 +1091,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         const screenPoint = { x: event.x, y: event.y }
         const mapPoint = view.toMap(screenPoint)
         if (mapPoint) {
-          const nextPoint =
-            typeof mapPoint.clone === "function"
-              ? (mapPoint.clone() as __esri.Point)
-              : mapPoint
-          lastCursorPointRef.current = nextPoint
-          updateCursorPoint(nextPoint)
+          lastCursorPointRef.current = mapPoint
+          updateCursorPoint(mapPoint)
 
           // Trigger debounced hover query
-          debouncedHoverQuery(nextPoint)
+          debouncedHoverQuery(mapPoint)
         } else {
           lastCursorPointRef.current = null
           updateCursorPoint(null)
@@ -1160,11 +1142,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   }, [
     runtimeState,
     modules,
-    highlightColorConfig,
-    highlightOpacityConfig,
-    outlineWidthConfig,
-    cursorTooltipNoPropertyText,
-    cursorTooltipFormatText,
   ])
 
   // Cleanup cursor point on unmount
@@ -1190,11 +1167,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     if (!lastCursorPointRef.current) return
     updateCursorPoint(lastCursorPointRef.current)
   }, [
-    cursorTooltipNoPropertyText,
-    cursorTooltipFormatText,
-    highlightColorConfig,
-    highlightOpacityConfig,
-    outlineWidthConfig,
     hoverTooltipData,
     isHoverQueryActive,
   ])
