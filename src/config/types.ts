@@ -145,6 +145,16 @@ export interface EsriModules {
   Extent: new (properties?: __esri.ExtentProperties) => __esri.Extent
 }
 
+export interface CursorTooltipStyle {
+  readonly textColor: string
+  readonly haloColor: string
+  readonly haloSize: number
+  readonly fontFamily: string
+  readonly fontSize: number
+  readonly fontWeight: __esri.FontProperties["weight"]
+  readonly offset: number
+}
+
 export interface UrlErrors {
   property: string | null
   owner: string | null

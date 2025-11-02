@@ -76,8 +76,10 @@ import {
   processPropertyQueryResults,
   updateRawPropertyResults,
   logger,
+  syncCursorGraphics,
 } from "../shared/utils"
-import { EXPORT_FORMATS, HIGHLIGHT_MARKER_SIZE } from "../config/constants"
+import type { CursorGraphicsState } from "../shared/utils"
+import { EXPORT_FORMATS, CURSOR_TOOLTIP_STYLE } from "../config/constants"
 import {
   trackEvent,
   trackError,
@@ -843,8 +845,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     })
 
   // Cursor point marker tracking
-  const cursorPointGraphicRef = React.useRef<__esri.Graphic | null>(null)
-  const cursorTooltipGraphicRef = React.useRef<__esri.Graphic | null>(null)
+  const cursorGraphicsStateRef = React.useRef<CursorGraphicsState | null>(null)
   const pointerMoveHandleRef = React.useRef<__esri.Handle | null>(null)
   const pointerLeaveHandleRef = React.useRef<__esri.Handle | null>(null)
   const lastCursorPointRef = React.useRef<__esri.Point | null>(null)
@@ -855,6 +856,28 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const highlightColorConfigRef = hooks.useLatest(highlightColorConfig)
   const highlightOpacityConfigRef = hooks.useLatest(highlightOpacityConfig)
   const outlineWidthConfigRef = hooks.useLatest(outlineWidthConfig)
+
+  const clearCursorGraphics = hooks.useEventCallback(() => {
+    const view = getCurrentView()
+    if (!cursorGraphicsStateRef.current) {
+      return
+    }
+
+    const layer = view?.map?.findLayerById(
+      `${id}-property-highlight-layer`
+    ) as __esri.GraphicsLayer
+
+    if (layer) {
+      if (cursorGraphicsStateRef.current.pointGraphic) {
+        layer.remove(cursorGraphicsStateRef.current.pointGraphic)
+      }
+      if (cursorGraphicsStateRef.current.tooltipGraphic) {
+        layer.remove(cursorGraphicsStateRef.current.tooltipGraphic)
+      }
+    }
+
+    cursorGraphicsStateRef.current = null
+  })
 
   // Hover query function - queries property at cursor position
   const queryPropertyAtPoint = hooks.useEventCallback(
@@ -958,22 +981,25 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const updateCursorPoint = hooks.useEventCallback(
     (mapPoint: __esri.Point | null) => {
       const view = getCurrentView()
-      if (!view || !modules || !modules.Graphic || !modules.TextSymbol) {
+      if (!view) {
         if (!mapPoint) {
-          if (cursorPointGraphicRef.current) {
-            const layer = view?.map?.findLayerById(
-              `${id}-property-highlight-layer`
-            ) as __esri.GraphicsLayer
-            if (layer) {
-              layer.remove(cursorPointGraphicRef.current)
-              if (cursorTooltipGraphicRef.current) {
-                layer.remove(cursorTooltipGraphicRef.current)
-              }
-            }
-            cursorPointGraphicRef.current = null
-            cursorTooltipGraphicRef.current = null
-          }
+          clearCursorGraphics()
         }
+        return
+      }
+
+      if (!modules?.Graphic || !modules?.TextSymbol) {
+        clearCursorGraphics()
+        return
+      }
+
+      ensureGraphicsLayer(view)
+      const layer = view.map.findLayerById(
+        `${id}-property-highlight-layer`
+      ) as __esri.GraphicsLayer | null
+
+      if (!layer) {
+        clearCursorGraphics()
         return
       }
 
@@ -985,110 +1011,27 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         outlineWidthConfigRef.current
       )
 
-      ensureGraphicsLayer(view)
-      const layer = view.map.findLayerById(
-        `${id}-property-highlight-layer`
-      ) as __esri.GraphicsLayer
-
-      if (!layer) {
-        if (!mapPoint) {
-          cursorPointGraphicRef.current = null
-          cursorTooltipGraphicRef.current = null
-        }
-        return
-      }
-
-      // Remove graphics if mapPoint is null
-      if (!mapPoint) {
-        if (cursorPointGraphicRef.current) {
-          layer.remove(cursorPointGraphicRef.current)
-          cursorPointGraphicRef.current = null
-        }
-        if (cursorTooltipGraphicRef.current) {
-          layer.remove(cursorTooltipGraphicRef.current)
-          cursorTooltipGraphicRef.current = null
-        }
-        return
-      }
-
-      // Create or update cursor point graphic
-      if (!cursorPointGraphicRef.current) {
-        const pointSymbol = {
-          type: "simple-marker",
-          style: "circle",
-          size: HIGHLIGHT_MARKER_SIZE,
-          color: currentHighlightColor,
-          outline: {
-            color: [
-              currentHighlightColor[0],
-              currentHighlightColor[1],
-              currentHighlightColor[2],
-              1,
-            ],
-            width: currentOutlineWidth,
-          },
-        }
-
-        const graphic = new modules.Graphic({
-          geometry: mapPoint,
-          symbol: pointSymbol as any,
-        })
-
-        layer.add(graphic)
-        cursorPointGraphicRef.current = graphic
-      } else {
-        // Update existing graphic position
-        cursorPointGraphicRef.current.geometry = mapPoint
-      }
-
-      // Create or update tooltip graphic
       let tooltipText: string | null = null
 
       if (hoverTooltipData) {
-        const { fastighet } = hoverTooltipData
-        tooltipText = tooltipFormatRef.current.replace("{fastighet}", fastighet)
+        tooltipText = tooltipFormatRef.current.replace(
+          "{fastighet}",
+          hoverTooltipData.fastighet
+        )
       } else if (!isHoverQueryActive) {
         tooltipText = tooltipNoPropertyRef.current
       }
-      // If we have text to show, create or update tooltip graphic
-      if (tooltipText) {
-        if (!cursorTooltipGraphicRef.current) {
-          const tooltipOffset = HIGHLIGHT_MARKER_SIZE + 4
-          const tooltipSymbol = new modules.TextSymbol({
-            text: tooltipText,
-            color: "#ffffff",
-            haloColor: "#000000",
-            haloSize: 1,
-            xoffset: tooltipOffset,
-            yoffset: tooltipOffset,
-            font: {
-              family: "sans-serif",
-              size: 12,
-              weight: "bold",
-            },
-          } as __esri.TextSymbolProperties)
 
-          const tooltipGraphic = new modules.Graphic({
-            geometry: mapPoint,
-            symbol: tooltipSymbol as any,
-          })
-
-          layer.add(tooltipGraphic)
-          cursorTooltipGraphicRef.current = tooltipGraphic
-        } else {
-          // Update existing tooltip position and text
-          cursorTooltipGraphicRef.current.geometry = mapPoint
-          const tooltipSymbol = cursorTooltipGraphicRef.current
-            .symbol as __esri.TextSymbol
-          if (tooltipSymbol && tooltipSymbol.text !== tooltipText) {
-            tooltipSymbol.text = tooltipText
-          }
-        }
-      } else if (cursorTooltipGraphicRef.current) {
-        // Remove tooltip if no text to show
-        layer.remove(cursorTooltipGraphicRef.current)
-        cursorTooltipGraphicRef.current = null
-      }
+      cursorGraphicsStateRef.current = syncCursorGraphics({
+        modules,
+        layer,
+        mapPoint,
+        tooltipText,
+        highlightColor: currentHighlightColor,
+        outlineWidth: currentOutlineWidth,
+        existing: cursorGraphicsStateRef.current,
+        style: CURSOR_TOOLTIP_STYLE,
+      })
     }
   )
 
@@ -1104,7 +1047,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     if (pointerMoveHandleRef.current) {
       pointerMoveHandleRef.current.remove()
       pointerMoveHandleRef.current = null
-      updateCursorPoint(null) // Remove cursor point
+      clearCursorGraphics()
     }
 
     if (pointerLeaveHandleRef.current) {
@@ -1112,7 +1055,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       pointerLeaveHandleRef.current = null
     }
 
-    const canTrackCursor = isActive && !!modules && !!modules?.TextSymbol
+    const canTrackCursor =
+      isActive && !!modules?.TextSymbol && !!modules?.Graphic
 
     // Setup new handler if widget is active
     if (canTrackCursor) {
@@ -1142,7 +1086,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       })
     } else {
       lastCursorPointRef.current = null
-      updateCursorPoint(null)
+      clearCursorGraphics()
       setHoverTooltipData(null)
       setIsHoverQueryActive(false)
     }
@@ -1166,7 +1110,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       if (!canTrackCursor) {
         lastCursorPointRef.current = null
       }
-      updateCursorPoint(null)
+      clearCursorGraphics()
     }
   }, [runtimeState, modules])
 
@@ -1186,7 +1130,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
     debouncedHoverQuery.cancel()
     lastCursorPointRef.current = null
-    updateCursorPoint(null)
+    clearCursorGraphics()
   })
 
   hooks.useUpdateEffect(() => {

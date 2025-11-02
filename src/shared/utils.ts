@@ -2,6 +2,8 @@ import type {
   OwnerAttributes,
   ValidationResult,
   SelectionGraphicsHelpers,
+  EsriModules,
+  CursorTooltipStyle,
 } from "../config/types"
 import {
   MIN_MASK_LENGTH,
@@ -10,6 +12,7 @@ import {
   HIGHLIGHT_SYMBOL_ALPHA,
   HIGHLIGHT_MARKER_SIZE,
   OUTLINE_WIDTH,
+  CURSOR_TOOLTIP_STYLE,
 } from "../config/constants"
 
 /** Sanitize arbitrary HTML/text content */
@@ -141,6 +144,117 @@ const buildOwnerIdentityKey = (
 export const ownerIdentity = {
   buildKey: buildOwnerIdentityKey,
   normalizeValue: normalizeOwnerValue,
+}
+
+export interface CursorGraphicsState {
+  pointGraphic: __esri.Graphic | null
+  tooltipGraphic: __esri.Graphic | null
+}
+
+export const buildTooltipSymbol = (
+  modules: EsriModules | null,
+  text: string,
+  style: CursorTooltipStyle
+): __esri.TextSymbol | null => {
+  if (!modules?.TextSymbol || !text) return null
+  const sanitized = stripHtml(text)
+  if (!sanitized) return null
+
+  return new modules.TextSymbol({
+    text: sanitized,
+    color: style.textColor,
+    haloColor: style.haloColor,
+    haloSize: style.haloSize,
+    xoffset: style.offset,
+    yoffset: style.offset,
+    font: {
+      family: style.fontFamily,
+      size: style.fontSize,
+      weight: style.fontWeight,
+    },
+  } as __esri.TextSymbolProperties)
+}
+
+export const syncCursorGraphics = ({
+  modules,
+  layer,
+  mapPoint,
+  tooltipText,
+  highlightColor,
+  outlineWidth,
+  existing,
+  style = CURSOR_TOOLTIP_STYLE,
+}: {
+  modules: EsriModules | null
+  layer: __esri.GraphicsLayer | null
+  mapPoint: __esri.Point | null
+  tooltipText: string | null
+  highlightColor: [number, number, number, number]
+  outlineWidth: number
+  existing: CursorGraphicsState | null
+  style?: CursorTooltipStyle
+}): CursorGraphicsState | null => {
+  if (!modules?.Graphic || !layer) {
+    return existing ?? null
+  }
+
+  if (!mapPoint) {
+    if (existing?.pointGraphic) {
+      layer.remove(existing.pointGraphic)
+    }
+    if (existing?.tooltipGraphic) {
+      layer.remove(existing.tooltipGraphic)
+    }
+    return null
+  }
+
+  const next: CursorGraphicsState = {
+    pointGraphic: existing?.pointGraphic ?? null,
+    tooltipGraphic: existing?.tooltipGraphic ?? null,
+  }
+
+  if (!next.pointGraphic) {
+    next.pointGraphic = new modules.Graphic({
+      geometry: mapPoint,
+      symbol: {
+        type: "simple-marker",
+        style: "circle",
+        size: HIGHLIGHT_MARKER_SIZE,
+        color: highlightColor,
+        outline: {
+          color: [highlightColor[0], highlightColor[1], highlightColor[2], 1],
+          width: outlineWidth,
+        },
+      } as any,
+    })
+    layer.add(next.pointGraphic)
+  } else {
+    next.pointGraphic.geometry = mapPoint
+  }
+
+  if (tooltipText) {
+    const symbol = buildTooltipSymbol(modules, tooltipText, style)
+    if (symbol) {
+      if (!next.tooltipGraphic) {
+        next.tooltipGraphic = new modules.Graphic({
+          geometry: mapPoint,
+          symbol,
+        })
+        layer.add(next.tooltipGraphic)
+      } else {
+        next.tooltipGraphic.geometry = mapPoint
+        next.tooltipGraphic.symbol = symbol
+      }
+    } else if (next.tooltipGraphic) {
+      layer.remove(next.tooltipGraphic)
+      next.tooltipGraphic = null
+    }
+  } else if (next.tooltipGraphic) {
+    layer.remove(next.tooltipGraphic)
+    next.tooltipGraphic = null
+  }
+
+  return next
 }
 
 export const formatOwnerInfo = (

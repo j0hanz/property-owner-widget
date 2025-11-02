@@ -33,6 +33,16 @@ export const OWNER_QUERY_CONCURRENCY = 5
 
 export const HIGHLIGHT_MARKER_SIZE = 6
 
+export const CURSOR_TOOLTIP_STYLE = {
+  textColor: "#ffffff",
+  haloColor: "#000000",
+  haloSize: 1,
+  fontFamily: "sans-serif",
+  fontSize: 12,
+  fontWeight: "bold" as const,
+  offset: HIGHLIGHT_MARKER_SIZE + 4,
+} as const
+
 // AbortController pool size for efficient cancellation management
 // Size matches OWNER_QUERY_CONCURRENCY to handle typical concurrent operations
 export const ABORT_CONTROLLER_POOL_SIZE = 5

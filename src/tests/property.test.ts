@@ -16,6 +16,8 @@ import {
   calculatePropertyUpdates,
   buildHighlightColor,
   buildHighlightSymbolJSON,
+  buildTooltipSymbol,
+  syncCursorGraphics,
 } from "../shared/utils"
 import {
   isValidArcGISUrl,
@@ -25,6 +27,7 @@ import {
   clearQueryCache,
 } from "../shared/api"
 import { convertToCSV, convertToGeoJSON, exportData } from "../shared/export"
+import { CURSOR_TOOLTIP_STYLE } from "../config/constants"
 import type { OwnerAttributes, GridRowData } from "../config/types"
 
 const mockFeatureLayerInstances: MockFeatureLayer[] = []
@@ -871,6 +874,109 @@ describe("Property Widget - Utility Helper Functions", () => {
     expect(result.toRemove.size).toBe(0)
     expect(result.updatedRows).toHaveLength(2)
     expect(result.updatedRows.map((row) => row.id)).toEqual(["123_1", "123_2"])
+  })
+
+  it("should sanitize tooltip content when building text symbols", () => {
+    class MockTextSymbol {
+      text: string
+      color: string
+      haloColor: string
+      haloSize: number
+      xoffset: number
+      yoffset: number
+      font: __esri.FontProperties
+
+      constructor(props: any) {
+        Object.assign(this, props)
+      }
+    }
+
+    const modules = {
+      TextSymbol: MockTextSymbol,
+    } as any
+
+    const symbol = buildTooltipSymbol(
+      modules,
+      "<strong>FAST-1</strong>",
+      CURSOR_TOOLTIP_STYLE
+    )
+
+    if (!symbol) {
+      throw new Error("Expected tooltip symbol instance")
+    }
+
+    expect(symbol).toBeInstanceOf(MockTextSymbol)
+    expect(symbol.text).toBe("FAST-1")
+    expect(symbol.color).toBe(CURSOR_TOOLTIP_STYLE.textColor)
+    expect(symbol.haloColor).toBe(CURSOR_TOOLTIP_STYLE.haloColor)
+    expect(symbol.font.family).toBe(CURSOR_TOOLTIP_STYLE.fontFamily)
+  })
+
+  it("should create and clear cursor graphics through sync helper", () => {
+    class MockTextSymbol {
+      text: string
+      constructor(props: any) {
+        this.text = props.text
+      }
+    }
+
+    class MockGraphic {
+      geometry: any
+      symbol: any
+
+      constructor(props: any) {
+        this.geometry = props.geometry
+        this.symbol = props.symbol
+      }
+    }
+
+    const modules = {
+      Graphic: MockGraphic,
+      TextSymbol: MockTextSymbol,
+    } as any
+
+    const layer = {
+      add: jest.fn(),
+      remove: jest.fn(),
+    } as any
+
+    const mapPoint = { x: 1, y: 2 } as any
+    const highlightColor: [number, number, number, number] = [0, 180, 216, 0.4]
+
+    const state = syncCursorGraphics({
+      modules,
+      layer,
+      mapPoint,
+      tooltipText: "<em>FAST-1</em>",
+      highlightColor,
+      outlineWidth: 2,
+      existing: null,
+      style: CURSOR_TOOLTIP_STYLE,
+    })
+
+    if (!state) {
+      throw new Error("Expected cursor graphics state")
+    }
+
+    expect(layer.add).toHaveBeenCalledTimes(2)
+    expect(state.pointGraphic).toBeInstanceOf(MockGraphic)
+    expect(state.tooltipGraphic).toBeInstanceOf(MockGraphic)
+    expect(state.tooltipGraphic?.symbol).toBeInstanceOf(MockTextSymbol)
+    expect((state.tooltipGraphic?.symbol as MockTextSymbol).text).toBe("FAST-1")
+
+    const clearedState = syncCursorGraphics({
+      modules,
+      layer,
+      mapPoint: null,
+      tooltipText: null,
+      highlightColor,
+      outlineWidth: 2,
+      existing: state,
+      style: CURSOR_TOOLTIP_STYLE,
+    })
+
+    expect(layer.remove).toHaveBeenCalledTimes(2)
+    expect(clearedState).toBeNull()
   })
 })
 
