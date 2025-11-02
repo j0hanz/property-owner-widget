@@ -24,7 +24,8 @@ import {
   validateDataSources,
   propertyQueryService,
 } from "../shared/api"
-import type { OwnerAttributes } from "../config/types"
+import { convertToCSV, convertToGeoJSON, exportData } from "../shared/export"
+import type { OwnerAttributes, GridRowData } from "../config/types"
 
 jest.mock("jimu-arcgis", () => ({
   loadArcGISJSAPIModules: jest.fn((modules: string[]) => {
@@ -1022,5 +1023,221 @@ describe("Query Controls", () => {
 
     expect(OWNER_QUERY_CONCURRENCY).toBeDefined()
     expect(OWNER_QUERY_CONCURRENCY).toBe(5)
+  })
+})
+
+describe("Export Utilities - CSV", () => {
+  const baseRow: GridRowData = {
+    id: "row-1",
+    FNR: "123",
+    UUID_FASTIGHET: "uuid-123",
+    FASTIGHET: "Property",
+    BOSTADR: "Owner",
+  }
+
+  it("should escape commas in values", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        FASTIGHET: "Value, with comma",
+      },
+    ]
+
+    const csv = convertToCSV(rows)
+    expect(csv.split("\n")[1]).toContain('"Value, with comma"')
+  })
+
+  it("should escape quotes in values", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        BOSTADR: 'Address "quoted" street',
+      },
+    ]
+
+    const csv = convertToCSV(rows)
+    expect(csv.split("\n")[1]).toContain('"Address ""quoted"" street"')
+  })
+
+  it("should handle Swedish characters", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        BOSTADR: "Malmö",
+      },
+    ]
+
+    const csv = convertToCSV(rows)
+    expect(csv).toContain("Malmö")
+  })
+
+  it("should strip HTML tags before exporting", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        FASTIGHET: "<strong>Secure</strong>",
+      },
+    ]
+
+    const csv = convertToCSV(rows)
+    expect(csv).toContain("Secure")
+    expect(csv).not.toContain("<strong>")
+  })
+})
+
+describe("Export Utilities - GeoJSON", () => {
+  const baseRow: GridRowData = {
+    id: "row-geo",
+    FNR: "456",
+    UUID_FASTIGHET: "uuid-geo",
+    FASTIGHET: "<em>Geo property</em>",
+    BOSTADR: "<span>Geo owner</span>",
+  }
+
+  it("should convert polygon geometry", () => {
+    const polygonRow: GridRowData = {
+      ...baseRow,
+      graphic: {
+        geometry: {
+          type: "polygon",
+          rings: [
+            [
+              [0, 0],
+              [1, 0],
+              [1, 1],
+              [0, 1],
+              [0, 0],
+            ],
+          ],
+        },
+      } as unknown as __esri.Graphic,
+    }
+
+    const geojson = convertToGeoJSON([polygonRow]) as any
+    expect(geojson.features).toHaveLength(1)
+    expect(geojson.features[0].geometry.type).toBe("Polygon")
+  })
+
+  it("should skip rows without geometry", () => {
+    const rows: GridRowData[] = [{ ...baseRow }]
+    const geojson = convertToGeoJSON(rows) as any
+    expect(geojson.features).toHaveLength(0)
+  })
+
+  it("should sanitize HTML in properties", () => {
+    const rowWithHtml: GridRowData = {
+      ...baseRow,
+      graphic: {
+        geometry: {
+          type: "point",
+          x: 10,
+          y: 20,
+        },
+      } as unknown as __esri.Graphic,
+    }
+
+    const geojson = convertToGeoJSON([rowWithHtml]) as any
+    expect(geojson.features[0].properties.FASTIGHET).toBe("Geo property")
+    expect(geojson.features[0].properties.BOSTADR).toBe("Geo owner")
+  })
+})
+
+describe("Export Utilities - exportData", () => {
+  it("should trigger download flow and revoke object URL", () => {
+    const rawData = [{ id: 1 }]
+    const rows: GridRowData[] = [
+      {
+        id: "row-export",
+        FNR: "789",
+        UUID_FASTIGHET: "uuid-export",
+        FASTIGHET: "Export Property",
+        BOSTADR: "Export Owner",
+      },
+    ]
+
+    jest.useFakeTimers()
+
+    const originalCreateObjectURL = (global.URL as any)?.createObjectURL
+    const originalRevokeObjectURL = (global.URL as any)?.revokeObjectURL
+
+    const createObjectURL = jest.fn(() => "blob:mock")
+    const revokeObjectURL = jest.fn()
+
+    Object.defineProperty(global.URL, "createObjectURL", {
+      configurable: true,
+      writable: true,
+      value: createObjectURL,
+    })
+    Object.defineProperty(global.URL, "revokeObjectURL", {
+      configurable: true,
+      writable: true,
+      value: revokeObjectURL,
+    })
+    const appendChildSpy = jest.spyOn(document.body, "appendChild")
+    const removeChildSpy = jest.spyOn(document.body, "removeChild")
+
+    const originalCreateElement = document.createElement.bind(document)
+    const anchorElement = originalCreateElement("a") as HTMLAnchorElement
+    const clickMock = jest.fn()
+    anchorElement.click = clickMock
+
+    const createElementSpy = jest
+      .spyOn(document, "createElement")
+      .mockImplementation((tagName: string, options?: any) => {
+        if (tagName.toLowerCase() === "a") {
+          return anchorElement
+        }
+        return originalCreateElement(tagName, options)
+      })
+
+    const definition = {
+      id: "json" as const,
+      label: "JSON",
+      description: "",
+      extension: "json",
+      mimeType: "application/json",
+    }
+
+    try {
+      exportData(rawData, rows, {
+        format: "json",
+        filename: "property-export",
+        rowCount: rows.length,
+        definition,
+      })
+
+      expect(createObjectURL).toHaveBeenCalled()
+      expect(appendChildSpy).toHaveBeenCalledWith(anchorElement)
+      expect(clickMock).toHaveBeenCalledTimes(1)
+
+      jest.runAllTimers()
+
+      expect(removeChildSpy).toHaveBeenCalledWith(anchorElement)
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock")
+    } finally {
+      if (originalCreateObjectURL) {
+        Object.defineProperty(global.URL, "createObjectURL", {
+          configurable: true,
+          writable: true,
+          value: originalCreateObjectURL,
+        })
+      } else {
+        delete (global.URL as any).createObjectURL
+      }
+
+      if (originalRevokeObjectURL) {
+        Object.defineProperty(global.URL, "revokeObjectURL", {
+          configurable: true,
+          writable: true,
+          value: originalRevokeObjectURL,
+        })
+      } else {
+        delete (global.URL as any).revokeObjectURL
+      }
+      appendChildSpy.mockRestore()
+      removeChildSpy.mockRestore()
+      createElementSpy.mockRestore()
+      jest.useRealTimers()
+    }
   })
 })

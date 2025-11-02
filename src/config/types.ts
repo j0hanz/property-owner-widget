@@ -12,10 +12,10 @@ export interface Config {
   enablePIIMasking: boolean
   relationshipId?: number
   enableBatchOwnerQuery: boolean
-  autoZoomOnSelection?: boolean
   highlightColor?: string
   highlightOpacity?: number
   outlineWidth?: number
+  autoCloseOtherWidgets?: boolean
 }
 
 export type IMConfig = ImmutableObject<Config>
@@ -51,6 +51,31 @@ export interface GridRowData {
   BOSTADR: string
   graphic?: __esri.Graphic
   rawOwner?: OwnerAttributes
+}
+
+export type ExportFormat = "json" | "csv" | "geojson"
+
+export interface ExportFormatDefinition {
+  id: ExportFormat
+  label: string
+  description: string
+  icon?: string
+  extension: string
+  mimeType: string
+}
+
+export interface CsvHeaderValues {
+  FNR: string
+  UUID_FASTIGHET: string
+  FASTIGHET: string
+  BOSTADR: string
+}
+
+export interface ExportOptions {
+  format: ExportFormat
+  filename: string
+  rowCount: number
+  definition?: ExportFormatDefinition
 }
 
 export interface SelectionGraphicsHelpers {
@@ -91,6 +116,7 @@ export interface PropertyWidgetState {
   error: ErrorState | null
   selectedProperties: GridRowData[]
   isQueryInFlight: boolean
+  rawPropertyResults: any[] | null
 }
 
 export interface QueryResult {

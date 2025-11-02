@@ -505,6 +505,35 @@ export const syncGraphicsWithState = (params: {
 
 export { isValidationSuccess, isValidationFailure } from "../config/types"
 
+/** Computes list of widget IDs that should be closed when this widget opens */
+export const computeWidgetsToClose = (
+  runtimeInfo:
+    | { [id: string]: { state?: any; isClassLoaded?: boolean } | undefined }
+    | null
+    | undefined,
+  widgetId: string
+): string[] => {
+  if (!runtimeInfo) return []
+
+  const ids: string[] = []
+
+  for (const [id, info] of Object.entries(runtimeInfo)) {
+    if (id === widgetId || !info) continue
+    const stateRaw = info.state
+    if (!stateRaw) continue
+    const normalized = String(stateRaw).toUpperCase()
+
+    // Skip widgets that are already closed or hidden
+    if (normalized === "CLOSED" || normalized === "HIDDEN") {
+      continue
+    }
+
+    ids.push(id)
+  }
+
+  return ids
+}
+
 class PopupSuppressionManager {
   private readonly ownersByView = new WeakMap<__esri.MapView, Set<symbol>>()
   private readonly originalStateByView = new WeakMap<__esri.MapView, boolean>()

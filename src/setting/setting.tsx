@@ -185,9 +185,6 @@ const Setting = (
       )
     )
   )
-  const [localAutoZoom, setLocalAutoZoom] = React.useState(() =>
-    getBooleanConfig("autoZoomOnSelection", false)
-  )
   const [localHighlightColor, setLocalHighlightColor] = React.useState(
     config.highlightColor || DEFAULT_HIGHLIGHT_COLOR
   )
@@ -336,14 +333,6 @@ const Setting = (
         return
       }
       handleAddAllowedHost()
-    }
-  )
-
-  const handleAutoZoomChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      const checked = evt.target.checked
-      setLocalAutoZoom(checked)
-      updateConfig("autoZoomOnSelection", checked)
     }
   )
 
@@ -504,10 +493,6 @@ const Setting = (
     const uniqueHosts = Array.from(new Set(normalizedHosts))
     setLocalAllowedHostsList(uniqueHosts)
   }, [config.allowedHosts])
-
-  hooks.useUpdateEffect(() => {
-    setLocalAutoZoom(getBooleanConfig("autoZoomOnSelection", false))
-  }, [config.autoZoomOnSelection])
 
   hooks.useUpdateEffect(() => {
     setLocalHighlightColor(config.highlightColor || DEFAULT_HIGHLIGHT_COLOR)
@@ -730,22 +715,6 @@ const Setting = (
                   checked={localPIIMasking}
                   onChange={handlePIIMaskingChange}
                   aria-label={translate("enablePIIMaskingLabel")}
-                />
-              </SettingRow>
-
-              <SettingRow
-                flow="no-wrap"
-                level={1}
-                css={styles.row}
-                label={renderLabelWithTooltip(
-                  "autoZoomOnSelectionLabel",
-                  "autoZoomOnSelectionDescription"
-                )}
-              >
-                <Switch
-                  checked={localAutoZoom}
-                  onChange={handleAutoZoomChange}
-                  aria-label={translate("autoZoomOnSelectionLabel")}
                 />
               </SettingRow>
 

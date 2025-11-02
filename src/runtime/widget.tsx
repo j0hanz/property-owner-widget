@@ -10,6 +10,8 @@ import {
   ReactRedux,
   type IMState,
   WidgetState,
+  appActions,
+  getAppStore,
   type UseDataSource,
   type ImmutableObject,
 } from "jimu-core"
@@ -17,6 +19,10 @@ import { JimuMapViewComponent } from "jimu-arcgis"
 import {
   Alert,
   Button,
+  Dropdown,
+  DropdownButton,
+  DropdownItem,
+  DropdownMenu,
   Loading,
   LoadingType,
   SVG,
@@ -32,6 +38,7 @@ import type {
   PropertyWidgetState,
   GridRowData,
   SelectionGraphicsParams,
+  ExportFormat,
 } from "../config/types"
 import { ErrorType } from "../config/enums"
 import { useWidgetStyles } from "../config/style"
@@ -46,7 +53,6 @@ import {
   queryPropertyByPoint,
   queryOwnerByFnr,
   clearQueryCache,
-  queryExtentForProperties,
   queryOwnersByRelationship,
   validateDataSources,
   propertyQueryService,
@@ -64,8 +70,9 @@ import {
   cleanupRemovedGraphics,
   isValidationFailure,
   buildHighlightColor,
+  computeWidgetsToClose,
 } from "../shared/utils"
-import { OUTLINE_WIDTH } from "../config/constants"
+import { OUTLINE_WIDTH, EXPORT_FORMATS } from "../config/constants"
 import {
   trackEvent,
   trackError,
@@ -73,9 +80,10 @@ import {
   createPerformanceTracker,
 } from "../shared/telemetry"
 import clearIcon from "../assets/clear-selection-general.svg"
-import zoomIcon from "../assets/zoom-in.svg"
 import setupIcon from "../assets/config-missing.svg"
 import mapSelect from "../assets/map-select.svg"
+import exportIcon from "../assets/export.svg"
+import { exportData } from "../shared/export"
 
 const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   const {
@@ -255,6 +263,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     error: null,
     selectedProperties: [],
     isQueryInFlight: false,
+    rawPropertyResults: null,
   })
   const isMountedRef = React.useRef(true)
 
@@ -295,7 +304,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const toggleEnabled = config.enableToggleRemoval
   const piiMaskingEnabled = config.enablePIIMasking
   const mapWidgetId = useMapWidgetIds?.[0]
-  const autoZoomEnabled = !!config.autoZoomOnSelection
   const highlightColorConfig = config.highlightColor
   const highlightOpacityConfig = config.highlightOpacity
   const outlineWidthConfig = config.outlineWidth
@@ -398,65 +406,96 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         selectedProperties: [],
         error: null,
         isQueryInFlight: false,
+        rawPropertyResults: null,
       }
     })
   })
 
-  const handleZoomToResults = hooks.useEventCallback(async () => {
-    const view = getCurrentView()
-    if (!view) {
-      setError(ErrorType.VALIDATION_ERROR, translate("errorNoMapPoint"))
+  const closeOtherWidgets = hooks.useEventCallback(() => {
+    const autoCloseSetting = config?.autoCloseOtherWidgets
+    if (autoCloseSetting !== undefined && !autoCloseSetting) {
       return
     }
-
-    const fnrs = state.selectedProperties.map((prop) => prop.FNR)
-    if (fnrs.length === 0) {
-      setError(ErrorType.VALIDATION_ERROR, translate("noPropertiesSelected"))
-      return
-    }
-
-    if (!config.propertyDataSourceId || !dsManagerRef.current) {
-      setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
-      return
-    }
-
-    setState((prev) => ({ ...prev, error: null }))
-
-    const controller = getController()
     try {
-      const extent = await queryExtentForProperties(
-        fnrs,
-        config.propertyDataSourceId,
-        dsManagerRef.current,
-        { signal: controller.signal }
-      )
-
-      if (controller.signal.aborted) {
-        return
+      const store = typeof getAppStore === "function" ? getAppStore() : null
+      const state = store?.getState?.()
+      const runtimeInfo = state?.widgetsRuntimeInfo as
+        | {
+            [id: string]:
+              | { state?: WidgetState | string; isClassLoaded?: boolean }
+              | undefined
+          }
+        | undefined
+      const targets = computeWidgetsToClose(runtimeInfo, id)
+      if (targets.length) {
+        const safeTargets = targets.filter((targetId) => {
+          const targetInfo = runtimeInfo?.[targetId]
+          return Boolean(targetInfo?.isClassLoaded)
+        })
+        if (safeTargets.length) {
+          console.log(
+            `Property Widget: Closing ${safeTargets.length} other widget(s)`,
+            safeTargets
+          )
+          trackEvent({
+            category: "Widget",
+            action: "close_other_widgets",
+            value: safeTargets.length,
+          })
+          props.dispatch(appActions.closeWidgets(safeTargets))
+        }
       }
-
-      if (!extent) {
-        setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
-        return
+    } catch (err) {
+      if (!isAbortError(err)) {
+        console.error("closeOtherWidgets error", err)
       }
-
-      await view.goTo(extent.expand(1.2), { duration: 1000 })
-
-      trackEvent({
-        category: "Navigation",
-        action: "zoom_to_results",
-        value: fnrs.length,
-      })
-    } catch (error) {
-      if (isAbortError(error)) {
-        return
-      }
-      setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
-      trackError("zoom_to_results", error)
-    } finally {
-      releaseController(controller)
     }
   })
+
+  const handleWidgetReset = hooks.useEventCallback(() => {
+    abortAll()
+    clearQueryCache()
+    clearGraphics()
+    setState((prev) => ({
+      ...prev,
+      selectedProperties: [],
+      error: null,
+      isQueryInFlight: false,
+      rawPropertyResults: null,
+    }))
+  })
+
+  const handleExport = hooks.useEventCallback((format: ExportFormat) => {
+    if (state.selectedProperties.length === 0) {
+      console.log("Export skipped: no selected properties")
+      return
+    }
+
+    if (!state.rawPropertyResults || state.rawPropertyResults.length === 0) {
+      console.log("Export skipped: no raw property data available")
+      return
+    }
+
+    const rowCount = state.selectedProperties.length
+    const formatDefinition = EXPORT_FORMATS.find((item) => item.id === format)
+
+    try {
+      exportData(state.rawPropertyResults, state.selectedProperties, {
+        format,
+        filename: "property-export",
+        rowCount,
+        definition: formatDefinition,
+      })
+    } catch (error) {
+      console.error(`Export ${format} failed`, error)
+    }
+  })
+
+  const handleExportFormatSelect = hooks.useEventCallback(
+    (format: ExportFormat) => {
+      handleExport(format)
+    }
+  )
 
   const setError = hooks.useEventCallback(
     (type: ErrorType, message: string, details?: string) => {
@@ -581,6 +620,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         console.log("=== FULL JSON RESPONSE ===")
         console.log(JSON.stringify(propertyResults, null, 2))
         console.log("=== END JSON RESPONSE ===")
+
+        const rawResultsForExport = propertyResults
 
         // Step 4: Process results and enrich with owner data
         const useBatchQuery =
@@ -720,6 +761,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             ...prev,
             selectedProperties: updatedRows,
             isQueryInFlight: false,
+            rawPropertyResults: rawResultsForExport,
           }
         })
 
@@ -753,61 +795,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           hasView: !!getCurrentView(),
         })
         syncSelectionGraphics(syncParams)
-
-        if (
-          autoZoomEnabled &&
-          syncParams &&
-          syncParams.selectedRows &&
-          syncParams.selectedRows.length > 0 &&
-          config.propertyDataSourceId
-        ) {
-          const view = getCurrentView()
-          if (view) {
-            const fnrsForZoom = Array.from(
-              new Set(
-                syncParams.selectedRows.map((row) =>
-                  row.FNR != null ? String(row.FNR) : null
-                )
-              )
-            ).filter((fnr): fnr is string => !!fnr)
-
-            if (fnrsForZoom.length > 0) {
-              const zoomController = getController()
-              try {
-                const extent = await queryExtentForProperties(
-                  fnrsForZoom,
-                  config.propertyDataSourceId,
-                  manager,
-                  { signal: zoomController.signal }
-                )
-
-                if (
-                  extent &&
-                  !zoomController.signal.aborted &&
-                  !isStaleRequest()
-                ) {
-                  await view.goTo(extent.expand(1.2), { duration: 1000 })
-                  trackEvent({
-                    category: "Navigation",
-                    action: "auto_zoom_to_results",
-                    value: fnrsForZoom.length,
-                  })
-                }
-              } catch (error) {
-                if (!isAbortError(error)) {
-                  console.error("Auto zoom failed", error)
-                  trackError("auto_zoom", error)
-                  // Reset query state on auto-zoom error
-                  if (isMountedRef.current && !isStaleRequest()) {
-                    setState((prev) => ({ ...prev, isQueryInFlight: false }))
-                  }
-                }
-              } finally {
-                releaseController(zoomController)
-              }
-            }
-          }
-        }
 
         tracker.success()
         trackEvent({
@@ -936,6 +923,28 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     getCurrentView,
   ])
 
+  hooks.useUpdateEffect(() => {
+    if (
+      runtimeState === WidgetState.Closed &&
+      prevRuntimeState !== WidgetState.Closed
+    ) {
+      handleWidgetReset()
+    }
+  }, [runtimeState, prevRuntimeState, handleWidgetReset])
+
+  hooks.useUpdateEffect(() => {
+    const isOpening =
+      (runtimeState === WidgetState.Opened ||
+        runtimeState === WidgetState.Active) &&
+      (prevRuntimeState === WidgetState.Closed ||
+        prevRuntimeState === WidgetState.Hidden ||
+        typeof prevRuntimeState === "undefined")
+
+    if (isOpening) {
+      closeOtherWidgets()
+    }
+  }, [runtimeState, prevRuntimeState, closeOtherWidgets])
+
   hooks.useUnmount(() => {
     isMountedRef.current = false
     abortAll()
@@ -1012,22 +1021,40 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           <Button
             type="tertiary"
             icon
-            onClick={handleZoomToResults}
-            title={translate("zoomToResults")}
-            disabled={state.selectedProperties.length === 0}
-            aria-label={translate("zoomToResults")}
-          >
-            <SVG src={zoomIcon} size={20} />
-          </Button>
-          <Button
-            type="tertiary"
-            icon
             onClick={handleClearAll}
             title={translate("clearAll")}
             disabled={state.selectedProperties.length === 0}
           >
             <SVG src={clearIcon} size={20} />
           </Button>
+          <Dropdown
+            activeIcon
+            menuRole="listbox"
+            aria-label={translate("exportData")}
+          >
+            <DropdownButton
+              arrow={false}
+              icon
+              type="tertiary"
+              disabled={state.selectedProperties.length === 0}
+              title={translate("exportData")}
+              role="combobox"
+            >
+              <SVG src={exportIcon} size={20} />
+            </DropdownButton>
+            <DropdownMenu alignment="start">
+              {EXPORT_FORMATS.map((format) => (
+                <DropdownItem
+                  key={format.id}
+                  onClick={() => handleExportFormatSelect(format.id)}
+                  role="menuitem"
+                  title={translate(`export${format.label}Desc`)}
+                >
+                  {translate(`export${format.label}`)}
+                </DropdownItem>
+              ))}
+            </DropdownMenu>
+          </Dropdown>
         </div>
       </div>
       <div css={styles.body} role="main">

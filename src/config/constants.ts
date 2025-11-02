@@ -1,3 +1,5 @@
+import type { ExportFormatDefinition } from "./types"
+
 export const ESRI_MODULES_TO_LOAD = [
   "esri/symbols/SimpleFillSymbol",
   "esri/symbols/SimpleLineSymbol",
@@ -37,3 +39,27 @@ export const ABORT_CONTROLLER_POOL_SIZE = 10
 // Debounce duration (ms) for stabilizing loading indicator visibility
 // 200ms balances perceived responsiveness vs flicker prevention
 export const LOADING_VISIBILITY_DEBOUNCE_MS = 200
+
+export const EXPORT_FORMATS: ExportFormatDefinition[] = [
+  {
+    id: "json",
+    label: "JSON",
+    description: "Raw query results with full metadata",
+    extension: "json",
+    mimeType: "application/json",
+  },
+  {
+    id: "csv",
+    label: "CSV",
+    description: "Spreadsheet format (attributes only)",
+    extension: "csv",
+    mimeType: "text/csv",
+  },
+  {
+    id: "geojson",
+    label: "GeoJSON",
+    description: "Geographic data format",
+    extension: "geojson",
+    mimeType: "application/geo+json",
+  },
+]
