@@ -66,6 +66,7 @@ const isValidHttpsUrl = (parsed: URL): boolean => {
 }
 
 const isValidArcGISPath = (pathname: string): boolean => {
+  if (pathname.length > 500) return false
   return /\/(MapServer|FeatureServer)\/\d+(\/query)?$/.test(pathname)
 }
 
@@ -429,21 +430,12 @@ export const queryOwnerByFnr = async (
         attributes: data, // The data IS the attributes
       }
 
-      // Log ALL fields with their actual values to debug
-      const allFields: any = {}
-      Object.keys(data || {}).forEach((key) => {
-        allFields[key] = data[key]
-      })
-
-      console.log("Property Widget: Owner record processed - ALL FIELDS", {
-        fnr,
-        allFieldsWithValues: allFields,
-        hasNAMN: "NAMN" in data,
-        hasBOSTADR: "BOSTADR" in data,
-        hasAGARLISTA: "AGARLISTA" in data,
-        NAMNvalue: data.NAMN,
-        BOSTADRvalue: data.BOSTADR,
-        AGARLISTAvalue: data.AGARLISTA,
+      logger.debug("Owner record processed", {
+        fnrLength: String(fnr).length,
+        hasNameField: typeof data?.NAMN === "string" && data.NAMN.length > 0,
+        hasAddressField:
+          typeof data?.BOSTADR === "string" && data.BOSTADR.length > 0,
+        hasOwnerList: typeof data?.AGARLISTA === "string",
       })
 
       return graphic as __esri.Graphic

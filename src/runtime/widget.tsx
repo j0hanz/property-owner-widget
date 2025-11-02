@@ -271,7 +271,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
     return (
       <div css={styles.emptyState} role="status" aria-live="polite">
-        <SVG css={styles.svgState} src={mapSelect} width={100} height={100} />
+        <SVG
+          css={styles.svgState}
+          src={mapSelect}
+          width={100}
+          height={100}
+          aria-label={translate("clickMapToSelectProperties")}
+        />
         <div css={styles.messageState}>
           {translate("clickMapToSelectProperties")}
         </div>
@@ -605,22 +611,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         logger.debug("Property results received", {
           count: propertyResults.length,
-          firstResult: propertyResults[0],
-          firstResultStructure: propertyResults[0]
-            ? {
-                hasFeatures: !!propertyResults[0].features,
-                featuresLength: propertyResults[0].features?.length,
-                firstFeature: propertyResults[0].features?.[0],
-                firstFeatureAttrs: propertyResults[0].features?.[0]?.attributes,
-                firstFeatureGeometry:
-                  !!propertyResults[0].features?.[0]?.geometry,
-              }
-            : null,
+          firstFeatureCount: propertyResults[0]?.features?.length ?? 0,
+          hasFirstGeometry: !!propertyResults[0]?.features?.[0]?.geometry,
         })
-
-        logger.debug("=== FULL JSON RESPONSE ===")
-        console.log(JSON.stringify(propertyResults, null, 2))
-        logger.debug("=== END JSON RESPONSE ===")
 
         // Step 4: Process results and enrich with owner data
         const { rowsToProcess, graphicsToAdd } =
@@ -661,16 +654,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         logger.debug("Processing complete", {
           rowsToProcessCount: rowsToProcess.length,
           graphicsToAddCount: graphicsToAdd.length,
-          firstRow: rowsToProcess[0],
-          firstGraphic: graphicsToAdd[0],
-          firstGraphicHasGeometry: !!graphicsToAdd[0]?.graphic?.geometry,
+          hasFirstGraphic: !!graphicsToAdd[0]?.graphic,
           firstGraphicGeometryType: graphicsToAdd[0]?.graphic?.geometry?.type,
-        })
-        logger.debug("First row details", {
-          FASTIGHET: rowsToProcess[0]?.FASTIGHET,
-          BOSTADR: rowsToProcess[0]?.BOSTADR,
-          FNR: rowsToProcess[0]?.FNR,
-          hasGraphic: !!rowsToProcess[0]?.graphic,
         })
 
         if (controller.signal.aborted || isStaleRequest()) {
@@ -1038,11 +1023,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
     // Setup new handler if widget is active
     if (canTrackCursor) {
-      // Performance: Throttle pointer-move to 100ms intervals (reduces events from 60fps to 10fps)
       let lastMoveTime = 0
+      const THROTTLE_MS = 100
       pointerMoveHandleRef.current = view.on("pointer-move", (event) => {
         const now = Date.now()
-        if (now - lastMoveTime < 100) return // Skip intermediate events
+        if (now - lastMoveTime < THROTTLE_MS) return // Skip intermediate events
         lastMoveTime = now
 
         const screenPoint = { x: event.x, y: event.y }
@@ -1246,6 +1231,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             type={LoadingType.Donut}
             width={125}
             height={125}
+            aria-label={translate("loadingModules")}
           />
         </div>
       </div>

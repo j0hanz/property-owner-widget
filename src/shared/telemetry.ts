@@ -40,7 +40,9 @@ export const trackEvent = (event: TelemetryEvent): void => {
   if (!isAllowedToTrack()) return
 
   try {
-    console.log("[Property Widget Telemetry]", event)
+    if (isAllowedToTrack()) {
+      console.log("[Property Widget Telemetry]", event)
+    }
   } catch (error) {
     console.log("Telemetry tracking failed", error)
   }
