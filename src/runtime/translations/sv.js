@@ -14,6 +14,9 @@ System.register([], function (e) {
         clickMapToSelectProperties:
           "Börja klicka på kartan för att välja fastigheter",
         cursorTooltip: "Flytta markören och klicka för att välja en fastighet",
+        cursorTooltipLoading: "Hämtar fastighet...",
+        cursorTooltipNoProperty: "Ingen fastighet vid markören",
+        cursorTooltipFormat: "{fastighet}\n{bostadr}",
         multipleOwnersFound: "Flera ägare hittades",
         emptyStatePrompt: "Klicka på fastighet",
         widgetNotConfigured: "Konfigurera widgeten för att börja använda den",

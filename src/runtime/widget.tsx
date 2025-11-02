@@ -37,6 +37,7 @@ import type {
   GridRowData,
   SelectionGraphicsParams,
   ExportFormat,
+  OwnerAttributes,
 } from "../config/types"
 import { ErrorType } from "../config/enums"
 import { useWidgetStyles } from "../config/style"
@@ -46,6 +47,7 @@ import {
   usePopupManager,
   useMapViewLifecycle,
   useAbortControllerPool,
+  useDebounce,
 } from "../shared/hooks"
 import {
   queryPropertyByPoint,
@@ -226,6 +228,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     rowSelectionIds: new Set(),
   })
   const isMountedRef = React.useRef(true)
+
+  // Hover tooltip state
+  const [hoverTooltipData, setHoverTooltipData] = React.useState<{
+    fastighet: string
+    bostadr: string
+  } | null>(null)
+  const [isHoverQueryActive, setIsHoverQueryActive] = React.useState(false)
+  const hoverQueryAbortRef = React.useRef<AbortController | null>(null)
 
   const hasSelectedProperties = state.selectedProperties.length > 0
   const hasSelectedRows = state.rowSelectionIds.size > 0
@@ -852,6 +862,107 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const cursorTooltipText = translate("cursorTooltip")
   const tooltipTextRef = hooks.useLatest(cursorTooltipText)
 
+  // Hover query function - queries property at cursor position
+  const queryPropertyAtPoint = hooks.useEventCallback(
+    async (mapPoint: __esri.Point) => {
+      // Cancel any existing hover query
+      if (hoverQueryAbortRef.current) {
+        hoverQueryAbortRef.current.abort()
+        hoverQueryAbortRef.current = null
+      }
+
+      // Create new abort controller for this hover query
+      const controller = new AbortController()
+      hoverQueryAbortRef.current = controller
+
+      setIsHoverQueryActive(true)
+      setHoverTooltipData(null)
+
+      try {
+        // Validate data sources
+        const dsValidation = validateDataSources({
+          propertyDsId: config.propertyDataSourceId,
+          ownerDsId: config.ownerDataSourceId,
+          dsManager: dsManagerRef.current,
+          allowedHosts: config.allowedHosts,
+          translate,
+        })
+
+        if (isValidationFailure(dsValidation)) {
+          setIsHoverQueryActive(false)
+          return
+        }
+        const { manager } = dsValidation.data
+
+        // Query property at point
+        const propertyResults = await queryPropertyByPoint(
+          mapPoint,
+          config.propertyDataSourceId,
+          manager,
+          { signal: controller.signal }
+        )
+
+        if (controller.signal.aborted || !isMountedRef.current) {
+          return
+        }
+
+        // No property found at cursor
+        if (!propertyResults.length || !propertyResults[0]?.features?.length) {
+          setHoverTooltipData(null)
+          setIsHoverQueryActive(false)
+          return
+        }
+
+        const feature = propertyResults[0].features[0]
+        const fnr = extractFnr(feature.attributes)
+        const fastighet = feature.attributes?.FASTIGHET || ""
+
+        if (!fnr || !fastighet) {
+          setHoverTooltipData(null)
+          setIsHoverQueryActive(false)
+          return
+        }
+
+        // Query owner data for this property
+        const ownerFeatures = await queryOwnerByFnr(
+          fnr,
+          config.ownerDataSourceId,
+          manager,
+          { signal: controller.signal }
+        )
+
+        if (controller.signal.aborted || !isMountedRef.current) {
+          return
+        }
+
+        // Format owner info
+        let bostadr = translate("unknownOwner")
+        if (ownerFeatures.length > 0) {
+          const ownerAttrs = ownerFeatures[0].attributes as OwnerAttributes
+          bostadr = formatOwnerInfo(
+            ownerAttrs,
+            piiMaskingEnabled,
+            translate("unknownOwner")
+          )
+        }
+
+        // Update hover tooltip data
+        setHoverTooltipData({ fastighet, bostadr })
+        setIsHoverQueryActive(false)
+      } catch (error) {
+        if (isAbortError(error)) {
+          return
+        }
+        console.log("Hover query failed:", error)
+        setHoverTooltipData(null)
+        setIsHoverQueryActive(false)
+      }
+    }
+  )
+
+  // Debounced hover query (250ms delay to avoid excessive queries)
+  const debouncedHoverQuery = useDebounce(queryPropertyAtPoint, 250)
+
   const updateCursorPoint = hooks.useEventCallback(
     (mapPoint: __esri.Point | null) => {
       const view = getCurrentView()
@@ -919,9 +1030,21 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         layer.add(graphic)
         cursorPointGraphicRef.current = graphic
 
+        // Determine tooltip text based on hover query state
+        let tooltipText = tooltipTextRef.current
+        if (isHoverQueryActive) {
+          tooltipText = translate("cursorTooltipLoading")
+        } else if (hoverTooltipData) {
+          const { fastighet, bostadr } = hoverTooltipData
+          tooltipText = `${fastighet}\n${bostadr}`
+        } else if (hoverTooltipData === null && !isHoverQueryActive) {
+          // Query completed but no property found
+          tooltipText = tooltipTextRef.current
+        }
+
         const tooltipOffset = HIGHLIGHT_MARKER_SIZE + 4
         const tooltipSymbol = new modules.TextSymbol({
-          text: tooltipTextRef.current,
+          text: tooltipText,
           color: [255, 255, 255, 1],
           haloColor: [
             currentHighlightColor[0],
@@ -984,19 +1107,29 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
               : mapPoint
           lastCursorPointRef.current = nextPoint
           updateCursorPoint(nextPoint)
+
+          // Trigger debounced hover query
+          debouncedHoverQuery(nextPoint)
         } else {
           lastCursorPointRef.current = null
           updateCursorPoint(null)
+          setHoverTooltipData(null)
+          setIsHoverQueryActive(false)
         }
       })
 
       pointerLeaveHandleRef.current = view.on("pointer-leave", () => {
         lastCursorPointRef.current = null
         updateCursorPoint(null)
+        setHoverTooltipData(null)
+        setIsHoverQueryActive(false)
+        debouncedHoverQuery.cancel()
       })
     } else {
       lastCursorPointRef.current = null
       updateCursorPoint(null)
+      setHoverTooltipData(null)
+      setIsHoverQueryActive(false)
     }
 
     return () => {
@@ -1008,6 +1141,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         pointerLeaveHandleRef.current.remove()
         pointerLeaveHandleRef.current = null
       }
+      if (hoverQueryAbortRef.current) {
+        hoverQueryAbortRef.current.abort()
+        hoverQueryAbortRef.current = null
+      }
+      debouncedHoverQuery.cancel()
+      setHoverTooltipData(null)
+      setIsHoverQueryActive(false)
       if (!canTrackCursor) {
         lastCursorPointRef.current = null
       }
@@ -1032,6 +1172,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       pointerLeaveHandleRef.current.remove()
       pointerLeaveHandleRef.current = null
     }
+    if (hoverQueryAbortRef.current) {
+      hoverQueryAbortRef.current.abort()
+      hoverQueryAbortRef.current = null
+    }
+    debouncedHoverQuery.cancel()
     lastCursorPointRef.current = null
     updateCursorPoint(null)
   })
@@ -1044,6 +1189,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     highlightColorConfig,
     highlightOpacityConfig,
     outlineWidthConfig,
+    hoverTooltipData,
+    isHoverQueryActive,
   ])
 
   hooks.useUpdateEffect(() => {

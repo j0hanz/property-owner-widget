@@ -10,6 +10,9 @@ export default {
   propertySelected: "Properties selected:",
   clickMapToSelectProperties: "Click on the map to select properties",
   cursorTooltip: "Move the cursor and click to select a property",
+  cursorTooltipLoading: "Querying property...",
+  cursorTooltipNoProperty: "No property at cursor",
+  cursorTooltipFormat: "{fastighet}\n{bostadr}",
   multipleOwnersFound: "Multiple owners found",
   emptyStatePrompt: "Click on property",
   widgetNotConfigured:

@@ -218,7 +218,7 @@ describe("Property Widget - Highlight Styling", () => {
 
   it("should clamp opacity and fall back to default color when invalid inputs provided", () => {
     const rgba = buildHighlightColor("not-a-color", 5)
-    expect(rgba).toEqual([0, 180, 216, 1])
+    expect(rgba).toEqual([181, 73, 0, 1]) // #b54900
   })
 
   it("should build highlight symbol definition with solid fill and outline", () => {

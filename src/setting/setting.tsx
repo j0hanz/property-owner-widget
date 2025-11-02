@@ -38,10 +38,11 @@ import {
   useDebounce,
 } from "../shared/hooks"
 import {
-  stripHtml,
   validateNumericRange,
   opacityHelpers,
   outlineWidthHelpers,
+  normalizeHostValue,
+  normalizeHostList,
 } from "../shared/utils"
 import {
   DEFAULT_HIGHLIGHT_COLOR,
@@ -55,9 +56,6 @@ import infoIcon from "../assets/info.svg"
 interface FieldErrors {
   [key: string]: string | undefined
 }
-
-const sanitizeHostValue = (value: string): string =>
-  stripHtml(value || "").trim()
 
 const Setting = (
   props: AllWidgetSettingProps<IMConfig>
@@ -144,13 +142,7 @@ const Setting = (
   )
   const [localAllowedHostInput, setLocalAllowedHostInput] = React.useState("")
   const [localAllowedHostsList, setLocalAllowedHostsList] = React.useState(() =>
-    Array.from(
-      new Set(
-        (config.allowedHosts || [])
-          .map((host) => sanitizeHostValue(host))
-          .filter(Boolean)
-      )
-    )
+    normalizeHostList(config.allowedHosts)
   )
   const [localHighlightColor, setLocalHighlightColor] = React.useState(
     config.highlightColor || DEFAULT_HIGHLIGHT_COLOR
@@ -276,7 +268,7 @@ const Setting = (
   )
 
   const handleAddAllowedHost = hooks.useEventCallback(() => {
-    const sanitized = sanitizeHostValue(localAllowedHostInput)
+    const sanitized = normalizeHostValue(localAllowedHostInput)
     if (!sanitized) {
       setLocalAllowedHostInput("")
       return
@@ -291,10 +283,8 @@ const Setting = (
   })
 
   const handleRemoveAllowedHost = hooks.useEventCallback((host: string) => {
-    const sanitized = sanitizeHostValue(host)
-    const nextHosts = localAllowedHostsList.filter(
-      (value) => value !== sanitized
-    )
+    const sanitized = normalizeHostValue(host)
+    const nextHosts = localAllowedHostsList.filter((h) => h !== sanitized)
     if (nextHosts.length === localAllowedHostsList.length) {
       return
     }
@@ -465,10 +455,7 @@ const Setting = (
   }, [config.relationshipId])
 
   hooks.useUpdateEffect(() => {
-    const normalizedHosts = (config.allowedHosts || [])
-      .map((host) => sanitizeHostValue(host))
-      .filter(Boolean)
-    const uniqueHosts = Array.from(new Set(normalizedHosts))
+    const uniqueHosts = normalizeHostList(config.allowedHosts)
     setLocalAllowedHostsList(uniqueHosts)
   }, [config.allowedHosts])
 
@@ -548,7 +535,7 @@ const Setting = (
   )
   const outlineWidthValue = outlineWidthHelpers.normalize(localOutlineWidth)
   const outlineWidthLabel = outlineWidthHelpers.formatDisplay(localOutlineWidth)
-  const sanitizedAllowedHostInput = sanitizeHostValue(localAllowedHostInput)
+  const sanitizedAllowedHostInput = normalizeHostValue(localAllowedHostInput)
   const canAddAllowedHost =
     sanitizedAllowedHostInput.length > 0 &&
     !localAllowedHostsList.includes(sanitizedAllowedHostInput)

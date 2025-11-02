@@ -22,6 +22,7 @@ import {
   isAbortError,
   ownerIdentity,
   normalizeFnrKey,
+  normalizeHostList,
   abortHelpers,
 } from "./utils"
 import { OWNER_QUERY_CONCURRENCY } from "../config/constants"
@@ -123,9 +124,7 @@ const validateDataSourceUrl = (
   allowedHosts: readonly string[] | undefined,
   translate: (key: string) => string
 ): ValidationResult<null> => {
-  const normalizedHosts = allowedHosts
-    ?.map((host) => host.trim())
-    .filter((host) => host.length > 0)
+  const normalizedHosts = normalizeHostList(allowedHosts)
 
   const url = getDataSourceUrl(ds)
   if (!url || !isValidArcGISUrl(url, normalizedHosts)) {

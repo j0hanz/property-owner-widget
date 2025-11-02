@@ -652,6 +652,17 @@ export const outlineWidthHelpers = {
   },
 }
 
+export const normalizeHostValue = (value: string): string =>
+  stripHtml(value || "").trim()
+
+export const normalizeHostList = (
+  hosts: readonly string[] | undefined
+): string[] => {
+  if (!hosts || hosts.length === 0) return []
+  const normalized = hosts.map(normalizeHostValue).filter((h) => h.length > 0)
+  return Array.from(new Set(normalized))
+}
+
 export const dataSourceHelpers = {
   extractId: (useDataSource: unknown): string | null => {
     if (!useDataSource) {
