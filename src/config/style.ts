@@ -76,11 +76,10 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     thead: css({
       position: "sticky",
       top: 0,
-      backgroundColor: color?.surface?.paper,
       zIndex: 1,
     }),
     th: css({
-      padding: spacing?.(1),
+      padding: spacing?.(0.5),
       textAlign: "left",
       borderBlockEnd: border,
       borderInlineEnd: border,
@@ -90,9 +89,6 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       fontWeight: 500,
       cursor: "pointer",
       userSelect: "none",
-      "&:hover": {
-        backgroundColor: color?.surface?.background,
-      },
     }),
     tbody: css({}),
     tr: css({
@@ -101,8 +97,11 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       },
     }),
     td: css({
-      padding: spacing?.(1),
-      borderBlockEnd: border,
+      padding: spacing?.(0.5),
+      borderInlineEnd: border,
+      "&:last-child": {
+        borderInlineEnd: "none",
+      },
       overflow: "hidden",
       fontFamily: typography?.label2?.fontFamily,
       fontSize: typography?.label2?.fontSize,
