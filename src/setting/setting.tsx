@@ -37,7 +37,12 @@ import {
   useUpdateConfig,
   useDebounce,
 } from "../shared/hooks"
-import { stripHtml } from "../shared/utils"
+import {
+  stripHtml,
+  validateNumericRange,
+  opacityHelpers,
+  outlineWidthHelpers,
+} from "../shared/utils"
 import {
   DEFAULT_HIGHLIGHT_COLOR,
   HIGHLIGHT_SYMBOL_ALPHA,
@@ -49,44 +54,6 @@ import infoIcon from "../assets/info.svg"
 
 interface FieldErrors {
   [key: string]: string | undefined
-}
-
-const clampNumber = (value: number, min: number, max: number): number => {
-  if (!Number.isFinite(value)) {
-    return min
-  }
-  if (value < min) {
-    return min
-  }
-  if (value > max) {
-    return max
-  }
-  return value
-}
-
-const toOpacityPercent = (value: number): number =>
-  Math.round(clampNumber(value, 0, 1) * 100)
-
-const fromOpacityPercent = (percent: number): number =>
-  clampNumber(percent, 0, 100) / 100
-
-const formatOpacityPercent = (percent: number): string => {
-  const normalized = clampNumber(Math.round(percent), 0, 100)
-  return `${normalized}%`
-}
-
-const normalizeOutlineWidth = (value: number): number => {
-  const clamped = clampNumber(value, 0.5, 10)
-  return Math.round(clamped * 2) / 2
-}
-
-const formatOutlineWidthDisplay = (value: number): string => {
-  const normalized = normalizeOutlineWidth(value)
-  const rounded = Math.round(normalized)
-  if (Math.abs(normalized - rounded) < 0.0001) {
-    return String(rounded)
-  }
-  return normalized.toFixed(1)
 }
 
 const sanitizeHostValue = (value: string): string =>
@@ -194,7 +161,7 @@ const Setting = (
         typeof config.highlightOpacity === "number"
           ? config.highlightOpacity
           : HIGHLIGHT_SYMBOL_ALPHA
-      return clampNumber(baseValue, 0, 1)
+      return opacityHelpers.fromPercent(opacityHelpers.toPercent(baseValue))
     }
   )
   const [localOutlineWidth, setLocalOutlineWidth] = React.useState(() => {
@@ -202,18 +169,24 @@ const Setting = (
       typeof config.outlineWidth === "number"
         ? config.outlineWidth
         : OUTLINE_WIDTH
-    return normalizeOutlineWidth(baseValue)
+    return outlineWidthHelpers.normalize(baseValue)
   })
 
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
 
   const validateMaxResults = hooks.useEventCallback(
     (value: string): boolean => {
-      const num = parseInt(value, 10)
-      if (isNaN(num) || num < 1 || num > 1000) {
+      const result = validateNumericRange({
+        value,
+        min: 1,
+        max: 1000,
+        errorMessage: translate("errorMaxResultsInvalid"),
+      })
+
+      if (!result.valid) {
         setFieldErrors((prev) => ({
           ...prev,
-          maxResults: translate("errorMaxResultsInvalid"),
+          maxResults: result.error,
         }))
         return false
       }
@@ -224,11 +197,17 @@ const Setting = (
 
   const validateRelationshipId = hooks.useEventCallback(
     (value: string): boolean => {
-      const num = parseInt(value, 10)
-      if (isNaN(num) || num < 0 || num > 99) {
+      const result = validateNumericRange({
+        value,
+        min: 0,
+        max: 99,
+        errorMessage: translate("errorRelationshipIdInvalid"),
+      })
+
+      if (!result.valid) {
         setFieldErrors((prev) => ({
           ...prev,
-          relationshipId: translate("errorRelationshipIdInvalid"),
+          relationshipId: result.error,
         }))
         return false
       }
@@ -348,8 +327,7 @@ const Setting = (
       if (!Number.isFinite(rawValue)) {
         return
       }
-      const normalizedPercent = clampNumber(Math.round(rawValue), 0, 100)
-      const nextOpacity = fromOpacityPercent(normalizedPercent)
+      const nextOpacity = opacityHelpers.fromPercent(rawValue)
       if (Math.abs(localHighlightOpacity - nextOpacity) < 0.0001) {
         return
       }
@@ -364,7 +342,7 @@ const Setting = (
       if (!Number.isFinite(rawValue)) {
         return
       }
-      const nextWidth = normalizeOutlineWidth(rawValue)
+      const nextWidth = outlineWidthHelpers.normalize(rawValue)
       if (Math.abs(localOutlineWidth - nextWidth) < 0.0001) {
         return
       }
@@ -503,7 +481,9 @@ const Setting = (
       typeof config.highlightOpacity === "number"
         ? config.highlightOpacity
         : HIGHLIGHT_SYMBOL_ALPHA
-    setLocalHighlightOpacity(clampNumber(baseValue, 0, 1))
+    setLocalHighlightOpacity(
+      opacityHelpers.fromPercent(opacityHelpers.toPercent(baseValue))
+    )
   }, [config.highlightOpacity])
 
   hooks.useUpdateEffect(() => {
@@ -511,7 +491,7 @@ const Setting = (
       typeof config.outlineWidth === "number"
         ? config.outlineWidth
         : OUTLINE_WIDTH
-    setLocalOutlineWidth(normalizeOutlineWidth(baseValue))
+    setLocalOutlineWidth(outlineWidthHelpers.normalize(baseValue))
   }, [config.outlineWidth])
 
   hooks.useEffectOnce(() => {
@@ -560,10 +540,14 @@ const Setting = (
     updateConfig,
   ])
 
-  const highlightOpacityPercent = toOpacityPercent(localHighlightOpacity)
-  const highlightOpacityLabel = formatOpacityPercent(highlightOpacityPercent)
-  const outlineWidthValue = normalizeOutlineWidth(localOutlineWidth)
-  const outlineWidthLabel = formatOutlineWidthDisplay(localOutlineWidth)
+  const highlightOpacityPercent = opacityHelpers.toPercent(
+    localHighlightOpacity
+  )
+  const highlightOpacityLabel = opacityHelpers.formatPercent(
+    highlightOpacityPercent
+  )
+  const outlineWidthValue = outlineWidthHelpers.normalize(localOutlineWidth)
+  const outlineWidthLabel = outlineWidthHelpers.formatDisplay(localOutlineWidth)
   const sanitizedAllowedHostInput = sanitizeHostValue(localAllowedHostInput)
   const canAddAllowedHost =
     sanitizedAllowedHostInput.length > 0 &&
@@ -831,7 +815,7 @@ const Setting = (
                       max={100}
                       step={5}
                       tooltip
-                      formatter={formatOpacityPercent}
+                      formatter={opacityHelpers.formatPercent}
                       aria-label={translate("highlightOpacityLabel")}
                       onChange={handleHighlightOpacityChange}
                       css={styles.sliderControl}
@@ -864,7 +848,7 @@ const Setting = (
                       max={10}
                       step={0.5}
                       tooltip
-                      formatter={formatOutlineWidthDisplay}
+                      formatter={outlineWidthHelpers.formatDisplay}
                       aria-label={translate("highlightOutlineWidthLabel")}
                       onChange={handleOutlineWidthChange}
                       css={styles.sliderControl}

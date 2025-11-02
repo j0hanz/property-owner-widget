@@ -12,8 +12,6 @@ import {
   WidgetState,
   appActions,
   getAppStore,
-  type UseDataSource,
-  type ImmutableObject,
 } from "jimu-core"
 import { JimuMapViewComponent } from "jimu-arcgis"
 import {
@@ -71,6 +69,7 @@ import {
   isValidationFailure,
   buildHighlightColor,
   computeWidgetsToClose,
+  dataSourceHelpers,
 } from "../shared/utils"
 import { OUTLINE_WIDTH, EXPORT_FORMATS } from "../config/constants"
 import {
@@ -115,49 +114,6 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   if (!success) {
     console.log("syncSelectionGraphics: failed to sync graphics with state")
   }
-}
-
-const extractUseDataSourceId = (
-  useDataSource: ImmutableObject<UseDataSource> | null | undefined
-): string | null => {
-  if (!useDataSource) {
-    return null
-  }
-
-  const getId = (useDataSource as any)?.get
-  if (typeof getId === "function") {
-    return getId.call(useDataSource, "dataSourceId") ?? null
-  }
-
-  return (useDataSource as any)?.dataSourceId ?? null
-}
-
-const findUseDataSourceById = (
-  useDataSources: AllWidgetProps<IMConfig>["useDataSources"],
-  dataSourceId?: string
-): ImmutableObject<UseDataSource> | null => {
-  if (!dataSourceId || !useDataSources) {
-    return null
-  }
-
-  const collection = useDataSources as unknown as {
-    find: (
-      predicate: (candidate: ImmutableObject<UseDataSource>) => boolean
-    ) => ImmutableObject<UseDataSource> | undefined
-  }
-
-  if (typeof collection.find !== "function") {
-    return null
-  }
-
-  const match = collection.find((candidate) => {
-    if (!candidate) {
-      return false
-    }
-    return extractUseDataSourceId(candidate) === dataSourceId
-  })
-
-  return match ?? null
 }
 
 // Error boundaries require class components in React (no functional equivalent)
@@ -226,16 +182,18 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     })
   })
 
-  const propertyUseDataSource = findUseDataSourceById(
+  const propertyUseDataSource = dataSourceHelpers.findById(
     props.useDataSources,
     config.propertyDataSourceId
-  )
-  const ownerUseDataSource = findUseDataSourceById(
+  ) as any
+  const ownerUseDataSource = dataSourceHelpers.findById(
     props.useDataSources,
     config.ownerDataSourceId
+  ) as any
+  const propertyUseDataSourceId = dataSourceHelpers.extractId(
+    propertyUseDataSource
   )
-  const propertyUseDataSourceId = extractUseDataSourceId(propertyUseDataSource)
-  const ownerUseDataSourceId = extractUseDataSourceId(ownerUseDataSource)
+  const ownerUseDataSourceId = dataSourceHelpers.extractId(ownerUseDataSource)
 
   const {
     modules,

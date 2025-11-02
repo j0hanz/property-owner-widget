@@ -220,51 +220,45 @@ export const buildHighlightColor = (
 
 export const buildHighlightSymbolJSON = (
   highlightColor: [number, number, number, number],
-  outlineWidth: number
-): __esri.SimpleFillSymbolProperties => {
-  const [r, g, b, a] = highlightColor
-
-  return {
-    style: "solid",
-    color: [r, g, b, a],
-    outline: {
-      style: "solid",
-      color: [r, g, b, 1],
-      width: outlineWidth,
-    },
-  }
-}
-
-export const buildHighlightLineSymbolJSON = (
-  highlightColor: [number, number, number, number],
-  outlineWidth: number
-): __esri.SimpleLineSymbolProperties => {
-  const [r, g, b, a] = highlightColor
-
-  return {
-    style: "solid",
-    color: [r, g, b, a],
-    width: outlineWidth,
-  }
-}
-
-export const buildHighlightMarkerSymbolJSON = (
-  highlightColor: [number, number, number, number],
   outlineWidth: number,
-  size: number = HIGHLIGHT_MARKER_SIZE
-): __esri.SimpleMarkerSymbolProperties => {
+  geometryType?: "polygon" | "polyline" | "point"
+):
+  | __esri.SimpleFillSymbolProperties
+  | __esri.SimpleLineSymbolProperties
+  | __esri.SimpleMarkerSymbolProperties => {
   const [r, g, b, a] = highlightColor
 
+  if (geometryType === "polyline") {
+    return {
+      style: "solid",
+      color: [r, g, b, a],
+      width: outlineWidth,
+    } as __esri.SimpleLineSymbolProperties
+  }
+
+  if (geometryType === "point") {
+    return {
+      style: "circle",
+      color: [r, g, b, a],
+      size: HIGHLIGHT_MARKER_SIZE,
+      outline: {
+        style: "solid",
+        color: [r, g, b, 1],
+        width: outlineWidth,
+      },
+    } as __esri.SimpleMarkerSymbolProperties
+  }
+
+  // Default to polygon
   return {
-    style: "circle",
+    style: "solid",
     color: [r, g, b, a],
-    size,
     outline: {
       style: "solid",
       color: [r, g, b, 1],
       width: outlineWidth,
     },
-  }
+  } as __esri.SimpleFillSymbolProperties
 }
 
 export const createRowId = (fnr: string | number, objectId: number): string =>
@@ -533,6 +527,98 @@ export const computeWidgetsToClose = (
   }
 
   return ids
+}
+
+export const validateNumericRange = (params: {
+  value: string | number
+  min: number
+  max: number
+  errorMessage: string
+}): { valid: boolean; normalized?: number; error?: string } => {
+  const { value, min, max, errorMessage } = params
+  const num = typeof value === "string" ? parseInt(value, 10) : value
+
+  if (isNaN(num) || num < min || num > max) {
+    return { valid: false, error: errorMessage }
+  }
+
+  return { valid: true, normalized: num }
+}
+
+const clampNumber = (value: number, min: number, max: number): number => {
+  if (!Number.isFinite(value)) return min
+  if (value < min) return min
+  if (value > max) return max
+  return value
+}
+
+export const opacityHelpers = {
+  toPercent: (value: number): number => {
+    const clamped = clampNumber(value, 0, 1)
+    return Math.round(clamped * 100)
+  },
+  fromPercent: (percent: number): number => {
+    const clamped = clampNumber(percent, 0, 100)
+    return clamped / 100
+  },
+  formatPercent: (percent: number): string => {
+    const normalized = clampNumber(Math.round(percent), 0, 100)
+    return `${normalized}%`
+  },
+}
+
+export const outlineWidthHelpers = {
+  normalize: (value: number): number => {
+    const clamped = clampNumber(value, 0.5, 10)
+    return Math.round(clamped * 2) / 2
+  },
+  formatDisplay: (value: number): string => {
+    const normalized = clampNumber(value, 0.5, 10)
+    const halfStep = Math.round(normalized * 2) / 2
+    const rounded = Math.round(halfStep)
+    if (Math.abs(halfStep - rounded) < 0.0001) {
+      return String(rounded)
+    }
+    return halfStep.toFixed(1)
+  },
+}
+
+export const dataSourceHelpers = {
+  extractId: (useDataSource: unknown): string | null => {
+    if (!useDataSource) {
+      return null
+    }
+
+    const getId = (useDataSource as any)?.get
+    if (typeof getId === "function") {
+      return getId.call(useDataSource, "dataSourceId") ?? null
+    }
+
+    return (useDataSource as any)?.dataSourceId ?? null
+  },
+
+  findById: (useDataSources: unknown, dataSourceId?: string): unknown => {
+    if (!dataSourceId || !useDataSources) {
+      return null
+    }
+
+    const collection = useDataSources as {
+      find?: (predicate: (candidate: unknown) => boolean) => unknown
+    }
+
+    if (typeof collection.find !== "function") {
+      return null
+    }
+
+    const match = collection.find((candidate: unknown) => {
+      if (!candidate) {
+        return false
+      }
+      return dataSourceHelpers.extractId(candidate) === dataSourceId
+    })
+
+    return match ?? null
+  },
 }
 
 class PopupSuppressionManager {

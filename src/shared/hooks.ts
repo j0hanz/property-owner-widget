@@ -5,12 +5,7 @@ import {
   ESRI_MODULES_TO_LOAD,
   ABORT_CONTROLLER_POOL_SIZE,
 } from "../config/constants"
-import {
-  popupSuppressionManager,
-  buildHighlightSymbolJSON,
-  buildHighlightLineSymbolJSON,
-  buildHighlightMarkerSymbolJSON,
-} from "./utils"
+import { popupSuppressionManager, buildHighlightSymbolJSON } from "./utils"
 
 export const useEsriModules = () => {
   const [modules, setModules] = React.useState<EsriModules | null>(null)
@@ -194,45 +189,69 @@ export const useGraphicsLayer = (
     const geometryType = geometry.type
 
     if (geometryType === "polygon" || geometryType === "extent") {
-      const polygonJSON = buildHighlightSymbolJSON(highlightColor, outlineWidth)
-      return new currentModules.SimpleFillSymbol(polygonJSON)
+      const symbolJSON = buildHighlightSymbolJSON(
+        highlightColor,
+        outlineWidth,
+        "polygon"
+      )
+      return new currentModules.SimpleFillSymbol(
+        symbolJSON as __esri.SimpleFillSymbolProperties
+      )
     }
 
     if (geometryType === "polyline") {
-      const lineJSON = buildHighlightLineSymbolJSON(
+      const symbolJSON = buildHighlightSymbolJSON(
         highlightColor,
-        outlineWidth
+        outlineWidth,
+        "polyline"
       )
-      return new currentModules.SimpleLineSymbol(lineJSON)
+      return new currentModules.SimpleLineSymbol(
+        symbolJSON as __esri.SimpleLineSymbolProperties
+      )
     }
 
     if (geometryType === "point" || geometryType === "multipoint") {
-      const markerJSON = buildHighlightMarkerSymbolJSON(
+      const symbolJSON = buildHighlightSymbolJSON(
         highlightColor,
-        outlineWidth
+        outlineWidth,
+        "point"
       )
-      return new currentModules.SimpleMarkerSymbol(markerJSON)
+      return new currentModules.SimpleMarkerSymbol(
+        symbolJSON as __esri.SimpleMarkerSymbolProperties
+      )
     }
 
     if ((geometry as any)?.rings) {
-      const polygonJSON = buildHighlightSymbolJSON(highlightColor, outlineWidth)
-      return new currentModules.SimpleFillSymbol(polygonJSON)
+      const symbolJSON = buildHighlightSymbolJSON(
+        highlightColor,
+        outlineWidth,
+        "polygon"
+      )
+      return new currentModules.SimpleFillSymbol(
+        symbolJSON as __esri.SimpleFillSymbolProperties
+      )
     }
 
     if ((geometry as any)?.paths) {
-      const lineJSON = buildHighlightLineSymbolJSON(
+      const symbolJSON = buildHighlightSymbolJSON(
         highlightColor,
-        outlineWidth
+        outlineWidth,
+        "polyline"
       )
-      return new currentModules.SimpleLineSymbol(lineJSON)
+      return new currentModules.SimpleLineSymbol(
+        symbolJSON as __esri.SimpleLineSymbolProperties
+      )
     }
 
     if ((geometry as any)?.points) {
-      const markerJSON = buildHighlightMarkerSymbolJSON(
+      const symbolJSON = buildHighlightSymbolJSON(
         highlightColor,
-        outlineWidth
+        outlineWidth,
+        "point"
       )
-      return new currentModules.SimpleMarkerSymbol(markerJSON)
+      return new currentModules.SimpleMarkerSymbol(
+        symbolJSON as __esri.SimpleMarkerSymbolProperties
+      )
     }
 
     return null
