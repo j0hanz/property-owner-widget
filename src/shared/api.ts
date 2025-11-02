@@ -40,10 +40,11 @@ let cachedQueryCtor:
   | null = null
 const featureLayerCache = new Map<string, __esri.FeatureLayer>()
 
-// =============================================================================
-// URL AND DATASOURCE VALIDATION HELPERS
-// =============================================================================
+// Cache constructors for relationship queries
+let cachedQueryTaskCtor: (new (props: any) => any) | null = null
+let cachedRelationshipQueryCtor: (new (props?: any) => any) | null = null
 
+// Check if hostname is private/local
 const isPrivateHost = (hostname: string): boolean => {
   const lower = hostname.toLowerCase()
   return (
@@ -499,14 +500,25 @@ export const queryOwnersByRelationship = async (
       throw new Error("Property layer URL not available")
     }
 
-    const modules = await loadArcGISJSAPIModules([
-      "esri/tasks/QueryTask",
-      "esri/rest/support/RelationshipQuery",
-    ])
-    const [QueryTask, RelationshipQuery] = modules
+    // Load relationship query modules if not cached
+    if (!cachedQueryTaskCtor || !cachedRelationshipQueryCtor) {
+      const modules = await loadArcGISJSAPIModules([
+        "esri/tasks/QueryTask",
+        "esri/rest/support/RelationshipQuery",
+      ])
+      const [QueryTask, RelationshipQuery] = modules
+      cachedQueryTaskCtor = QueryTask
+      cachedRelationshipQueryCtor = RelationshipQuery
+    }
 
-    const queryTask = new QueryTask({ url: layerUrl })
-    const relationshipQuery = new RelationshipQuery()
+    const QueryTaskCtor = cachedQueryTaskCtor
+    const RelationshipQueryCtor = cachedRelationshipQueryCtor
+    if (!QueryTaskCtor || !RelationshipQueryCtor) {
+      throw new Error("Relationship query modules failed to load")
+    }
+
+    const queryTask = new QueryTaskCtor({ url: layerUrl })
+    const relationshipQuery = new RelationshipQueryCtor()
 
     const objectIds: number[] = []
     const fnrToObjectIdMap = new Map<number, string>()
@@ -574,10 +586,7 @@ export const queryOwnersByRelationship = async (
   }
 }
 
-// =============================================================================
-// PROPERTY OWNER PROCESSING SERVICE
-// =============================================================================
-
+// Deduplicate owner entries based on identity keys
 const deduplicateOwnerEntries = (
   entries: Array<
     __esri.Graphic | OwnerAttributes | { attributes?: OwnerAttributes }

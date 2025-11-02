@@ -4,7 +4,11 @@ import type {
   SelectionGraphicsHelpers,
   EsriModules,
   CursorTooltipStyle,
+  IMConfig,
 } from "../config/types"
+import type { DataSourceManager } from "jimu-core"
+import { isValidationFailure as checkValidationFailure } from "../config/types"
+import { validateDataSources as validateDataSourcesCore } from "../shared/api"
 import {
   MIN_MASK_LENGTH,
   MAX_MASK_ASTERISKS,
@@ -257,42 +261,42 @@ export const syncCursorGraphics = ({
   return next
 }
 
-export const formatOwnerInfo = (
+const deduplicateEntries = (entries: string[]): string[] => {
+  const seen = new Set<string>()
+  return entries
+    .map((e) => e.trim())
+    .filter((entry) => {
+      if (!entry || seen.has(entry)) return false
+      seen.add(entry)
+      return true
+    })
+}
+
+const maskOwnerListEntry = (entry: string): string => {
+  const match = entry.match(/^(.+?)\s*\(([^)]+)\)\s*$/)
+  if (!match) return ownerPrivacy.maskName(entry)
+
+  const [, name, orgNr] = match
+  return `${ownerPrivacy.maskName(name.trim())} (${orgNr.trim()})`
+}
+
+const formatOwnerList = (agarLista: string, maskPII: boolean): string => {
+  const sanitized = sanitizeText(String(agarLista))
+  const uniqueEntries = deduplicateEntries(sanitized.split(";"))
+
+  if (!maskPII) return uniqueEntries.join("; ")
+
+  return uniqueEntries
+    .map((entry) => maskOwnerListEntry(entry))
+    .filter(Boolean)
+    .join("; ")
+}
+
+const formatIndividualOwner = (
   owner: OwnerAttributes,
   maskPII: boolean,
   unknownOwnerText: string
 ): string => {
-  if (owner.AGARLISTA && typeof owner.AGARLISTA === "string") {
-    const agarLista = sanitizeText(String(owner.AGARLISTA))
-
-    // Split, trim, and deduplicate entries
-    const seen = new Set<string>()
-    const uniqueEntries = agarLista
-      .split(";")
-      .map((entry) => entry.trim())
-      .filter((entry) => {
-        if (!entry) return false
-        if (seen.has(entry)) return false
-        seen.add(entry)
-        return true
-      })
-
-    // If PII masking is disabled, return deduplicated list as-is
-    if (!maskPII) return uniqueEntries.join("; ")
-
-    // Apply PII masking to each unique entry
-    return uniqueEntries
-      .map((trimmed) => {
-        const match = trimmed.match(/^(.+?)\s*\(([^)]+)\)\s*$/)
-        if (!match) return ownerPrivacy.maskName(trimmed)
-        const name = match[1].trim()
-        const orgNr = match[2].trim()
-        return `${ownerPrivacy.maskName(name)} (${orgNr})`
-      })
-      .filter(Boolean)
-      .join("; ")
-  }
-
   const rawName = sanitizeText(owner.NAMN || "") || unknownOwnerText
   const namePart =
     maskPII && rawName !== unknownOwnerText
@@ -315,6 +319,17 @@ export const formatOwnerInfo = (
 
   const result = `${parts.join(", ")}${orgNr ? ` (${orgNr})` : ""}`.trim()
   return result || unknownOwnerText
+}
+
+export const formatOwnerInfo = (
+  owner: OwnerAttributes,
+  maskPII: boolean,
+  unknownOwnerText: string
+): string => {
+  if (owner.AGARLISTA && typeof owner.AGARLISTA === "string") {
+    return formatOwnerList(owner.AGARLISTA, maskPII)
+  }
+  return formatIndividualOwner(owner, maskPII, unknownOwnerText)
 }
 
 export const formatPropertyWithShare = (
@@ -569,11 +584,15 @@ export const calculatePropertyUpdates = <
   toggleEnabled: boolean,
   maxResults: number
 ): { toRemove: Set<string>; toAdd: T[]; updatedRows: T[] } => {
+  // Precompute normalized FNR keys for efficiency
+  const existingFnrKeys = existingProperties.map((r) => normalizeFnrKey(r.FNR))
+  const processFnrKeys = rowsToProcess.map((r) => normalizeFnrKey(r.FNR))
+
   const existingByFnr = new Map<string, T[]>()
   const remainingIds = new Set<string>()
 
-  existingProperties.forEach((row) => {
-    const fnrKey = normalizeFnrKey(row.FNR)
+  existingProperties.forEach((row, idx) => {
+    const fnrKey = existingFnrKeys[idx]
     const existingGroup = existingByFnr.get(fnrKey)
     if (existingGroup) {
       existingGroup.push(row)
@@ -587,8 +606,8 @@ export const calculatePropertyUpdates = <
   const toAdd: T[] = []
   const addedIds = new Set<string>()
 
-  rowsToProcess.forEach((row) => {
-    const fnrKey = normalizeFnrKey(row.FNR)
+  rowsToProcess.forEach((row, idx) => {
+    const fnrKey = processFnrKeys[idx]
     if (toggleEnabled && !toRemove.has(fnrKey)) {
       const existingGroup = existingByFnr.get(fnrKey)
       if (existingGroup && existingGroup.length > 0) {
@@ -707,6 +726,64 @@ export const syncGraphicsWithState = (params: {
 }
 
 export { isValidationSuccess, isValidationFailure } from "../config/types"
+
+export const validateMapClickPipeline = (params: {
+  event: any
+  modules: EsriModules | null
+  config: IMConfig
+  dsManager: DataSourceManager | null
+  translate: (key: string) => string
+}): ValidationResult<{
+  mapPoint: __esri.Point
+  manager: DataSourceManager
+}> => {
+  const { event, modules, config, dsManager, translate } = params
+
+  const mapValidation = validateMapClickInputs(
+    event,
+    modules,
+    config,
+    translate
+  )
+  if (checkValidationFailure(mapValidation)) {
+    return mapValidation as ValidationResult<{
+      mapPoint: __esri.Point
+      manager: DataSourceManager
+    }>
+  }
+
+  const dsValidation = validateDataSourcesCore({
+    propertyDsId: config.propertyDataSourceId,
+    ownerDsId: config.ownerDataSourceId,
+    dsManager,
+    allowedHosts: config.allowedHosts,
+    translate,
+  })
+  if (checkValidationFailure(dsValidation)) {
+    return dsValidation as ValidationResult<{
+      mapPoint: __esri.Point
+      manager: DataSourceManager
+    }>
+  }
+
+  // TypeScript type guard ensures we have .data here
+  const validatedMap = mapValidation as {
+    valid: true
+    data: { mapPoint: __esri.Point }
+  }
+  const validatedDs = dsValidation as {
+    valid: true
+    data: { manager: DataSourceManager }
+  }
+
+  return {
+    valid: true,
+    data: {
+      mapPoint: validatedMap.data.mapPoint,
+      manager: validatedDs.data.manager,
+    },
+  }
+}
 
 interface ProcessPropertyQueryParams {
   propertyResults: any[]

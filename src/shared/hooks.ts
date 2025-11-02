@@ -223,39 +223,11 @@ export const useGraphicsLayer = (
       )
     }
 
-    if ((geometry as any)?.rings) {
-      const symbolJSON = buildHighlightSymbolJSON(
-        highlightColor,
-        outlineWidth,
-        "polygon"
-      )
-      return new currentModules.SimpleFillSymbol(
-        symbolJSON as __esri.SimpleFillSymbolProperties
-      )
-    }
-
-    if ((geometry as any)?.paths) {
-      const symbolJSON = buildHighlightSymbolJSON(
-        highlightColor,
-        outlineWidth,
-        "polyline"
-      )
-      return new currentModules.SimpleLineSymbol(
-        symbolJSON as __esri.SimpleLineSymbolProperties
-      )
-    }
-
-    if ((geometry as any)?.points) {
-      const symbolJSON = buildHighlightSymbolJSON(
-        highlightColor,
-        outlineWidth,
-        "point"
-      )
-      return new currentModules.SimpleMarkerSymbol(
-        symbolJSON as __esri.SimpleMarkerSymbolProperties
-      )
-    }
-
+    // Unsupported geometry type
+    console.warn(
+      "Property Widget: Unexpected geometry type for highlight symbol",
+      geometryType
+    )
     return null
   }
 
@@ -298,12 +270,14 @@ export const useGraphicsLayer = (
       })
       if (!symbol) return
 
-      const highlightGraphic = graphic.clone()
-      highlightGraphic.symbol = symbol
-      highlightGraphic.attributes = {
-        ...(highlightGraphic.attributes || {}),
-        FNR: fnr,
-      }
+      // Create a new graphic with the highlight symbol
+      const highlightGraphic = new currentModules.Graphic({
+        geometry: graphic.geometry,
+        symbol,
+        attributes: graphic.attributes
+          ? { ...graphic.attributes, FNR: fnr }
+          : { FNR: fnr },
+      })
 
       console.log("Property Widget: Adding graphic to layer", {
         layerId: layer.id,
@@ -316,8 +290,13 @@ export const useGraphicsLayer = (
       if (!fnr) return
 
       const fnrKey = normalizeFnrKey(fnr)
-      const existing = graphicsMapRef.current.get(fnrKey) || []
-      graphicsMapRef.current.set(fnrKey, [...existing, highlightGraphic])
+      // Store reference for future removal
+      const existing = graphicsMapRef.current.get(fnrKey)
+      if (existing) {
+        existing.push(highlightGraphic)
+      } else {
+        graphicsMapRef.current.set(fnrKey, [highlightGraphic])
+      }
     }
   )
 

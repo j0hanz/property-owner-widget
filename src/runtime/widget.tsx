@@ -65,7 +65,7 @@ import {
   isAbortError,
   normalizeFnrKey,
   calculatePropertyUpdates,
-  validateMapClickInputs,
+  validateMapClickPipeline,
   syncGraphicsWithState,
   cleanupRemovedGraphics,
   isValidationFailure,
@@ -540,39 +540,23 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       abortAll()
       const tracker = createPerformanceTracker("map_click_query")
 
-      // Step 1: Validate inputs
-      const validation = validateMapClickInputs(
+      // Step 1: Validate inputs and data sources
+      const validation = validateMapClickPipeline({
         event,
         modules,
         config,
-        translate
-      )
-      if (isValidationFailure(validation)) {
-        const { error } = validation
-        setError(error.type, error.message)
-        tracker.failure(error.type)
-        trackError("map_click_validation", error.type, error.message)
-        return
-      }
-      const { mapPoint } = validation.data
-
-      // Step 2: Validate data sources
-      const dsValidation = validateDataSources({
-        propertyDsId: config.propertyDataSourceId,
-        ownerDsId: config.ownerDataSourceId,
         dsManager: dsManagerRef.current,
-        allowedHosts: config.allowedHosts,
         translate,
       })
 
-      if (isValidationFailure(dsValidation)) {
-        const { error, failureReason } = dsValidation
+      if (isValidationFailure(validation)) {
+        const { error, failureReason } = validation
         setError(error.type, error.message)
         tracker.failure(failureReason)
-        trackError("map_click", failureReason)
+        trackError("map_click_validation", failureReason)
         return
       }
-      const { manager } = dsValidation.data
+      const { mapPoint, manager } = validation.data
 
       const requestId = requestIdRef.current + 1
       requestIdRef.current = requestId
@@ -750,7 +734,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           }
         }
 
-        // Update state
+        // Step 6: Update state
         setState((prev) => {
           // Check staleness atomically within setState
           if (isStaleRequest()) {
@@ -823,12 +807,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         tracker.failure("query_error")
         trackError("property_query", error)
       } finally {
-        if (isMountedRef.current && !isStaleRequest()) {
-          setState((prev) => ({
-            ...prev,
-            isQueryInFlight: false,
-          }))
-        }
         releaseController(controller)
       }
     }
@@ -1060,7 +1038,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
     // Setup new handler if widget is active
     if (canTrackCursor) {
+      // Performance: Throttle pointer-move to 100ms intervals (reduces events from 60fps to 10fps)
+      let lastMoveTime = 0
       pointerMoveHandleRef.current = view.on("pointer-move", (event) => {
+        const now = Date.now()
+        if (now - lastMoveTime < 100) return // Skip intermediate events
+        lastMoveTime = now
+
         const screenPoint = { x: event.x, y: event.y }
         const mapPoint = view.toMap(screenPoint)
         if (mapPoint) {
@@ -1139,7 +1123,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     updateCursorPoint(lastCursorPointRef.current)
   }, [hoverTooltipData, isHoverQueryActive])
 
-  hooks.useUpdateEffect(() => {
+  // Sync selection graphics when highlight config changes
+  const debouncedSyncGraphics = useDebounce(() => {
     if (state.selectedProperties.length === 0) {
       return
     }
@@ -1175,6 +1160,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       highlightColor: currentHighlightColor,
       outlineWidth: currentOutlineWidth,
     })
+  }, 100)
+
+  hooks.useUpdateEffect(() => {
+    debouncedSyncGraphics()
   }, [highlightColorConfig, highlightOpacityConfig, outlineWidthConfig])
 
   hooks.useUpdateEffect(() => {
