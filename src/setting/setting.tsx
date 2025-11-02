@@ -38,9 +38,9 @@ import {
   useDebounce,
   useSwitchConfigHandler,
   useSliderConfigHandler,
+  useNumericValidator,
 } from "../shared/hooks"
 import {
-  validateNumericRange,
   opacityHelpers,
   outlineWidthHelpers,
   normalizeHostValue,
@@ -168,46 +168,20 @@ const Setting = (
 
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
 
-  const validateMaxResults = hooks.useEventCallback(
-    (value: string): boolean => {
-      const result = validateNumericRange({
-        value,
-        min: 1,
-        max: 1000,
-        errorMessage: translate("errorMaxResultsInvalid"),
-      })
-
-      if (!result.valid) {
-        setFieldErrors((prev) => ({
-          ...prev,
-          maxResults: result.error,
-        }))
-        return false
-      }
-      setFieldErrors((prev) => ({ ...prev, maxResults: undefined }))
-      return true
-    }
+  const validateMaxResults = useNumericValidator(
+    "maxResults",
+    1,
+    1000,
+    translate("errorMaxResultsInvalid"),
+    setFieldErrors
   )
 
-  const validateRelationshipId = hooks.useEventCallback(
-    (value: string): boolean => {
-      const result = validateNumericRange({
-        value,
-        min: 0,
-        max: 99,
-        errorMessage: translate("errorRelationshipIdInvalid"),
-      })
-
-      if (!result.valid) {
-        setFieldErrors((prev) => ({
-          ...prev,
-          relationshipId: result.error,
-        }))
-        return false
-      }
-      setFieldErrors((prev) => ({ ...prev, relationshipId: undefined }))
-      return true
-    }
+  const validateRelationshipId = useNumericValidator(
+    "relationshipId",
+    0,
+    99,
+    translate("errorRelationshipIdInvalid"),
+    setFieldErrors
   )
 
   const debouncedMaxResultsValidation = useDebounce(validateMaxResults, 500)

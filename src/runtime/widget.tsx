@@ -77,6 +77,7 @@ import {
   updateRawPropertyResults,
   logger,
   syncCursorGraphics,
+  abortHelpers,
 } from "../shared/utils"
 import type { CursorGraphicsState } from "../shared/utils"
 import { EXPORT_FORMATS, CURSOR_TOOLTIP_STYLE } from "../config/constants"
@@ -585,10 +586,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           { signal: controller.signal }
         )
 
-        if (controller.signal.aborted || isStaleRequest()) {
-          if (isStaleRequest()) {
-            return
-          }
+        const abortStatus = abortHelpers.checkAbortedOrStale(
+          controller.signal,
+          isStaleRequest
+        )
+        if (abortStatus === "stale") return
+        if (abortStatus === "aborted") {
           tracker.failure("aborted")
           return
         }
@@ -658,11 +661,15 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           firstGraphicGeometryType: graphicsToAdd[0]?.graphic?.geometry?.type,
         })
 
-        if (controller.signal.aborted || isStaleRequest()) {
-          if (isStaleRequest()) {
-            releaseController(controller)
-            return
-          }
+        const abortStatus2 = abortHelpers.checkAbortedOrStale(
+          controller.signal,
+          isStaleRequest
+        )
+        if (abortStatus2 === "stale") {
+          releaseController(controller)
+          return
+        }
+        if (abortStatus2 === "aborted") {
           tracker.failure("aborted")
           releaseController(controller)
           return

@@ -594,6 +594,28 @@ type DebouncedFn<T extends (...args: any[]) => void> = ((
   cancel: () => void
 }
 
+export const useNumericValidator = (
+  fieldKey: string,
+  min: number,
+  max: number,
+  errorMessage: string,
+  setFieldErrors: (
+    fn: (prev: { [key: string]: string | undefined }) => {
+      [key: string]: string | undefined
+    }
+  ) => void
+) => {
+  return hooks.useEventCallback((value: string): boolean => {
+    const { validateNumericRange } = require("./utils")
+    const result = validateNumericRange({ value, min, max, errorMessage })
+    setFieldErrors((prev) => ({
+      ...prev,
+      [fieldKey]: result.valid ? undefined : result.error,
+    }))
+    return result.valid
+  })
+}
+
 export const useDebounce = <T extends (...args: any[]) => void>(
   callback: T,
   delay: number,
