@@ -493,6 +493,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   const handleExportFormatSelect = hooks.useEventCallback(
     (format: ExportFormat) => {
+      if (!["json", "csv", "geojson"].includes(format)) {
+        console.error("Invalid export format:", format)
+        return
+      }
       handleExport(format)
     }
   )
@@ -590,6 +594,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         if (!propertyResults.length) {
           if (isStaleRequest()) {
+            releaseController(controller)
             return
           }
           console.log("No property results returned from query")
@@ -599,6 +604,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             action: "property_query",
             label: "no_results",
           })
+          releaseController(controller)
           return
         }
 
@@ -687,9 +693,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         if (controller.signal.aborted || isStaleRequest()) {
           if (isStaleRequest()) {
+            releaseController(controller)
             return
           }
           tracker.failure("aborted")
+          releaseController(controller)
           return
         }
 

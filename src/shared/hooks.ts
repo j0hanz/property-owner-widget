@@ -544,6 +544,7 @@ export const useDebounce = <T extends (...args: any[]) => void>(
   const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0
   const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingRef = React.useRef(false)
+  const mountedRef = React.useRef(true)
   const callbackRef = hooks.useLatest(callback)
   const optionsRef = hooks.useLatest(options)
 
@@ -575,6 +576,7 @@ export const useDebounce = <T extends (...args: any[]) => void>(
     notifyPending(true)
     timeoutRef.current = setTimeout(() => {
       timeoutRef.current = null
+      if (!mountedRef.current) return
       try {
         callbackRef.current(...args)
       } finally {
@@ -599,6 +601,7 @@ export const useDebounce = <T extends (...args: any[]) => void>(
 
   hooks.useEffectOnce(() => {
     return () => {
+      mountedRef.current = false
       cancelRef.current()
     }
   })

@@ -600,13 +600,18 @@ const deduplicateOwnerEntries = (
       return
     }
 
-    const identityKey = ownerIdentity.buildKey(attrs, context, index)
-    if (seen.has(identityKey)) {
-      return
-    }
+    try {
+      const identityKey = ownerIdentity.buildKey(attrs, context, index)
+      if (seen.has(identityKey)) {
+        return
+      }
 
-    seen.add(identityKey)
-    uniqueOwners.push(attrs)
+      seen.add(identityKey)
+      uniqueOwners.push(attrs)
+    } catch (error) {
+      console.warn("Failed to generate identity key for owner entry", error)
+      uniqueOwners.push(attrs)
+    }
   })
 
   return uniqueOwners
@@ -834,6 +839,10 @@ const processBatchOfProperties = async (params: {
       if (rowsToAdd.length > 0) {
         graphics.push({ graphic: validated.graphic, fnr: validated.fnr })
       }
+      continue
+    }
+
+    if (!result.value) {
       continue
     }
 

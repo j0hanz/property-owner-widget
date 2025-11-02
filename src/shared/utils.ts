@@ -128,7 +128,7 @@ export const formatOwnerInfo = (
   unknownOwnerText: string
 ): string => {
   if (owner.AGARLISTA && typeof owner.AGARLISTA === "string") {
-    const agarLista = sanitizeText(owner.AGARLISTA)
+    const agarLista = sanitizeText(String(owner.AGARLISTA))
 
     // Split, trim, and deduplicate entries
     const seen = new Set<string>()
@@ -360,7 +360,8 @@ export const shouldToggleRemove = (
   existingProperties: Array<{ FNR: string | number }>,
   toggleEnabled: boolean
 ): boolean => {
-  return toggleEnabled && isDuplicateProperty(fnr, existingProperties)
+  if (!toggleEnabled) return false
+  return isDuplicateProperty(fnr, existingProperties)
 }
 
 export const calculatePropertyUpdates = <
