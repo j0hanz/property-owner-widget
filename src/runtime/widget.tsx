@@ -215,7 +215,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     clearQueryCache,
     trackEvent,
   })
-  const isMountedRef = React.useRef(true)
 
   // Hover tooltip state
   const [hoverTooltipData, setHoverTooltipData] = React.useState<{
@@ -690,7 +689,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           { signal: controller.signal }
         )
 
-        if (controller.signal.aborted || !isMountedRef.current) {
+        if (controller.signal.aborted) {
           return
         }
 
@@ -719,7 +718,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           { signal: controller.signal }
         )
 
-        if (controller.signal.aborted || !isMountedRef.current) {
+        if (controller.signal.aborted) {
           return
         }
 
@@ -1032,7 +1031,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   }, [runtimeState, prevRuntimeState, closeOtherWidgets])
 
   hooks.useUnmount(() => {
-    isMountedRef.current = false
     abortAll()
     clearQueryCache()
   })
