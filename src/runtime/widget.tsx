@@ -223,10 +223,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     selectedProperties: [],
     isQueryInFlight: false,
     rawPropertyResults: null,
+    rowSelectionIds: new Set(),
   })
   const isMountedRef = React.useRef(true)
 
   const hasSelectedProperties = state.selectedProperties.length > 0
+  const hasSelectedRows = state.rowSelectionIds.size > 0
 
   const renderConfiguredContent = () => {
     if (state.error) {
@@ -245,6 +247,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           columns={tableColumns}
           translate={translate}
           styles={styles}
+          onSelectionChange={handleSelectionChange}
         />
       )
     }
@@ -349,6 +352,15 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   )
   const tableColumns = tableColumnsRef.current
 
+  const handleSelectionChange = hooks.useEventCallback(
+    (selectedIds: Set<string>) => {
+      setState((prev) => ({
+        ...prev,
+        rowSelectionIds: selectedIds,
+      }))
+    }
+  )
+
   const handleClearAll = hooks.useEventCallback(() => {
     abortAll()
     clearQueryCache()
@@ -366,6 +378,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         error: null,
         isQueryInFlight: false,
         rawPropertyResults: null,
+        rowSelectionIds: new Set(),
       }
     })
   })
@@ -421,25 +434,43 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       error: null,
       isQueryInFlight: false,
       rawPropertyResults: null,
+      rowSelectionIds: new Set(),
     }))
   })
 
   const handleExport = hooks.useEventCallback((format: ExportFormat) => {
-    if (state.selectedProperties.length === 0) {
-      console.log("Export skipped: no selected properties")
+    if (!hasSelectedRows) {
+      console.log("Export skipped: no rows selected")
       return
     }
 
-    if (!state.rawPropertyResults || state.rawPropertyResults.length === 0) {
+    if (!state.rawPropertyResults || state.rawPropertyResults.size === 0) {
       console.log("Export skipped: no raw property data available")
       return
     }
 
-    const rowCount = state.selectedProperties.length
+    const selectedRowData = state.selectedProperties.filter((row) =>
+      state.rowSelectionIds.has(row.id)
+    )
+
+    const selectedRawData: any[] = []
+    state.rowSelectionIds.forEach((id) => {
+      const rawData = state.rawPropertyResults?.get(id)
+      if (rawData) {
+        selectedRawData.push(rawData)
+      }
+    })
+
+    if (selectedRawData.length === 0) {
+      console.log("Export skipped: no matching raw data for selected rows")
+      return
+    }
+
+    const rowCount = selectedRowData.length
     const formatDefinition = EXPORT_FORMATS.find((item) => item.id === format)
 
     try {
-      exportData(state.rawPropertyResults, state.selectedProperties, {
+      exportData(selectedRawData, selectedRowData, {
         format,
         filename: "property-export",
         rowCount,
@@ -586,8 +617,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         console.log(JSON.stringify(propertyResults, null, 2))
         console.log("=== END JSON RESPONSE ===")
 
-        const rawResultsForExport = propertyResults
-
         // Step 4: Process results and enrich with owner data
         const useBatchQuery =
           config.enableBatchOwnerQuery &&
@@ -718,11 +747,28 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             return prev
           }
 
+          const updatedRawResults = new Map(prev.rawPropertyResults || [])
+
+          rowsToProcess.forEach((row, index) => {
+            if (index < propertyResults.length) {
+              updatedRawResults.set(row.id, propertyResults[index])
+            }
+          })
+
+          toRemove.forEach((removedKey) => {
+            const removedRow = prev.selectedProperties.find(
+              (row) => normalizeFnrKey(row.FNR) === removedKey
+            )
+            if (removedRow) {
+              updatedRawResults.delete(removedRow.id)
+            }
+          })
+
           return {
             ...prev,
             selectedProperties: updatedRows,
             isQueryInFlight: false,
-            rawPropertyResults: rawResultsForExport,
+            rawPropertyResults: updatedRawResults,
           }
         })
 
@@ -980,7 +1026,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
               arrow={false}
               icon
               type="tertiary"
-              disabled={state.selectedProperties.length === 0}
+              disabled={!hasSelectedRows}
               title={translate("exportData")}
               role="combobox"
             >
