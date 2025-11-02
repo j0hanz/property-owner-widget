@@ -48,6 +48,38 @@ export const convertToCSV = (rows: GridRowData[]): string => {
   return [csvHeaders, ...csvRows].join("\n")
 }
 
+const stripRingsFromGeometry = (data: any[]): any[] => {
+  return data.map((result) => {
+    if (!result?.features) return result
+
+    return {
+      ...result,
+      features: result.features.map((feature: any) => {
+        if (!feature) return feature
+
+        // Convert feature to plain object, preserving all properties
+        const plainFeature: any = {
+          aggregateGeometries: feature.aggregateGeometries ?? null,
+          geometry: null,
+          symbol: feature.symbol ?? null,
+          attributes: feature.attributes ?? null,
+          popupTemplate: feature.popupTemplate ?? null,
+        }
+
+        if (feature.geometry) {
+          // Extract geometry properties, excluding rings
+          const geom = feature.geometry
+          const { rings, ...otherGeomProps } = geom
+
+          plainFeature.geometry = otherGeomProps
+        }
+
+        return plainFeature
+      }),
+    }
+  })
+}
+
 const isPolygonGeometry = (
   geometry: __esri.Geometry
 ): geometry is __esri.Polygon => geometry.type === "polygon"
@@ -69,17 +101,14 @@ export const convertToGeoJSON = (rows: GridRowData[]): object => {
       if (geometry && isPolygonGeometry(geometry)) {
         geojsonGeometry = {
           type: "Polygon",
-          coordinates: geometry.rings,
         }
       } else if (geometry && isPolylineGeometry(geometry)) {
         geojsonGeometry = {
           type: "MultiLineString",
-          coordinates: geometry.paths,
         }
       } else if (geometry && isPointGeometry(geometry)) {
         geojsonGeometry = {
           type: "Point",
-          coordinates: [geometry.x, geometry.y],
         }
       }
 
@@ -125,7 +154,8 @@ export const exportData = (
     let extension = definition?.extension || "json"
 
     if (format === "json") {
-      content = JSON.stringify(rawData ?? [], null, 2)
+      const cleanedData = stripRingsFromGeometry(rawData ?? [])
+      content = JSON.stringify(cleanedData, null, 2)
       mimeType = definition?.mimeType || "application/json;charset=utf-8"
     } else if (format === "csv") {
       content = convertToCSV(selectedRows)
