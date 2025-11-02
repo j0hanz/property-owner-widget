@@ -36,8 +36,16 @@ import {
   useBooleanConfigValue,
   useUpdateConfig,
   useDebounce,
+  useSwitchConfigHandler,
+  useSliderConfigHandler,
+  useNumericValidator,
 } from "../shared/hooks"
-import { stripHtml } from "../shared/utils"
+import {
+  opacityHelpers,
+  outlineWidthHelpers,
+  normalizeHostValue,
+  normalizeHostList,
+} from "../shared/utils"
 import {
   DEFAULT_HIGHLIGHT_COLOR,
   HIGHLIGHT_SYMBOL_ALPHA,
@@ -50,47 +58,6 @@ import infoIcon from "../assets/info.svg"
 interface FieldErrors {
   [key: string]: string | undefined
 }
-
-const clampNumber = (value: number, min: number, max: number): number => {
-  if (!Number.isFinite(value)) {
-    return min
-  }
-  if (value < min) {
-    return min
-  }
-  if (value > max) {
-    return max
-  }
-  return value
-}
-
-const toOpacityPercent = (value: number): number =>
-  Math.round(clampNumber(value, 0, 1) * 100)
-
-const fromOpacityPercent = (percent: number): number =>
-  clampNumber(percent, 0, 100) / 100
-
-const formatOpacityPercent = (percent: number): string => {
-  const normalized = clampNumber(Math.round(percent), 0, 100)
-  return `${normalized}%`
-}
-
-const normalizeOutlineWidth = (value: number): number => {
-  const clamped = clampNumber(value, 0.5, 10)
-  return Math.round(clamped * 2) / 2
-}
-
-const formatOutlineWidthDisplay = (value: number): string => {
-  const normalized = normalizeOutlineWidth(value)
-  const rounded = Math.round(normalized)
-  if (Math.abs(normalized - rounded) < 0.0001) {
-    return String(rounded)
-  }
-  return normalized.toFixed(1)
-}
-
-const sanitizeHostValue = (value: string): string =>
-  stripHtml(value || "").trim()
 
 const Setting = (
   props: AllWidgetSettingProps<IMConfig>
@@ -177,16 +144,7 @@ const Setting = (
   )
   const [localAllowedHostInput, setLocalAllowedHostInput] = React.useState("")
   const [localAllowedHostsList, setLocalAllowedHostsList] = React.useState(() =>
-    Array.from(
-      new Set(
-        (config.allowedHosts || [])
-          .map((host) => sanitizeHostValue(host))
-          .filter(Boolean)
-      )
-    )
-  )
-  const [localAutoZoom, setLocalAutoZoom] = React.useState(() =>
-    getBooleanConfig("autoZoomOnSelection", false)
+    normalizeHostList(config.allowedHosts)
   )
   const [localHighlightColor, setLocalHighlightColor] = React.useState(
     config.highlightColor || DEFAULT_HIGHLIGHT_COLOR
@@ -197,7 +155,7 @@ const Setting = (
         typeof config.highlightOpacity === "number"
           ? config.highlightOpacity
           : HIGHLIGHT_SYMBOL_ALPHA
-      return clampNumber(baseValue, 0, 1)
+      return opacityHelpers.fromPercent(opacityHelpers.toPercent(baseValue))
     }
   )
   const [localOutlineWidth, setLocalOutlineWidth] = React.useState(() => {
@@ -205,39 +163,25 @@ const Setting = (
       typeof config.outlineWidth === "number"
         ? config.outlineWidth
         : OUTLINE_WIDTH
-    return normalizeOutlineWidth(baseValue)
+    return outlineWidthHelpers.normalize(baseValue)
   })
 
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
 
-  const validateMaxResults = hooks.useEventCallback(
-    (value: string): boolean => {
-      const num = parseInt(value, 10)
-      if (isNaN(num) || num < 1 || num > 1000) {
-        setFieldErrors((prev) => ({
-          ...prev,
-          maxResults: translate("errorMaxResultsInvalid"),
-        }))
-        return false
-      }
-      setFieldErrors((prev) => ({ ...prev, maxResults: undefined }))
-      return true
-    }
+  const validateMaxResults = useNumericValidator(
+    "maxResults",
+    1,
+    1000,
+    translate("errorMaxResultsInvalid"),
+    setFieldErrors
   )
 
-  const validateRelationshipId = hooks.useEventCallback(
-    (value: string): boolean => {
-      const num = parseInt(value, 10)
-      if (isNaN(num) || num < 0 || num > 99) {
-        setFieldErrors((prev) => ({
-          ...prev,
-          relationshipId: translate("errorRelationshipIdInvalid"),
-        }))
-        return false
-      }
-      setFieldErrors((prev) => ({ ...prev, relationshipId: undefined }))
-      return true
-    }
+  const validateRelationshipId = useNumericValidator(
+    "relationshipId",
+    0,
+    99,
+    translate("errorRelationshipIdInvalid"),
+    setFieldErrors
   )
 
   const debouncedMaxResultsValidation = useDebounce(validateMaxResults, 500)
@@ -256,28 +200,25 @@ const Setting = (
     }
   })
 
-  const handleToggleRemovalChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      const checked = evt.target.checked
-      setLocalToggleRemoval(checked)
-      updateConfig("enableToggleRemoval", checked)
-    }
+  const handleToggleRemovalChange = useSwitchConfigHandler(
+    localToggleRemoval,
+    setLocalToggleRemoval,
+    updateConfig,
+    "enableToggleRemoval"
   )
 
-  const handlePIIMaskingChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      const checked = evt.target.checked
-      setLocalPIIMasking(checked)
-      updateConfig("enablePIIMasking", checked)
-    }
+  const handlePIIMaskingChange = useSwitchConfigHandler(
+    localPIIMasking,
+    setLocalPIIMasking,
+    updateConfig,
+    "enablePIIMasking"
   )
 
-  const handleBatchOwnerQueryChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      const checked = evt.target.checked
-      setLocalBatchOwnerQuery(checked)
-      updateConfig("enableBatchOwnerQuery", checked)
-    }
+  const handleBatchOwnerQueryChange = useSwitchConfigHandler(
+    localBatchOwnerQuery,
+    setLocalBatchOwnerQuery,
+    updateConfig,
+    "enableBatchOwnerQuery"
   )
 
   const handleRelationshipIdChange = hooks.useEventCallback((value: number) => {
@@ -300,7 +241,7 @@ const Setting = (
   )
 
   const handleAddAllowedHost = hooks.useEventCallback(() => {
-    const sanitized = sanitizeHostValue(localAllowedHostInput)
+    const sanitized = normalizeHostValue(localAllowedHostInput)
     if (!sanitized) {
       setLocalAllowedHostInput("")
       return
@@ -315,10 +256,8 @@ const Setting = (
   })
 
   const handleRemoveAllowedHost = hooks.useEventCallback((host: string) => {
-    const sanitized = sanitizeHostValue(host)
-    const nextHosts = localAllowedHostsList.filter(
-      (value) => value !== sanitized
-    )
+    const sanitized = normalizeHostValue(host)
+    const nextHosts = localAllowedHostsList.filter((h) => h !== sanitized)
     if (nextHosts.length === localAllowedHostsList.length) {
       return
     }
@@ -339,49 +278,26 @@ const Setting = (
     }
   )
 
-  const handleAutoZoomChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      const checked = evt.target.checked
-      setLocalAutoZoom(checked)
-      updateConfig("autoZoomOnSelection", checked)
-    }
-  )
-
   const handleHighlightColorChange = hooks.useEventCallback((color: string) => {
     const nextColor = color || DEFAULT_HIGHLIGHT_COLOR
     setLocalHighlightColor(nextColor)
     updateConfig("highlightColor", nextColor)
   })
 
-  const handleHighlightOpacityChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      const rawValue = Number.parseFloat(evt?.target?.value ?? "")
-      if (!Number.isFinite(rawValue)) {
-        return
-      }
-      const normalizedPercent = clampNumber(Math.round(rawValue), 0, 100)
-      const nextOpacity = fromOpacityPercent(normalizedPercent)
-      if (Math.abs(localHighlightOpacity - nextOpacity) < 0.0001) {
-        return
-      }
-      setLocalHighlightOpacity(nextOpacity)
-      updateConfig("highlightOpacity", nextOpacity)
-    }
+  const handleHighlightOpacityChange = useSliderConfigHandler(
+    localHighlightOpacity,
+    setLocalHighlightOpacity,
+    updateConfig,
+    "highlightOpacity",
+    opacityHelpers.fromPercent
   )
 
-  const handleOutlineWidthChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLInputElement>) => {
-      const rawValue = Number.parseFloat(evt?.target?.value ?? "")
-      if (!Number.isFinite(rawValue)) {
-        return
-      }
-      const nextWidth = normalizeOutlineWidth(rawValue)
-      if (Math.abs(localOutlineWidth - nextWidth) < 0.0001) {
-        return
-      }
-      setLocalOutlineWidth(nextWidth)
-      updateConfig("outlineWidth", nextWidth)
-    }
+  const handleOutlineWidthChange = useSliderConfigHandler(
+    localOutlineWidth,
+    setLocalOutlineWidth,
+    updateConfig,
+    "outlineWidth",
+    outlineWidthHelpers.normalize
   )
 
   const handlePropertyDataSourceChange = hooks.useEventCallback(
@@ -498,16 +414,9 @@ const Setting = (
   }, [config.relationshipId])
 
   hooks.useUpdateEffect(() => {
-    const normalizedHosts = (config.allowedHosts || [])
-      .map((host) => sanitizeHostValue(host))
-      .filter(Boolean)
-    const uniqueHosts = Array.from(new Set(normalizedHosts))
+    const uniqueHosts = normalizeHostList(config.allowedHosts)
     setLocalAllowedHostsList(uniqueHosts)
   }, [config.allowedHosts])
-
-  hooks.useUpdateEffect(() => {
-    setLocalAutoZoom(getBooleanConfig("autoZoomOnSelection", false))
-  }, [config.autoZoomOnSelection])
 
   hooks.useUpdateEffect(() => {
     setLocalHighlightColor(config.highlightColor || DEFAULT_HIGHLIGHT_COLOR)
@@ -518,7 +427,9 @@ const Setting = (
       typeof config.highlightOpacity === "number"
         ? config.highlightOpacity
         : HIGHLIGHT_SYMBOL_ALPHA
-    setLocalHighlightOpacity(clampNumber(baseValue, 0, 1))
+    setLocalHighlightOpacity(
+      opacityHelpers.fromPercent(opacityHelpers.toPercent(baseValue))
+    )
   }, [config.highlightOpacity])
 
   hooks.useUpdateEffect(() => {
@@ -526,13 +437,11 @@ const Setting = (
       typeof config.outlineWidth === "number"
         ? config.outlineWidth
         : OUTLINE_WIDTH
-    setLocalOutlineWidth(normalizeOutlineWidth(baseValue))
+    setLocalOutlineWidth(outlineWidthHelpers.normalize(baseValue))
   }, [config.outlineWidth])
 
   hooks.useEffectOnce(() => {
-    if (useMapWidgetIds && useMapWidgetIds.length > 0) {
-      console.log("Property Widget: Map configured on mount", useMapWidgetIds)
-    }
+    // Settings panel mounted
   })
 
   const hasMapSelection =
@@ -575,11 +484,15 @@ const Setting = (
     updateConfig,
   ])
 
-  const highlightOpacityPercent = toOpacityPercent(localHighlightOpacity)
-  const highlightOpacityLabel = formatOpacityPercent(highlightOpacityPercent)
-  const outlineWidthValue = normalizeOutlineWidth(localOutlineWidth)
-  const outlineWidthLabel = formatOutlineWidthDisplay(localOutlineWidth)
-  const sanitizedAllowedHostInput = sanitizeHostValue(localAllowedHostInput)
+  const highlightOpacityPercent = opacityHelpers.toPercent(
+    localHighlightOpacity
+  )
+  const highlightOpacityLabel = opacityHelpers.formatPercent(
+    highlightOpacityPercent
+  )
+  const outlineWidthValue = outlineWidthHelpers.normalize(localOutlineWidth)
+  const outlineWidthLabel = outlineWidthHelpers.formatDisplay(localOutlineWidth)
+  const sanitizedAllowedHostInput = normalizeHostValue(localAllowedHostInput)
   const canAddAllowedHost =
     sanitizedAllowedHostInput.length > 0 &&
     !localAllowedHostsList.includes(sanitizedAllowedHostInput)
@@ -734,22 +647,6 @@ const Setting = (
               </SettingRow>
 
               <SettingRow
-                flow="no-wrap"
-                level={1}
-                css={styles.row}
-                label={renderLabelWithTooltip(
-                  "autoZoomOnSelectionLabel",
-                  "autoZoomOnSelectionDescription"
-                )}
-              >
-                <Switch
-                  checked={localAutoZoom}
-                  onChange={handleAutoZoomChange}
-                  aria-label={translate("autoZoomOnSelectionLabel")}
-                />
-              </SettingRow>
-
-              <SettingRow
                 flow="wrap"
                 level={1}
                 css={styles.row}
@@ -862,7 +759,7 @@ const Setting = (
                       max={100}
                       step={5}
                       tooltip
-                      formatter={formatOpacityPercent}
+                      formatter={opacityHelpers.formatPercent}
                       aria-label={translate("highlightOpacityLabel")}
                       onChange={handleHighlightOpacityChange}
                       css={styles.sliderControl}
@@ -895,7 +792,7 @@ const Setting = (
                       max={10}
                       step={0.5}
                       tooltip
-                      formatter={formatOutlineWidthDisplay}
+                      formatter={outlineWidthHelpers.formatDisplay}
                       aria-label={translate("highlightOutlineWidthLabel")}
                       onChange={handleOutlineWidthChange}
                       css={styles.sliderControl}

@@ -17,7 +17,7 @@ export const isAllowedToTrack = (): boolean => {
 
     // Check cookie opt-out with proper parsing to avoid cross-domain pollution
     const cookie = typeof document !== "undefined" ? document.cookie || "" : ""
-    const cookiePairs = cookie.split("").map((c) => c.trim())
+    const cookiePairs = cookie.split(";").map((c) => c.trim())
     if (cookiePairs.some((pair) => pair === "esri_disallow_tracking=1")) {
       return false
     }
@@ -40,9 +40,9 @@ export const trackEvent = (event: TelemetryEvent): void => {
   if (!isAllowedToTrack()) return
 
   try {
-    console.log("[Property Widget Telemetry]", event)
+    // Event tracking implementation here (silent)
   } catch (error) {
-    console.log("Telemetry tracking failed", error)
+    // Silent fail for telemetry
   }
 }
 
@@ -65,7 +65,7 @@ export const trackPerformance = (metric: PerformanceMetric): void => {
       })
     }
   } catch (error) {
-    console.log("Performance tracking failed", error)
+    // Silent fail for telemetry
   }
 }
 
@@ -88,7 +88,7 @@ export const trackError = (
       label: details ? `${errorMessage}: ${details}` : errorMessage,
     })
   } catch (trackingError) {
-    console.log("Error tracking failed", trackingError)
+    // Silent fail for telemetry
   }
 }
 

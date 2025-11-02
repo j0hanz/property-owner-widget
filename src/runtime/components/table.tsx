@@ -1,5 +1,5 @@
 /** @jsx jsx */
-import { React, jsx } from "jimu-core"
+import { React, jsx, hooks } from "jimu-core"
 import { Checkbox } from "jimu-ui"
 import { useReactTable, flexRender } from "@tanstack/react-table"
 import type {
@@ -29,7 +29,7 @@ const IndeterminateCheckbox = (props: {
 }
 
 export const PropertyTable = (props: PropertyTableProps) => {
-  const { data, columns, translate, styles } = props
+  const { data, columns, translate, styles, onSelectionChange } = props
 
   const [sorting, setSorting] =
     React.useState<SortingState>(getDefaultSorting())
@@ -40,11 +40,20 @@ export const PropertyTable = (props: PropertyTableProps) => {
     getDefaultRowSelection()
   )
 
+  hooks.useUpdateEffect(() => {
+    if (onSelectionChange) {
+      const selectedIds = new Set(
+        Object.keys(rowSelection).filter((id) => rowSelection[id])
+      )
+      onSelectionChange(selectedIds)
+    }
+  }, [rowSelection, onSelectionChange])
+
   const columnsWithSelectRef = React.useRef<Array<ColumnDef<GridRowData, any>>>(
     [createSelectColumn(IndeterminateCheckbox), ...columns]
   )
 
-  React.useEffect(() => {
+  hooks.useUpdateEffect(() => {
     columnsWithSelectRef.current = [
       createSelectColumn(IndeterminateCheckbox),
       ...columns,

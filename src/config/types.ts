@@ -2,6 +2,15 @@ import type { ImmutableObject, DataSourceManager } from "jimu-core"
 import type { ColumnDef } from "@tanstack/react-table"
 import type { WidgetStyles } from "./style"
 
+// =============================================================================
+// WIDGET CONFIGURATION
+// Core configuration interface for property widget settings
+// =============================================================================
+
+/**
+ * Widget configuration stored in app config
+ * All properties are immutable at runtime - updates via onSettingChange only
+ */
 export interface Config {
   propertyDataSourceId: string
   ownerDataSourceId: string
@@ -12,13 +21,18 @@ export interface Config {
   enablePIIMasking: boolean
   relationshipId?: number
   enableBatchOwnerQuery: boolean
-  autoZoomOnSelection?: boolean
   highlightColor?: string
   highlightOpacity?: number
   outlineWidth?: number
+  autoCloseOtherWidgets?: boolean
 }
 
 export type IMConfig = ImmutableObject<Config>
+
+// =============================================================================
+// DATA ATTRIBUTES
+// Property and owner data structures from ArcGIS feature layers
+// =============================================================================
 
 export interface PropertyAttributes {
   OBJECTID: number
@@ -43,6 +57,11 @@ export interface OwnerAttributes {
   [key: string]: any
 }
 
+// =============================================================================
+// GRID & EXPORT
+// Data grid row structure and export format definitions
+// =============================================================================
+
 export interface GridRowData {
   id: string
   FNR: string | number
@@ -52,6 +71,36 @@ export interface GridRowData {
   graphic?: __esri.Graphic
   rawOwner?: OwnerAttributes
 }
+
+export type ExportFormat = "json" | "csv" | "geojson"
+
+export interface ExportFormatDefinition {
+  id: ExportFormat
+  label: string
+  description: string
+  icon?: string
+  extension: string
+  mimeType: string
+}
+
+export interface CsvHeaderValues {
+  FNR: string
+  UUID_FASTIGHET: string
+  FASTIGHET: string
+  BOSTADR: string
+}
+
+export interface ExportOptions {
+  format: ExportFormat
+  filename: string
+  rowCount: number
+  definition?: ExportFormatDefinition
+}
+
+// =============================================================================
+// GRAPHICS & SELECTION
+// Graphics layer manipulation and selection management
+// =============================================================================
 
 export interface SelectionGraphicsHelpers {
   addGraphicsToMap: (
@@ -75,6 +124,11 @@ export interface SelectionGraphicsParams {
   outlineWidth: number
 }
 
+// =============================================================================
+// ERROR & STATE MANAGEMENT
+// Widget error states and runtime state structure
+// =============================================================================
+
 export interface ErrorBoundaryProps {
   children: React.ReactNode
   styles: WidgetStyles
@@ -91,12 +145,19 @@ export interface PropertyWidgetState {
   error: ErrorState | null
   selectedProperties: GridRowData[]
   isQueryInFlight: boolean
+  rawPropertyResults: Map<string, any> | null
+  rowSelectionIds: Set<string>
 }
 
 export interface QueryResult {
   features: __esri.Graphic[]
   propertyId: string | number
 }
+
+// =============================================================================
+// ARCGIS JS API MODULES
+// TypeScript interfaces for lazy-loaded ArcGIS modules
+// =============================================================================
 
 export interface EsriModules {
   SimpleFillSymbol: new (
@@ -108,11 +169,29 @@ export interface EsriModules {
   SimpleMarkerSymbol: new (
     properties?: __esri.SimpleMarkerSymbolProperties
   ) => __esri.SimpleMarkerSymbol
+  TextSymbol: new (
+    properties?: __esri.TextSymbolProperties
+  ) => __esri.TextSymbol
   Graphic: new (properties?: __esri.GraphicProperties) => __esri.Graphic
   GraphicsLayer: new (
     properties?: __esri.GraphicsLayerProperties
   ) => __esri.GraphicsLayer
   Extent: new (properties?: __esri.ExtentProperties) => __esri.Extent
+}
+
+export interface CursorTooltipStyle {
+  readonly textColor: string
+  readonly backgroundColor: string
+  readonly fontFamily: string
+  readonly fontSize: number
+  readonly fontWeight: __esri.FontProperties["weight"]
+  readonly verticalAlignment: __esri.TextSymbolProperties["verticalAlignment"]
+  readonly horizontalAlignment: __esri.TextSymbolProperties["horizontalAlignment"]
+  readonly yoffset: number
+  readonly xoffset: number
+  readonly lineWidth: number
+  readonly lineHeight: number
+  readonly kerning: boolean
 }
 
 export interface UrlErrors {
@@ -142,14 +221,25 @@ export interface PerformanceMetric {
 // =============================================================================
 // VALIDATION RESULT TYPES
 // Discriminated unions for type-safe validation results
+// Use isValidationSuccess() and isValidationFailure() type guards
 // =============================================================================
 
+/**
+ * Validation success result
+ * Contains validated data of type T
+ * Use type guard: if (isValidationSuccess(result)) { result.data... }
+ */
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
 export type ValidationSuccess<T> = {
   readonly valid: true
   readonly data: T
 }
 
+/**
+ * Validation failure result
+ * Contains error state and failure reason for debugging
+ * Use type guard: if (isValidationFailure(result)) { result.error... }
+ */
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
 export type ValidationFailure = {
   readonly valid: false
@@ -157,6 +247,11 @@ export type ValidationFailure = {
   readonly failureReason: string
 }
 
+/**
+ * Discriminated union for validation results
+ * Check result.valid to determine success/failure
+ * Prefer type guards for type narrowing
+ */
 export type ValidationResult<T> = ValidationSuccess<T> | ValidationFailure
 
 /** Type guard for validation success */
@@ -176,6 +271,7 @@ export function isValidationFailure<T>(
 // =============================================================================
 // QUERY PROCESSING TYPES
 // Interfaces for property query operations and context
+// Used by processPropertyQueryResults pipeline
 // =============================================================================
 
 export interface PropertyQueryHelpers {
@@ -251,6 +347,7 @@ export interface PropertyTableProps {
   columns: Array<ColumnDef<GridRowData, any>>
   translate: (key: string) => string
   styles: WidgetStyles
+  onSelectionChange?: (selectedIds: Set<string>) => void
 }
 
 export interface LoadingBlockProps {

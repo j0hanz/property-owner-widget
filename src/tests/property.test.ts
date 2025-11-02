@@ -16,15 +16,83 @@ import {
   calculatePropertyUpdates,
   buildHighlightColor,
   buildHighlightSymbolJSON,
-  buildHighlightLineSymbolJSON,
-  buildHighlightMarkerSymbolJSON,
+  buildTooltipSymbol,
+  syncCursorGraphics,
 } from "../shared/utils"
 import {
   isValidArcGISUrl,
   validateDataSources,
   propertyQueryService,
+  queryPropertyByPoint,
+  clearQueryCache,
 } from "../shared/api"
-import type { OwnerAttributes } from "../config/types"
+import { convertToCSV, convertToGeoJSON, exportData } from "../shared/export"
+import { CURSOR_TOOLTIP_STYLE } from "../config/constants"
+import type { OwnerAttributes, GridRowData } from "../config/types"
+
+const mockFeatureLayerInstances: MockFeatureLayer[] = []
+let featureLayerCtorCount = 0
+let mockQueryFeaturesResponse: any = {
+  features: [
+    {
+      attributes: {
+        FNR: "123",
+        OBJECTID: 1,
+        UUID_FASTIGHET: "uuid-123",
+        FASTIGHET: "Test 1:1",
+      },
+    },
+  ],
+}
+
+class MockFeatureLayer {
+  url: string
+  destroyed = false
+  queryFeatures = jest.fn((_query: any) =>
+    Promise.resolve(mockQueryFeaturesResponse)
+  )
+  destroy = jest.fn(() => {
+    this.destroyed = true
+  })
+
+  constructor(options: { url: string }) {
+    this.url = options.url
+    featureLayerCtorCount += 1
+    mockFeatureLayerInstances.push(this)
+  }
+}
+
+class MockQuery {
+  geometry: any
+  returnGeometry: boolean
+  outFields: string[]
+  spatialRelationship: string
+
+  constructor(params: {
+    geometry: any
+    returnGeometry: boolean
+    outFields: string[]
+    spatialRelationship: string
+  }) {
+    this.geometry = params.geometry
+    this.returnGeometry = params.returnGeometry
+    this.outFields = params.outFields
+    this.spatialRelationship = params.spatialRelationship
+  }
+}
+
+const resetMockFeatureLayerState = () => {
+  featureLayerCtorCount = 0
+  mockFeatureLayerInstances.length = 0
+}
+
+const setMockQueryFeaturesResponse = (response: any) => {
+  mockQueryFeaturesResponse = response
+}
+
+const getFeatureLayerCtorCount = () => featureLayerCtorCount
+
+const getMockFeatureLayerInstances = () => mockFeatureLayerInstances
 
 jest.mock("jimu-arcgis", () => ({
   loadArcGISJSAPIModules: jest.fn((modules: string[]) => {
@@ -41,6 +109,12 @@ jest.mock("jimu-arcgis", () => ({
                 )
               ),
           }
+        }
+        if (moduleId === "esri/layers/FeatureLayer") {
+          return MockFeatureLayer
+        }
+        if (moduleId === "esri/rest/support/Query") {
+          return MockQuery
         }
         return {}
       })
@@ -219,7 +293,7 @@ describe("Property Widget - Highlight Styling", () => {
 
   it("should clamp opacity and fall back to default color when invalid inputs provided", () => {
     const rgba = buildHighlightColor("not-a-color", 5)
-    expect(rgba).toEqual([0, 180, 216, 1])
+    expect(rgba).toEqual([181, 73, 0, 1]) // #b54900
   })
 
   it("should build highlight symbol definition with solid fill and outline", () => {
@@ -237,7 +311,11 @@ describe("Property Widget - Highlight Styling", () => {
   })
 
   it("should build line highlight symbol definition with configured width", () => {
-    const symbolJSON = buildHighlightLineSymbolJSON([100, 150, 200, 0.6], 5)
+    const symbolJSON = buildHighlightSymbolJSON(
+      [100, 150, 200, 0.6],
+      5,
+      "polyline"
+    )
 
     expect(symbolJSON).toMatchObject({
       style: "solid",
@@ -247,12 +325,11 @@ describe("Property Widget - Highlight Styling", () => {
   })
 
   it("should build marker highlight symbol definition with outline", () => {
-    const symbolJSON = buildHighlightMarkerSymbolJSON([5, 15, 25, 0.8], 2, 14)
+    const symbolJSON = buildHighlightSymbolJSON([5, 15, 25, 0.8], 2, "point")
 
     expect(symbolJSON).toMatchObject({
-      style: "circle",
+      style: "cross",
       color: [5, 15, 25, 0.8],
-      size: 14,
       outline: {
         style: "solid",
         color: [5, 15, 25, 1],
@@ -798,6 +875,191 @@ describe("Property Widget - Utility Helper Functions", () => {
     expect(result.updatedRows).toHaveLength(2)
     expect(result.updatedRows.map((row) => row.id)).toEqual(["123_1", "123_2"])
   })
+
+  it("should sanitize tooltip content when building text symbols", () => {
+    class MockTextSymbol {
+      text: string
+      color: string
+      haloColor: string
+      haloSize: number
+      xoffset: number
+      yoffset: number
+      font: __esri.FontProperties
+
+      constructor(props: any) {
+        Object.assign(this, props)
+      }
+    }
+
+    const modules = {
+      TextSymbol: MockTextSymbol,
+    } as any
+
+    const symbol = buildTooltipSymbol(
+      modules,
+      "<strong>FAST-1</strong>",
+      CURSOR_TOOLTIP_STYLE
+    )
+
+    if (!symbol) {
+      throw new Error("Expected tooltip symbol instance")
+    }
+
+    expect(symbol).toBeInstanceOf(MockTextSymbol)
+    expect(symbol.text).toBe("FAST-1")
+    expect(symbol.color).toBe(CURSOR_TOOLTIP_STYLE.textColor)
+    expect(symbol.haloColor).toBe(CURSOR_TOOLTIP_STYLE.haloColor)
+    expect(symbol.font.family).toBe(CURSOR_TOOLTIP_STYLE.fontFamily)
+  })
+
+  it("should create and clear cursor graphics through sync helper", () => {
+    class MockTextSymbol {
+      text: string
+      constructor(props: any) {
+        this.text = props.text
+      }
+    }
+
+    class MockGraphic {
+      geometry: any
+      symbol: any
+
+      constructor(props: any) {
+        this.geometry = props.geometry
+        this.symbol = props.symbol
+      }
+    }
+
+    const modules = {
+      Graphic: MockGraphic,
+      TextSymbol: MockTextSymbol,
+    } as any
+
+    const layer = {
+      add: jest.fn(),
+      remove: jest.fn(),
+    } as any
+
+    const mapPoint = { x: 1, y: 2 } as any
+    const highlightColor: [number, number, number, number] = [0, 180, 216, 0.4]
+
+    const state = syncCursorGraphics({
+      modules,
+      layer,
+      mapPoint,
+      tooltipText: "<em>FAST-1</em>",
+      highlightColor,
+      outlineWidth: 2,
+      existing: null,
+      style: CURSOR_TOOLTIP_STYLE,
+    })
+
+    if (!state) {
+      throw new Error("Expected cursor graphics state")
+    }
+
+    expect(layer.add).toHaveBeenCalledTimes(2)
+    expect(state.pointGraphic).toBeInstanceOf(MockGraphic)
+    expect(state.tooltipGraphic).toBeInstanceOf(MockGraphic)
+    expect(state.tooltipGraphic?.symbol).toBeInstanceOf(MockTextSymbol)
+    expect((state.tooltipGraphic?.symbol as MockTextSymbol).text).toBe("FAST-1")
+    expect(state.lastTooltipText).toBe("<em>FAST-1</em>")
+
+    const clearedState = syncCursorGraphics({
+      modules,
+      layer,
+      mapPoint: null,
+      tooltipText: null,
+      highlightColor,
+      outlineWidth: 2,
+      existing: state,
+      style: CURSOR_TOOLTIP_STYLE,
+    })
+
+    expect(layer.remove).toHaveBeenCalledTimes(2)
+    expect(clearedState).toBeNull()
+  })
+
+  it("should only update symbol when tooltip text changes (performance optimization)", () => {
+    class MockTextSymbol {
+      text: string
+      constructor(props: any) {
+        this.text = props.text
+      }
+    }
+
+    class MockGraphic {
+      geometry: any
+      symbol: any
+      constructor(props: any) {
+        this.geometry = props.geometry
+        this.symbol = props.symbol
+      }
+    }
+
+    const modules = {
+      Graphic: MockGraphic,
+      TextSymbol: MockTextSymbol,
+    } as any
+
+    const layer = {
+      add: jest.fn(),
+      remove: jest.fn(),
+    } as any
+
+    const mapPoint1 = { x: 1, y: 2 } as any
+    const mapPoint2 = { x: 3, y: 4 } as any
+    const highlightColor: [number, number, number, number] = [0, 180, 216, 0.4]
+
+    // Initial render with tooltip
+    const state1 = syncCursorGraphics({
+      modules,
+      layer,
+      mapPoint: mapPoint1,
+      tooltipText: "Property A",
+      highlightColor,
+      outlineWidth: 2,
+      existing: null,
+      style: CURSOR_TOOLTIP_STYLE,
+    })
+
+    expect(state1?.lastTooltipText).toBe("Property A")
+    const originalSymbol = state1?.tooltipGraphic?.symbol
+
+    // Move cursor but keep same tooltip text - symbol should NOT be recreated
+    const state2 = syncCursorGraphics({
+      modules,
+      layer,
+      mapPoint: mapPoint2,
+      tooltipText: "Property A",
+      highlightColor,
+      outlineWidth: 2,
+      existing: state1,
+      style: CURSOR_TOOLTIP_STYLE,
+    })
+
+    expect(state2?.lastTooltipText).toBe("Property A")
+    expect(state2?.tooltipGraphic?.symbol).toBe(originalSymbol) // Same symbol reference
+    expect(state2?.tooltipGraphic?.geometry).toBe(mapPoint2) // Position updated
+
+    // Change tooltip text - symbol SHOULD be recreated
+    const state3 = syncCursorGraphics({
+      modules,
+      layer,
+      mapPoint: mapPoint2,
+      tooltipText: "Property B",
+      highlightColor,
+      outlineWidth: 2,
+      existing: state2,
+      style: CURSOR_TOOLTIP_STYLE,
+    })
+
+    expect(state3?.lastTooltipText).toBe("Property B")
+    expect(state3?.tooltipGraphic?.symbol).not.toBe(originalSymbol) // New symbol created
+    expect((state3?.tooltipGraphic?.symbol as MockTextSymbol).text).toBe(
+      "Property B"
+    )
+  })
 })
 
 describe("Property Widget - Undo Functionality", () => {
@@ -991,13 +1253,90 @@ describe("Property Widget - Telemetry", () => {
 })
 
 describe("Query Controls", () => {
-  it("should expose clearQueryCache as a safe no-op", async () => {
-    const { clearQueryCache } = await import("../shared/api")
+  const createDefaultQueryResponse = () => ({
+    features: [
+      {
+        attributes: {
+          FNR: "123",
+          OBJECTID: 1,
+          UUID_FASTIGHET: "uuid-123",
+          FASTIGHET: "Test 1:1",
+        },
+      },
+    ],
+  })
 
-    expect(typeof clearQueryCache).toBe("function")
+  const createMockDsManager = (url: string) =>
+    ({
+      getDataSource: jest.fn(() => ({ url })),
+    }) as any
+
+  beforeEach(() => {
+    resetMockFeatureLayerState()
+    setMockQueryFeaturesResponse(createDefaultQueryResponse())
+    clearQueryCache()
+  })
+
+  afterEach(() => {
+    clearQueryCache()
+  })
+
+  it("should clear cached FeatureLayers without errors", async () => {
+    const dsManager = createMockDsManager(
+      "https://example.com/arcgis/rest/services/Parcels/MapServer/0"
+    )
+    const point: any = { x: 10, y: 20, spatialReference: { wkid: 3006 } }
+
+    await queryPropertyByPoint(point, "property", dsManager)
+    expect(getFeatureLayerCtorCount()).toBe(1)
+
     expect(() => {
       clearQueryCache()
     }).not.toThrow()
+
+    getMockFeatureLayerInstances().forEach((instance) => {
+      expect(instance.destroy).toHaveBeenCalledTimes(1)
+      expect(instance.destroyed).toBe(true)
+    })
+  })
+
+  it("should reuse cached FeatureLayer instances across property queries", async () => {
+    const dsManager = createMockDsManager(
+      "https://example.com/arcgis/rest/services/Parcels/MapServer/0"
+    )
+    const point: any = { x: 0, y: 0, spatialReference: { wkid: 3006 } }
+
+    const firstResult = await queryPropertyByPoint(point, "property", dsManager)
+    const secondResult = await queryPropertyByPoint(
+      point,
+      "property",
+      dsManager
+    )
+
+    expect(firstResult.length).toBe(1)
+    expect(secondResult.length).toBe(1)
+    expect(getFeatureLayerCtorCount()).toBe(1)
+  })
+
+  it("should destroy cached FeatureLayers before creating new ones after clear", async () => {
+    const dsManager = createMockDsManager(
+      "https://example.com/arcgis/rest/services/Parcels/MapServer/0"
+    )
+    const point: any = { x: 5, y: 15, spatialReference: { wkid: 3006 } }
+
+    await queryPropertyByPoint(point, "property", dsManager)
+    const cachedInstancesBeforeClear = getMockFeatureLayerInstances().slice()
+    expect(cachedInstancesBeforeClear.length).toBe(1)
+
+    clearQueryCache()
+
+    cachedInstancesBeforeClear.forEach((instance) => {
+      expect(instance.destroy).toHaveBeenCalledTimes(1)
+      expect(instance.destroyed).toBe(true)
+    })
+
+    await queryPropertyByPoint(point, "property", dsManager)
+    expect(getFeatureLayerCtorCount()).toBe(2)
   })
 
   it("should remove deprecated query cache constants", () => {
@@ -1022,5 +1361,221 @@ describe("Query Controls", () => {
 
     expect(OWNER_QUERY_CONCURRENCY).toBeDefined()
     expect(OWNER_QUERY_CONCURRENCY).toBe(5)
+  })
+})
+
+describe("Export Utilities - CSV", () => {
+  const baseRow: GridRowData = {
+    id: "row-1",
+    FNR: "123",
+    UUID_FASTIGHET: "uuid-123",
+    FASTIGHET: "Property",
+    BOSTADR: "Owner",
+  }
+
+  it("should escape commas in values", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        FASTIGHET: "Value, with comma",
+      },
+    ]
+
+    const csv = convertToCSV(rows)
+    expect(csv.split("\n")[1]).toContain('"Value, with comma"')
+  })
+
+  it("should escape quotes in values", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        BOSTADR: 'Address "quoted" street',
+      },
+    ]
+
+    const csv = convertToCSV(rows)
+    expect(csv.split("\n")[1]).toContain('"Address ""quoted"" street"')
+  })
+
+  it("should handle Swedish characters", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        BOSTADR: "Malmö",
+      },
+    ]
+
+    const csv = convertToCSV(rows)
+    expect(csv).toContain("Malmö")
+  })
+
+  it("should strip HTML tags before exporting", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        FASTIGHET: "<strong>Secure</strong>",
+      },
+    ]
+
+    const csv = convertToCSV(rows)
+    expect(csv).toContain("Secure")
+    expect(csv).not.toContain("<strong>")
+  })
+})
+
+describe("Export Utilities - GeoJSON", () => {
+  const baseRow: GridRowData = {
+    id: "row-geo",
+    FNR: "456",
+    UUID_FASTIGHET: "uuid-geo",
+    FASTIGHET: "<em>Geo property</em>",
+    BOSTADR: "<span>Geo owner</span>",
+  }
+
+  it("should convert polygon geometry", () => {
+    const polygonRow: GridRowData = {
+      ...baseRow,
+      graphic: {
+        geometry: {
+          type: "polygon",
+          rings: [
+            [
+              [0, 0],
+              [1, 0],
+              [1, 1],
+              [0, 1],
+              [0, 0],
+            ],
+          ],
+        },
+      } as unknown as __esri.Graphic,
+    }
+
+    const geojson = convertToGeoJSON([polygonRow]) as any
+    expect(geojson.features).toHaveLength(1)
+    expect(geojson.features[0].geometry.type).toBe("Polygon")
+  })
+
+  it("should skip rows without geometry", () => {
+    const rows: GridRowData[] = [{ ...baseRow }]
+    const geojson = convertToGeoJSON(rows) as any
+    expect(geojson.features).toHaveLength(0)
+  })
+
+  it("should sanitize HTML in properties", () => {
+    const rowWithHtml: GridRowData = {
+      ...baseRow,
+      graphic: {
+        geometry: {
+          type: "point",
+          x: 10,
+          y: 20,
+        },
+      } as unknown as __esri.Graphic,
+    }
+
+    const geojson = convertToGeoJSON([rowWithHtml]) as any
+    expect(geojson.features[0].properties.FASTIGHET).toBe("Geo property")
+    expect(geojson.features[0].properties.BOSTADR).toBe("Geo owner")
+  })
+})
+
+describe("Export Utilities - exportData", () => {
+  it("should trigger download flow and revoke object URL", () => {
+    const rawData = [{ id: 1 }]
+    const rows: GridRowData[] = [
+      {
+        id: "row-export",
+        FNR: "789",
+        UUID_FASTIGHET: "uuid-export",
+        FASTIGHET: "Export Property",
+        BOSTADR: "Export Owner",
+      },
+    ]
+
+    jest.useFakeTimers()
+
+    const originalCreateObjectURL = (global.URL as any)?.createObjectURL
+    const originalRevokeObjectURL = (global.URL as any)?.revokeObjectURL
+
+    const createObjectURL = jest.fn(() => "blob:mock")
+    const revokeObjectURL = jest.fn()
+
+    Object.defineProperty(global.URL, "createObjectURL", {
+      configurable: true,
+      writable: true,
+      value: createObjectURL,
+    })
+    Object.defineProperty(global.URL, "revokeObjectURL", {
+      configurable: true,
+      writable: true,
+      value: revokeObjectURL,
+    })
+    const appendChildSpy = jest.spyOn(document.body, "appendChild")
+    const removeChildSpy = jest.spyOn(document.body, "removeChild")
+
+    const originalCreateElement = document.createElement.bind(document)
+    const anchorElement = originalCreateElement("a") as HTMLAnchorElement
+    const clickMock = jest.fn()
+    anchorElement.click = clickMock
+
+    const createElementSpy = jest
+      .spyOn(document, "createElement")
+      .mockImplementation((tagName: string, options?: any) => {
+        if (tagName.toLowerCase() === "a") {
+          return anchorElement
+        }
+        return originalCreateElement(tagName, options)
+      })
+
+    const definition = {
+      id: "json" as const,
+      label: "JSON",
+      description: "",
+      extension: "json",
+      mimeType: "application/json",
+    }
+
+    try {
+      exportData(rawData, rows, {
+        format: "json",
+        filename: "property-export",
+        rowCount: rows.length,
+        definition,
+      })
+
+      expect(createObjectURL).toHaveBeenCalled()
+      expect(appendChildSpy).toHaveBeenCalledWith(anchorElement)
+      expect(clickMock).toHaveBeenCalledTimes(1)
+
+      jest.runAllTimers()
+
+      expect(removeChildSpy).toHaveBeenCalledWith(anchorElement)
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock")
+    } finally {
+      if (originalCreateObjectURL) {
+        Object.defineProperty(global.URL, "createObjectURL", {
+          configurable: true,
+          writable: true,
+          value: originalCreateObjectURL,
+        })
+      } else {
+        delete (global.URL as any).createObjectURL
+      }
+
+      if (originalRevokeObjectURL) {
+        Object.defineProperty(global.URL, "revokeObjectURL", {
+          configurable: true,
+          writable: true,
+          value: originalRevokeObjectURL,
+        })
+      } else {
+        delete (global.URL as any).revokeObjectURL
+      }
+      appendChildSpy.mockRestore()
+      removeChildSpy.mockRestore()
+      createElementSpy.mockRestore()
+      jest.useRealTimers()
+    }
   })
 })

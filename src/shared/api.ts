@@ -22,17 +22,122 @@ import {
   isAbortError,
   ownerIdentity,
   normalizeFnrKey,
+  normalizeHostList,
+  abortHelpers,
+  logger,
+  formatOwnerInfo,
+  formatPropertyWithShare,
+  createRowId,
+  extractFnr,
+  calculatePropertyUpdates,
+  processPropertyQueryResults,
 } from "./utils"
 import { OWNER_QUERY_CONCURRENCY } from "../config/constants"
+
+// ============================================================================
+// QUERY CACHE SERVICE
+// LRU cache with size limits and automatic eviction
+// ============================================================================
+
+const queryCacheService = {
+  cache: new Map<string, { value: any; timestamp: number }>(),
+  maxSize: 100,
+  hits: 0,
+  misses: 0,
+
+  get(key: string): unknown {
+    const entry = this.cache.get(key)
+    if (entry) {
+      this.hits++
+      // Update timestamp for LRU
+      entry.timestamp = Date.now()
+      return entry.value
+    }
+    this.misses++
+    return undefined
+  },
+
+  set(key: string, value: unknown): void {
+    if (this.cache.size >= this.maxSize) {
+      this.evictOldest()
+    }
+    this.cache.set(key, { value, timestamp: Date.now() })
+  },
+
+  evictOldest(): void {
+    const entriesToRemove = Math.floor(this.maxSize * 0.2)
+    const sorted = Array.from(this.cache.entries()).sort(
+      (a, b) => a[1].timestamp - b[1].timestamp
+    )
+    sorted.slice(0, entriesToRemove).forEach(([key]) => this.cache.delete(key))
+  },
+
+  clear(): void {
+    this.cache.clear()
+    this.hits = 0
+    this.misses = 0
+  },
+
+  getMetrics() {
+    return {
+      size: this.cache.size,
+      hits: this.hits,
+      misses: this.misses,
+      hitRate:
+        this.hits + this.misses > 0 ? this.hits / (this.hits + this.misses) : 0,
+    }
+  },
+}
+
+/**
+ * Clear all query caches
+ * Called when config changes or widget unmounts
+ */
+export const clearQueryCache = (): void => {
+  queryCacheService.clear()
+  featureLayerCache.forEach((layer) => {
+    try {
+      if (layer && typeof layer.destroy === "function") {
+        layer.destroy()
+      }
+    } catch (error) {
+      logger.warn("Failed to destroy cached FeatureLayer", {
+        error,
+      })
+    }
+  })
+  featureLayerCache.clear()
+  cachedFeatureLayerCtor = null
+  cachedQueryCtor = null
+}
 
 const createSignalOptions = (signal?: AbortSignal): any => {
   return signal ? { signal } : undefined
 }
 
-// =============================================================================
-// URL AND DATASOURCE VALIDATION HELPERS
-// =============================================================================
+// ============================================================================
+// MODULE CONSTRUCTOR CACHING
+// Cache ArcGIS JS API constructors for performance
+// ============================================================================
 
+let cachedFeatureLayerCtor:
+  | (new (props: __esri.FeatureLayerProperties) => __esri.FeatureLayer)
+  | null = null
+let cachedQueryCtor:
+  | (new (props: __esri.QueryProperties) => __esri.Query)
+  | null = null
+const featureLayerCache = new Map<string, __esri.FeatureLayer>()
+
+// Cache constructors for relationship queries
+let cachedQueryTaskCtor: (new (props: any) => any) | null = null
+let cachedRelationshipQueryCtor: (new (props?: any) => any) | null = null
+
+// ============================================================================
+// URL VALIDATION
+// Security checks for ArcGIS service URLs
+// ============================================================================
+
+// Check if hostname is private/local
 const isPrivateHost = (hostname: string): boolean => {
   const lower = hostname.toLowerCase()
   return (
@@ -54,6 +159,7 @@ const isValidHttpsUrl = (parsed: URL): boolean => {
 }
 
 const isValidArcGISPath = (pathname: string): boolean => {
+  if (pathname.length > 500) return false
   return /\/(MapServer|FeatureServer)\/\d+(\/query)?$/.test(pathname)
 }
 
@@ -122,9 +228,7 @@ const validateDataSourceUrl = (
   allowedHosts: readonly string[] | undefined,
   translate: (key: string) => string
 ): ValidationResult<null> => {
-  const normalizedHosts = allowedHosts
-    ?.map((host) => host.trim())
-    .filter((host) => host.length > 0)
+  const normalizedHosts = normalizeHostList(allowedHosts)
 
   const url = getDataSourceUrl(ds)
   if (!url || !isValidArcGISUrl(url, normalizedHosts)) {
@@ -240,26 +344,6 @@ export const validateDataSources = (params: {
     return ownerUrlValidation
   }
 
-  const propertyUrl = getDataSourceUrl(propertyDs)
-  const ownerUrl = getDataSourceUrl(ownerDs)
-  if (propertyUrl && ownerUrl) {
-    const propertyService = propertyUrl.split("/MapServer/")[0]
-    const ownerService = ownerUrl.split("/MapServer/")[0]
-    if (propertyService !== ownerService) {
-      console.warn(
-        "⚠️ Configuration Warning: Property and owner layers use different MapServer services",
-        {
-          propertyService,
-          ownerService,
-          propertyUrl,
-          ownerUrl,
-          recommendation:
-            "Both should typically use the same MapServer service with different layer indexes (e.g., layer 0 for properties, layer 1 for owners)",
-        }
-      )
-    }
-  }
-
   return { valid: true, data: { manager: dsManager } }
 }
 
@@ -270,11 +354,7 @@ export const queryPropertyByPoint = async (
   options?: { signal?: AbortSignal }
 ): Promise<QueryResult[]> => {
   try {
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
     if (!ds) {
@@ -286,26 +366,30 @@ export const queryPropertyByPoint = async (
       throw new Error("Data source URL not available")
     }
 
-    console.log("Querying layer:", {
-      dataSourceId,
-      url: layerUrl,
-      pointX: point.x,
-      pointY: point.y,
-      wkid: point.spatialReference?.wkid,
-    })
+    if (!cachedFeatureLayerCtor || !cachedQueryCtor) {
+      const [FeatureLayer, Query] = await loadArcGISJSAPIModules([
+        "esri/layers/FeatureLayer",
+        "esri/rest/support/Query",
+      ])
+      cachedFeatureLayerCtor = FeatureLayer as typeof __esri.FeatureLayer
+      cachedQueryCtor = Query as typeof __esri.Query
+    }
 
-    // Load FeatureLayer and Query classes
-    const [FeatureLayer, Query] = await loadArcGISJSAPIModules([
-      "esri/layers/FeatureLayer",
-      "esri/rest/support/Query",
-    ])
+    const FeatureLayerCtor = cachedFeatureLayerCtor
+    const QueryCtor = cachedQueryCtor
+    if (!FeatureLayerCtor || !QueryCtor) {
+      throw new Error("Property query modules failed to load")
+    }
 
-    // Create a temporary FeatureLayer from the URL
-    const layer = new FeatureLayer({
-      url: layerUrl,
-    })
+    let layer = featureLayerCache.get(layerUrl)
+    if (!layer) {
+      layer = new FeatureLayerCtor({
+        url: layerUrl,
+      })
+      featureLayerCache.set(layerUrl, layer)
+    }
 
-    const query = new Query({
+    const query = new QueryCtor({
       geometry: point,
       returnGeometry: true,
       outFields: ["*"],
@@ -317,31 +401,21 @@ export const queryPropertyByPoint = async (
       createSignalOptions(options?.signal)
     )
 
-    console.log("Query result:", {
-      featureCount: result?.features?.length || 0,
-      hasFeatures: !!(result?.features && result.features.length > 0),
-      firstFeature: result?.features?.[0]?.attributes,
-    })
-
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     if (!result?.features || result.features.length === 0) {
-      console.log("No features found at this location")
       return []
     }
 
     const mappedResults = result.features.map((feature: __esri.Graphic) => {
+      const attrs = feature.attributes as PropertyAttributes
       return {
         features: [feature],
-        propertyId: (feature.attributes as PropertyAttributes).FNR,
+        propertyId: attrs.FNR,
       }
     })
 
-    console.log("Mapped results:", {
+    logger.debug("Mapped results", {
       count: mappedResults.length,
       propertyIds: mappedResults.map((r) => r.propertyId),
     })
@@ -349,11 +423,16 @@ export const queryPropertyByPoint = async (
     return mappedResults
   } catch (error) {
     if (isAbortError(error)) {
-      throw error as Error
+      throw error
     }
     throw new Error(parseArcGISError(error, "Property query failed"))
   }
 }
+
+// ============================================================================
+// OWNER QUERIES
+// Query owner information by property FNR (Fastighetsbeteckning)
+// ============================================================================
 
 export const queryOwnerByFnr = async (
   fnr: string | number,
@@ -362,11 +441,7 @@ export const queryOwnerByFnr = async (
   options?: { signal?: AbortSignal }
 ): Promise<__esri.Graphic[]> => {
   try {
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
     if (!ds) {
@@ -375,7 +450,7 @@ export const queryOwnerByFnr = async (
 
     const layerUrl = ds.url
     const layerDef = (ds as any).getLayerDefinition?.()
-    console.log("Querying owner layer:", {
+    logger.debug("Querying owner layer", {
       dataSourceId,
       url: layerUrl,
       fnr,
@@ -393,21 +468,17 @@ export const queryOwnerByFnr = async (
       createSignalOptions(options?.signal)
     )
 
-    console.log("Owner query result:", {
+    logger.debug("Owner query result", {
       fnr,
       recordCount: result?.records?.length || 0,
       hasRecords: !!(result?.records && result.records.length > 0),
       firstRecord: result?.records?.[0]?.getData(),
     })
 
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     if (!result?.records) {
-      console.log("⚠️ Owner query returned no records:", {
+      logger.warn("Owner query returned no records", {
         fnr,
         dataSourceId,
         url: layerUrl,
@@ -417,7 +488,7 @@ export const queryOwnerByFnr = async (
     }
 
     if (result.records.length === 0) {
-      console.log("⚠️ Owner query returned empty records array:", {
+      logger.warn("Owner query returned empty records array", {
         fnr,
         dataSourceId,
         url: layerUrl,
@@ -431,106 +502,26 @@ export const queryOwnerByFnr = async (
         attributes: data, // The data IS the attributes
       }
 
-      // Log ALL fields with their actual values to debug
-      const allFields: any = {}
-      Object.keys(data || {}).forEach((key) => {
-        allFields[key] = data[key]
-      })
-
-      console.log("Owner record processed - ALL FIELDS:", {
-        fnr,
-        allFieldsWithValues: allFields,
-        hasNAMN: "NAMN" in data,
-        hasBOSTADR: "BOSTADR" in data,
-        hasAGARLISTA: "AGARLISTA" in data,
-        NAMNvalue: data.NAMN,
-        BOSTADRvalue: data.BOSTADR,
-        AGARLISTAvalue: data.AGARLISTA,
+      logger.debug("Owner record processed", {
+        fnrLength: String(fnr).length,
+        hasNameField: typeof data?.NAMN === "string" && data.NAMN.length > 0,
+        hasAddressField:
+          typeof data?.BOSTADR === "string" && data.BOSTADR.length > 0,
+        hasOwnerList: typeof data?.AGARLISTA === "string",
       })
 
       return graphic as __esri.Graphic
     })
   } catch (error) {
-    if (isAbortError(error)) {
-      throw error as Error
-    }
+    abortHelpers.handleOrThrow(error)
     throw new Error(parseArcGISError(error, "Owner query failed"))
   }
 }
 
-export const clearQueryCache = () => {
-  // Query caching has been disabled to ensure fresh results on every request
-}
-
-export const queryExtentForProperties = async (
-  fnrs: Array<string | number>,
-  dataSourceId: string,
-  dsManager: DataSourceManager,
-  options?: { signal?: AbortSignal }
-): Promise<__esri.Extent | null> => {
-  try {
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
-
-    if (!fnrs || fnrs.length === 0) {
-      return null
-    }
-
-    const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
-    if (!ds) {
-      throw new Error("Property data source not found")
-    }
-
-    const whereClause = fnrs.map((fnr) => buildFnrWhereClause(fnr)).join(" OR ")
-
-    const result = await ds.query(
-      {
-        where: whereClause,
-        returnGeometry: true,
-        outFields: ["FNR"],
-      },
-      createSignalOptions(options?.signal)
-    )
-
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
-
-    if (!result?.records || result.records.length === 0) {
-      return null
-    }
-
-    let extent: __esri.Extent | null = null
-    result.records.forEach((record: FeatureDataRecord) => {
-      const feature = record.getData()
-      const geom = feature.geometry as __esri.Geometry
-      if (
-        geom &&
-        geom.extent !== undefined &&
-        geom.extent !== null &&
-        typeof geom.extent.clone === "function"
-      ) {
-        if (!extent) {
-          extent = geom.extent.clone()
-        } else {
-          extent = extent.union(geom.extent)
-        }
-      }
-    })
-
-    return extent
-  } catch (error) {
-    if (isAbortError(error)) {
-      throw error as Error
-    }
-    throw new Error(parseArcGISError(error, "Extent query failed"))
-  }
-}
+// ============================================================================
+// RELATIONSHIP QUERIES
+// Batch query owners using ArcGIS relationship class
+// ============================================================================
 
 export const queryOwnersByRelationship = async (
   propertyFnrs: Array<string | number>,
@@ -541,11 +532,7 @@ export const queryOwnersByRelationship = async (
   options?: { signal?: AbortSignal }
 ): Promise<Map<string, OwnerAttributes[]>> => {
   try {
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     if (!propertyFnrs || propertyFnrs.length === 0) {
       return new Map()
@@ -565,14 +552,25 @@ export const queryOwnersByRelationship = async (
       throw new Error("Property layer URL not available")
     }
 
-    const modules = await loadArcGISJSAPIModules([
-      "esri/tasks/QueryTask",
-      "esri/rest/support/RelationshipQuery",
-    ])
-    const [QueryTask, RelationshipQuery] = modules
+    // Load relationship query modules if not cached
+    if (!cachedQueryTaskCtor || !cachedRelationshipQueryCtor) {
+      const modules = await loadArcGISJSAPIModules([
+        "esri/tasks/QueryTask",
+        "esri/rest/support/RelationshipQuery",
+      ])
+      const [QueryTask, RelationshipQuery] = modules
+      cachedQueryTaskCtor = QueryTask
+      cachedRelationshipQueryCtor = RelationshipQuery
+    }
 
-    const queryTask = new QueryTask({ url: layerUrl })
-    const relationshipQuery = new RelationshipQuery()
+    const QueryTaskCtor = cachedQueryTaskCtor
+    const RelationshipQueryCtor = cachedRelationshipQueryCtor
+    if (!QueryTaskCtor || !RelationshipQueryCtor) {
+      throw new Error("Relationship query modules failed to load")
+    }
+
+    const queryTask = new QueryTaskCtor({ url: layerUrl })
+    const relationshipQuery = new RelationshipQueryCtor()
 
     const objectIds: number[] = []
     const fnrToObjectIdMap = new Map<number, string>()
@@ -587,22 +585,14 @@ export const queryOwnersByRelationship = async (
     )
 
     // Check abort immediately after async operation
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     if (!propertyResult?.records || propertyResult.records.length === 0) {
       return new Map()
     }
 
     // Check abort before processing records
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     propertyResult.records.forEach((record: FeatureDataRecord) => {
       const data = record.getData()
@@ -616,22 +606,14 @@ export const queryOwnersByRelationship = async (
     relationshipQuery.relationshipId = relationshipId
     relationshipQuery.outFields = ["*"]
 
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     const result = await queryTask.executeRelationshipQuery(
       relationshipQuery,
       createSignalOptions(options?.signal)
     )
 
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     const ownersByFnr = new Map<string, OwnerAttributes[]>()
 
@@ -649,17 +631,12 @@ export const queryOwnersByRelationship = async (
 
     return ownersByFnr
   } catch (error) {
-    if (isAbortError(error)) {
-      throw error as Error
-    }
+    abortHelpers.handleOrThrow(error)
     throw new Error(parseArcGISError(error, "Relationship query failed"))
   }
 }
 
-// =============================================================================
-// PROPERTY OWNER PROCESSING SERVICE
-// =============================================================================
-
+// Deduplicate owner entries based on identity keys
 const deduplicateOwnerEntries = (
   entries: Array<
     __esri.Graphic | OwnerAttributes | { attributes?: OwnerAttributes }
@@ -678,13 +655,17 @@ const deduplicateOwnerEntries = (
       return
     }
 
-    const identityKey = ownerIdentity.buildKey(attrs, context, index)
-    if (seen.has(identityKey)) {
-      return
-    }
+    try {
+      const identityKey = ownerIdentity.buildKey(attrs, context, index)
+      if (seen.has(identityKey)) {
+        return
+      }
 
-    seen.add(identityKey)
-    uniqueOwners.push(attrs)
+      seen.add(identityKey)
+      uniqueOwners.push(attrs)
+    } catch (error) {
+      uniqueOwners.push(attrs)
+    }
   })
 
   return uniqueOwners
@@ -988,12 +969,14 @@ const processBatchQuery = async (
     )
   } catch (error) {
     if (helpers.isAbortError(error)) {
-      throw error as Error
+      throw error instanceof Error ? error : new Error(String(error))
     }
-    console.error("Batch owner query failed for FNRs:", fnrsToQuery, error)
+    console.error("Batch owner query failed", error)
     ownersByFnr = new Map()
     fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)))
   }
+
+  abortHelpers.throwIfAborted(context.signal)
   for (const { fnr, attrs, graphic } of validatedProperties) {
     const owners = ownersByFnr.get(String(fnr)) || []
 
@@ -1112,6 +1095,117 @@ export const propertyQueryService = {
   processIndividual: processIndividualQuery,
 }
 
+export interface PropertySelectionPipelineParams {
+  mapPoint: __esri.Point
+  propertyDataSourceId: string
+  ownerDataSourceId: string
+  dsManager: DataSourceManager
+  maxResults: number
+  toggleEnabled: boolean
+  enableBatchOwnerQuery?: boolean
+  relationshipId?: number
+  enablePIIMasking: boolean
+  signal: AbortSignal
+  selectedProperties: GridRowData[]
+  translate: (key: string) => string
+}
+
+export type PropertySelectionPipelineResult =
+  | { status: "empty" }
+  | {
+      status: "success"
+      rowsToProcess: GridRowData[]
+      graphicsToAdd: Array<{
+        graphic: __esri.Graphic
+        fnr: string | number
+      }>
+      updatedRows: GridRowData[]
+      toRemove: Set<string>
+      propertyResults: QueryResult[]
+    }
+
+export const runPropertySelectionPipeline = async (
+  params: PropertySelectionPipelineParams
+): Promise<PropertySelectionPipelineResult> => {
+  const {
+    mapPoint,
+    propertyDataSourceId,
+    ownerDataSourceId,
+    dsManager,
+    maxResults,
+    toggleEnabled,
+    enableBatchOwnerQuery,
+    relationshipId,
+    enablePIIMasking,
+    signal,
+    selectedProperties,
+    translate,
+  } = params
+
+  const propertyResults = await queryPropertyByPoint(
+    mapPoint,
+    propertyDataSourceId,
+    dsManager,
+    { signal }
+  )
+
+  if (propertyResults.length === 0) {
+    return { status: "empty" }
+  }
+
+  const { rowsToProcess, graphicsToAdd } = await processPropertyQueryResults({
+    propertyResults,
+    config: {
+      propertyDataSourceId,
+      ownerDataSourceId,
+      enablePIIMasking,
+      relationshipId,
+      enableBatchOwnerQuery,
+    },
+    processingContext: {
+      dsManager,
+      maxResults,
+      signal,
+      helpers: {
+        extractFnr,
+        queryOwnerByFnr,
+        queryOwnersByRelationship,
+        createRowId,
+        formatPropertyWithShare,
+        formatOwnerInfo,
+        isAbortError,
+      },
+      messages: {
+        unknownOwner: translate("unknownOwner"),
+        errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
+        errorNoDataAvailable: translate("errorNoDataAvailable"),
+      },
+    },
+    services: {
+      processBatch: propertyQueryService.processBatch,
+      processIndividual: propertyQueryService.processIndividual,
+    },
+  })
+
+  abortHelpers.throwIfAborted(signal)
+
+  const { toRemove, updatedRows } = calculatePropertyUpdates(
+    rowsToProcess,
+    selectedProperties,
+    toggleEnabled,
+    maxResults
+  )
+
+  return {
+    status: "success",
+    rowsToProcess,
+    graphicsToAdd,
+    updatedRows,
+    toRemove,
+    propertyResults,
+  }
+}
+
 export const queryPropertiesInBuffer = async (
   point: __esri.Point,
   bufferDistance: number,
@@ -1121,11 +1215,7 @@ export const queryPropertiesInBuffer = async (
   options?: { signal?: AbortSignal }
 ): Promise<PropertyAttributes[]> => {
   try {
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     const modules = await loadArcGISJSAPIModules([
       "esri/geometry/geometryEngine",
@@ -1142,11 +1232,7 @@ export const queryPropertiesInBuffer = async (
       throw new Error("Failed to create buffer geometry")
     }
 
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
     if (!ds) {
@@ -1163,11 +1249,7 @@ export const queryPropertiesInBuffer = async (
       createSignalOptions(options?.signal)
     )
 
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     if (!result?.records || result.records.length === 0) {
       return []
@@ -1177,9 +1259,7 @@ export const queryPropertiesInBuffer = async (
       (record: FeatureDataRecord) => record.getData() as PropertyAttributes
     )
   } catch (error) {
-    if (isAbortError(error)) {
-      throw error as Error
-    }
+    abortHelpers.handleOrThrow(error)
     throw new Error(parseArcGISError(error, "Buffer query failed"))
   }
 }

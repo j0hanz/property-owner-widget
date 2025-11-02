@@ -9,8 +9,8 @@
   "icon": "icon.svg",
   "dependency": "jimu-arcgis",
   "defaultSize": {
-    "width": 325,
-    "height": 375
+    "width": 300,
+    "height": 600
   },
   "translatedLocales": [
     "en",

@@ -10,13 +10,17 @@ import {
   ReactRedux,
   type IMState,
   WidgetState,
-  type UseDataSource,
-  type ImmutableObject,
+  appActions,
+  getAppStore,
 } from "jimu-core"
 import { JimuMapViewComponent } from "jimu-arcgis"
 import {
   Alert,
   Button,
+  Dropdown,
+  DropdownButton,
+  DropdownItem,
+  DropdownMenu,
   Loading,
   LoadingType,
   SVG,
@@ -29,9 +33,10 @@ import type { ColumnDef } from "@tanstack/react-table"
 import type {
   IMConfig,
   ErrorBoundaryProps,
-  PropertyWidgetState,
   GridRowData,
   SelectionGraphicsParams,
+  ExportFormat,
+  OwnerAttributes,
 } from "../config/types"
 import { ErrorType } from "../config/enums"
 import { useWidgetStyles } from "../config/style"
@@ -41,31 +46,37 @@ import {
   usePopupManager,
   useMapViewLifecycle,
   useAbortControllerPool,
+  useDebounce,
+  useThrottle,
+  usePropertySelectionState,
 } from "../shared/hooks"
 import {
   queryPropertyByPoint,
   queryOwnerByFnr,
   clearQueryCache,
-  queryExtentForProperties,
-  queryOwnersByRelationship,
   validateDataSources,
-  propertyQueryService,
+  runPropertySelectionPipeline,
 } from "../shared/api"
 import {
   formatOwnerInfo,
-  formatPropertyWithShare,
-  createRowId,
   extractFnr,
   isAbortError,
   normalizeFnrKey,
-  calculatePropertyUpdates,
-  validateMapClickInputs,
+  validateMapClickPipeline,
   syncGraphicsWithState,
   cleanupRemovedGraphics,
   isValidationFailure,
   buildHighlightColor,
+  computeWidgetsToClose,
+  dataSourceHelpers,
+  getValidatedOutlineWidth,
+  updateRawPropertyResults,
+  logger,
+  syncCursorGraphics,
+  abortHelpers,
 } from "../shared/utils"
-import { OUTLINE_WIDTH } from "../config/constants"
+import type { CursorGraphicsState } from "../shared/utils"
+import { EXPORT_FORMATS, CURSOR_TOOLTIP_STYLE } from "../config/constants"
 import {
   trackEvent,
   trackError,
@@ -73,9 +84,10 @@ import {
   createPerformanceTracker,
 } from "../shared/telemetry"
 import clearIcon from "../assets/clear-selection-general.svg"
-import zoomIcon from "../assets/zoom-in.svg"
 import setupIcon from "../assets/config-missing.svg"
 import mapSelect from "../assets/map-select.svg"
+import exportIcon from "../assets/export.svg"
+import { exportData } from "../shared/export"
 
 const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   const {
@@ -89,13 +101,10 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
 
   const view = getCurrentView()
   if (!view) {
-    console.log(
-      "syncSelectionGraphics: no active view, deferring graphics sync"
-    )
     return
   }
 
-  const success = syncGraphicsWithState({
+  syncGraphicsWithState({
     graphicsToAdd,
     selectedRows,
     view,
@@ -103,53 +112,6 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
     highlightColor,
     outlineWidth,
   })
-
-  if (!success) {
-    console.log("syncSelectionGraphics: failed to sync graphics with state")
-  }
-}
-
-const extractUseDataSourceId = (
-  useDataSource: ImmutableObject<UseDataSource> | null | undefined
-): string | null => {
-  if (!useDataSource) {
-    return null
-  }
-
-  const getId = (useDataSource as any)?.get
-  if (typeof getId === "function") {
-    return getId.call(useDataSource, "dataSourceId") ?? null
-  }
-
-  return (useDataSource as any)?.dataSourceId ?? null
-}
-
-const findUseDataSourceById = (
-  useDataSources: AllWidgetProps<IMConfig>["useDataSources"],
-  dataSourceId?: string
-): ImmutableObject<UseDataSource> | null => {
-  if (!dataSourceId || !useDataSources) {
-    return null
-  }
-
-  const collection = useDataSources as unknown as {
-    find: (
-      predicate: (candidate: ImmutableObject<UseDataSource>) => boolean
-    ) => ImmutableObject<UseDataSource> | undefined
-  }
-
-  if (typeof collection.find !== "function") {
-    return null
-  }
-
-  const match = collection.find((candidate) => {
-    if (!candidate) {
-      return false
-    }
-    return extractUseDataSourceId(candidate) === dataSourceId
-  })
-
-  return match ?? null
 }
 
 // Error boundaries require class components in React (no functional equivalent)
@@ -167,11 +129,6 @@ class PropertyWidgetErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.log(
-      this.props.translate("errorBoundaryConsoleLog"),
-      error,
-      errorInfo
-    )
     trackError("error_boundary", error, errorInfo.componentStack)
   }
 
@@ -207,27 +164,21 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const prevRuntimeState = hooks.usePrevious(runtimeState)
 
   hooks.useEffectOnce(() => {
-    console.log("Property Widget: Initial mount", {
-      propertyDataSourceId: config.propertyDataSourceId,
-      ownerDataSourceId: config.ownerDataSourceId,
-      mapWidgetId: useMapWidgetIds?.[0],
-      hasDataSources: !!(
-        config.propertyDataSourceId && config.ownerDataSourceId
-      ),
-      runtimeState,
-    })
+    // Widget mounted
   })
 
-  const propertyUseDataSource = findUseDataSourceById(
+  const propertyUseDataSource = dataSourceHelpers.findById(
     props.useDataSources,
     config.propertyDataSourceId
-  )
-  const ownerUseDataSource = findUseDataSourceById(
+  ) as any
+  const ownerUseDataSource = dataSourceHelpers.findById(
     props.useDataSources,
     config.ownerDataSourceId
+  ) as any
+  const propertyUseDataSourceId = dataSourceHelpers.extractId(
+    propertyUseDataSource
   )
-  const propertyUseDataSourceId = extractUseDataSourceId(propertyUseDataSource)
-  const ownerUseDataSourceId = extractUseDataSourceId(ownerUseDataSource)
+  const ownerUseDataSourceId = dataSourceHelpers.extractId(ownerUseDataSource)
 
   const {
     modules,
@@ -251,14 +202,31 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   }
   const requestIdRef = React.useRef(0)
 
-  const [state, setState] = React.useState<PropertyWidgetState>({
-    error: null,
-    selectedProperties: [],
-    isQueryInFlight: false,
+  const {
+    state,
+    updateState,
+    setError,
+    handleSelectionChange,
+    handleClearAll,
+    handleWidgetReset,
+  } = usePropertySelectionState({
+    abortAll,
+    clearGraphics,
+    clearQueryCache,
+    trackEvent,
   })
   const isMountedRef = React.useRef(true)
 
+  // Hover tooltip state
+  const [hoverTooltipData, setHoverTooltipData] = React.useState<{
+    fastighet: string
+    bostadr: string
+  } | null>(null)
+  const [isHoverQueryActive, setIsHoverQueryActive] = React.useState(false)
+  const hoverQueryAbortRef = React.useRef<AbortController | null>(null)
+
   const hasSelectedProperties = state.selectedProperties.length > 0
+  const hasSelectedRows = state.rowSelectionIds.size > 0
 
   const renderConfiguredContent = () => {
     if (state.error) {
@@ -277,13 +245,20 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           columns={tableColumns}
           translate={translate}
           styles={styles}
+          onSelectionChange={handleSelectionChange}
         />
       )
     }
 
     return (
       <div css={styles.emptyState} role="status" aria-live="polite">
-        <SVG css={styles.svgState} src={mapSelect} width={100} height={100} />
+        <SVG
+          css={styles.svgState}
+          src={mapSelect}
+          width={100}
+          height={100}
+          aria-label={translate("clickMapToSelectProperties")}
+        />
         <div css={styles.messageState}>
           {translate("clickMapToSelectProperties")}
         </div>
@@ -295,20 +270,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const toggleEnabled = config.enableToggleRemoval
   const piiMaskingEnabled = config.enablePIIMasking
   const mapWidgetId = useMapWidgetIds?.[0]
-  const autoZoomEnabled = !!config.autoZoomOnSelection
   const highlightColorConfig = config.highlightColor
   const highlightOpacityConfig = config.highlightOpacity
   const outlineWidthConfig = config.outlineWidth
 
   hooks.useUpdateEffect(() => {
-    setState((prev) => {
+    updateState((prev) => {
       if (prev.selectedProperties.length === 0) return prev
 
-      console.log(
-        "PII masking toggled:",
-        piiMaskingEnabled,
-        "- reformatting existing data"
-      )
       trackFeatureUsage("pii_masking_toggled", piiMaskingEnabled)
 
       const reformattedProperties = prev.selectedProperties.map((row) => {
@@ -327,15 +296,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       return { ...prev, selectedProperties: reformattedProperties }
     })
-  }, [piiMaskingEnabled])
+  }, [piiMaskingEnabled, translate])
 
   hooks.useUpdateEffect(() => {
-    setState((prev) => {
+    updateState((prev) => {
       if (prev.selectedProperties.length <= maxResults) return prev
 
-      console.log(
-        `Max results changed to ${maxResults}, trimming from ${prev.selectedProperties.length} properties`
-      )
       trackEvent({
         category: "Property",
         action: "max_results_trim",
@@ -360,17 +326,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   }, [maxResults])
 
   hooks.useUpdateEffect(() => {
-    console.log("Toggle removal mode changed:", toggleEnabled)
     trackFeatureUsage("toggle_removal_changed", toggleEnabled)
   }, [toggleEnabled])
 
   hooks.useUpdateEffect(() => {
-    console.log(
-      "Batch owner query mode changed:",
-      config.enableBatchOwnerQuery,
-      "relationshipId:",
-      config.relationshipId
-    )
     trackFeatureUsage(
       "batch_owner_query_changed",
       config.enableBatchOwnerQuery ?? false
@@ -382,149 +341,128 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   )
   const tableColumns = tableColumnsRef.current
 
-  const handleClearAll = hooks.useEventCallback(() => {
-    abortAll()
-    clearQueryCache()
-    clearGraphics()
-    setState((prev) => {
-      trackEvent({
-        category: "Property",
-        action: "clear_all",
-        value: prev.selectedProperties.length,
-      })
+  const closeOtherWidgets = hooks.useEventCallback(() => {
+    const autoCloseSetting = config?.autoCloseOtherWidgets
+    if (autoCloseSetting !== undefined && !autoCloseSetting) {
+      return
+    }
+    try {
+      const store = typeof getAppStore === "function" ? getAppStore() : null
+      const state = store?.getState?.()
+      const runtimeInfo = state?.widgetsRuntimeInfo as
+        | {
+            [id: string]:
+              | { state?: WidgetState | string; isClassLoaded?: boolean }
+              | undefined
+          }
+        | undefined
+      const targets = computeWidgetsToClose(runtimeInfo, id)
+      if (targets.length) {
+        const safeTargets = targets.filter((targetId) => {
+          const targetInfo = runtimeInfo?.[targetId]
+          return Boolean(targetInfo?.isClassLoaded)
+        })
+        if (safeTargets.length) {
+          trackEvent({
+            category: "Widget",
+            action: "close_other_widgets",
+            value: safeTargets.length,
+          })
+          props.dispatch(appActions.closeWidgets(safeTargets))
+        }
+      }
+    } catch (err) {
+      // Silent fail - non-critical error
+    }
+  })
 
-      return {
-        ...prev,
-        selectedProperties: [],
-        error: null,
-        isQueryInFlight: false,
+  const handleExport = hooks.useEventCallback((format: ExportFormat) => {
+    if (!hasSelectedRows) {
+      return
+    }
+
+    if (!state.rawPropertyResults || state.rawPropertyResults.size === 0) {
+      return
+    }
+
+    const selectedRowData = state.selectedProperties.filter((row) =>
+      state.rowSelectionIds.has(row.id)
+    )
+
+    const selectedRawData: any[] = []
+    state.rowSelectionIds.forEach((id) => {
+      const rawData = state.rawPropertyResults?.get(id)
+      if (rawData) {
+        selectedRawData.push(rawData)
       }
     })
-  })
 
-  const handleZoomToResults = hooks.useEventCallback(async () => {
-    const view = getCurrentView()
-    if (!view) {
-      setError(ErrorType.VALIDATION_ERROR, translate("errorNoMapPoint"))
+    if (selectedRawData.length === 0) {
       return
     }
 
-    const fnrs = state.selectedProperties.map((prop) => prop.FNR)
-    if (fnrs.length === 0) {
-      setError(ErrorType.VALIDATION_ERROR, translate("noPropertiesSelected"))
-      return
-    }
+    const rowCount = selectedRowData.length
+    const formatDefinition = EXPORT_FORMATS.find((item) => item.id === format)
 
-    if (!config.propertyDataSourceId || !dsManagerRef.current) {
-      setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
-      return
-    }
-
-    setState((prev) => ({ ...prev, error: null }))
-
-    const controller = getController()
     try {
-      const extent = await queryExtentForProperties(
-        fnrs,
-        config.propertyDataSourceId,
-        dsManagerRef.current,
-        { signal: controller.signal }
-      )
-
-      if (controller.signal.aborted) {
-        return
-      }
-
-      if (!extent) {
-        setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
-        return
-      }
-
-      await view.goTo(extent.expand(1.2), { duration: 1000 })
-
-      trackEvent({
-        category: "Navigation",
-        action: "zoom_to_results",
-        value: fnrs.length,
+      exportData(selectedRawData, selectedRowData, {
+        format,
+        filename: "property-export",
+        rowCount,
+        definition: formatDefinition,
       })
     } catch (error) {
-      if (isAbortError(error)) {
-        return
-      }
-      setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
-      trackError("zoom_to_results", error)
-    } finally {
-      releaseController(controller)
+      console.error("Export failed", error)
     }
   })
 
-  const setError = hooks.useEventCallback(
-    (type: ErrorType, message: string, details?: string) => {
-      if (!isMountedRef.current) {
+  const handleExportFormatSelect = hooks.useEventCallback(
+    (format: ExportFormat) => {
+      if (!["json", "csv", "geojson"].includes(format)) {
         return
       }
-      setState((prev) => ({
-        ...prev,
-        error: { type, message, details },
-        isQueryInFlight: false,
-      }))
+      handleExport(format)
     }
   )
 
   const handlePropertyDataSourceFailed = hooks.useEventCallback(() => {
-    console.error("Property data source creation failed")
     setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
   })
 
   const handleOwnerDataSourceFailed = hooks.useEventCallback(() => {
-    console.error("Owner data source creation failed")
     setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
   })
+
+  const stateRef = hooks.useLatest(state)
 
   const handleMapClick = hooks.useEventCallback(
     async (event: __esri.ViewClickEvent) => {
       abortAll()
       const tracker = createPerformanceTracker("map_click_query")
 
-      // Step 1: Validate inputs
-      const validation = validateMapClickInputs(
+      const validation = validateMapClickPipeline({
         event,
         modules,
         config,
-        translate
-      )
-      if (isValidationFailure(validation)) {
-        const { error } = validation
-        setError(error.type, error.message)
-        tracker.failure(error.type)
-        trackError("map_click_validation", error.type, error.message)
-        return
-      }
-      const { mapPoint } = validation.data
-
-      // Step 2: Validate data sources
-      const dsValidation = validateDataSources({
-        propertyDsId: config.propertyDataSourceId,
-        ownerDsId: config.ownerDataSourceId,
         dsManager: dsManagerRef.current,
-        allowedHosts: config.allowedHosts,
         translate,
       })
 
-      if (isValidationFailure(dsValidation)) {
-        const { error, failureReason } = dsValidation
-        setError(error.type, error.message)
+      if (isValidationFailure(validation)) {
+        const { error, failureReason } = validation
+        setError(error.type as ErrorType, error.message)
         tracker.failure(failureReason)
-        trackError("map_click", failureReason)
+        trackError("map_click_validation", failureReason)
         return
       }
-      const { manager } = dsValidation.data
+
+      const { mapPoint, manager } = validation.data
 
       const requestId = requestIdRef.current + 1
       requestIdRef.current = requestId
       const isStaleRequest = () => requestId !== requestIdRef.current
 
-      setState((prev) => ({
+      updateState((prev) => ({
         ...prev,
         error: null,
         isQueryInFlight: true,
@@ -533,289 +471,108 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       const controller = getController()
 
       try {
-        // Step 3: Query properties
-        const propertyResults = await queryPropertyByPoint(
+        const pipelineResult = await runPropertySelectionPipeline({
           mapPoint,
-          config.propertyDataSourceId,
-          manager,
-          { signal: controller.signal }
-        )
-
-        if (controller.signal.aborted || isStaleRequest()) {
-          if (isStaleRequest()) {
-            return
-          }
-          tracker.failure("aborted")
-          return
-        }
-
-        if (!propertyResults.length) {
-          if (isStaleRequest()) {
-            return
-          }
-          console.log("No property results returned from query")
-          tracker.success()
-          trackEvent({
-            category: "Query",
-            action: "property_query",
-            label: "no_results",
-          })
-          return
-        }
-
-        console.log("Property results received:", {
-          count: propertyResults.length,
-          firstResult: propertyResults[0],
-          firstResultStructure: propertyResults[0]
-            ? {
-                hasFeatures: !!propertyResults[0].features,
-                featuresLength: propertyResults[0].features?.length,
-                firstFeature: propertyResults[0].features?.[0],
-                firstFeatureAttrs: propertyResults[0].features?.[0]?.attributes,
-                firstFeatureGeometry:
-                  !!propertyResults[0].features?.[0]?.geometry,
-              }
-            : null,
-        })
-
-        console.log("=== FULL JSON RESPONSE ===")
-        console.log(JSON.stringify(propertyResults, null, 2))
-        console.log("=== END JSON RESPONSE ===")
-
-        // Step 4: Process results and enrich with owner data
-        const useBatchQuery =
-          config.enableBatchOwnerQuery &&
-          config.relationshipId !== undefined &&
-          config.propertyDataSourceId
-
-        const processingContext = {
+          propertyDataSourceId: config.propertyDataSourceId,
+          ownerDataSourceId: config.ownerDataSourceId,
           dsManager: manager,
           maxResults,
+          toggleEnabled,
+          enableBatchOwnerQuery: config.enableBatchOwnerQuery,
+          relationshipId: config.relationshipId,
+          enablePIIMasking: piiMaskingEnabled,
           signal: controller.signal,
-          helpers: {
-            extractFnr,
-            queryOwnerByFnr,
-            queryOwnersByRelationship,
-            createRowId,
-            formatPropertyWithShare,
-            formatOwnerInfo,
-            isAbortError,
-          },
-          messages: {
-            unknownOwner: translate("unknownOwner"),
-            errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
-            errorNoDataAvailable: translate("errorNoDataAvailable"),
-          },
+          selectedProperties: stateRef.current.selectedProperties,
+          translate,
+        })
+
+        const abortStatus = abortHelpers.checkAbortedOrStale(
+          controller.signal,
+          isStaleRequest
+        )
+        if (abortStatus === "stale") {
+          return
         }
-
-        const { rowsToProcess, graphicsToAdd } =
-          useBatchQuery && config.relationshipId !== undefined
-            ? await propertyQueryService.processBatch({
-                propertyResults,
-                config: {
-                  propertyDataSourceId: config.propertyDataSourceId,
-                  ownerDataSourceId: config.ownerDataSourceId,
-                  enablePIIMasking: piiMaskingEnabled,
-                  relationshipId: config.relationshipId,
-                },
-                context: processingContext,
-              })
-            : await propertyQueryService.processIndividual({
-                propertyResults,
-                config: {
-                  ownerDataSourceId: config.ownerDataSourceId,
-                  enablePIIMasking: piiMaskingEnabled,
-                },
-                context: processingContext,
-              })
-
-        console.log("Processing complete:", {
-          rowsToProcessCount: rowsToProcess.length,
-          graphicsToAddCount: graphicsToAdd.length,
-          firstRow: rowsToProcess[0],
-          firstGraphic: graphicsToAdd[0],
-          firstGraphicHasGeometry: !!graphicsToAdd[0]?.graphic?.geometry,
-          firstGraphicGeometryType: graphicsToAdd[0]?.graphic?.geometry?.type,
-        })
-        console.log("First row details:", {
-          FASTIGHET: rowsToProcess[0]?.FASTIGHET,
-          BOSTADR: rowsToProcess[0]?.BOSTADR,
-          FNR: rowsToProcess[0]?.FNR,
-          hasGraphic: !!rowsToProcess[0]?.graphic,
-        })
-
-        if (controller.signal.aborted || isStaleRequest()) {
-          if (isStaleRequest()) {
-            return
-          }
+        if (abortStatus === "aborted") {
           tracker.failure("aborted")
           return
         }
 
-        // Step 5: Calculate updates with toggle logic
-        const { updatedRows, toRemove } = calculatePropertyUpdates(
-          rowsToProcess,
-          state.selectedProperties,
-          toggleEnabled,
-          maxResults
+        if (pipelineResult.status === "empty") {
+          updateState((prev) => {
+            if (isStaleRequest()) return prev
+            return { ...prev, isQueryInFlight: false }
+          })
+          tracker.success()
+          return
+        }
+
+        const previousSelection = stateRef.current.selectedProperties
+        const removedRows = previousSelection.filter((row) =>
+          pipelineResult.toRemove.has(normalizeFnrKey(row.FNR))
         )
 
-        // Compute highlight values fresh from current config
-        const currentHighlightColor = buildHighlightColor(
-          config.highlightColor,
-          config.highlightOpacity
-        )
-        const currentOutlineWidth = (() => {
-          const width = config.outlineWidth
-          if (typeof width !== "number" || !Number.isFinite(width)) {
-            return OUTLINE_WIDTH
+        if (removedRows.length > 0) {
+          trackEvent({
+            category: "Property",
+            action: "toggle_remove",
+            value: removedRows.length,
+          })
+        }
+
+        updateState((prev) => {
+          if (isStaleRequest()) {
+            return prev
           }
-          if (width < 0.5) return 0.5
-          if (width > 10) return 10
-          return width
-        })()
 
-        const syncParams: SelectionGraphicsParams = {
-          graphicsToAdd,
-          selectedRows: updatedRows,
+          const updatedRawResults = updateRawPropertyResults(
+            prev.rawPropertyResults || new Map(),
+            pipelineResult.rowsToProcess,
+            pipelineResult.propertyResults,
+            pipelineResult.toRemove,
+            prev.selectedProperties,
+            normalizeFnrKey
+          )
+
+          return {
+            ...prev,
+            selectedProperties: pipelineResult.updatedRows,
+            isQueryInFlight: false,
+            rawPropertyResults: updatedRawResults,
+          }
+        })
+
+        cleanupRemovedGraphics({
+          toRemove: pipelineResult.toRemove,
+          removeGraphicsForFnr,
+          normalizeFnrKey,
+        })
+
+        const highlightColor = buildHighlightColor(
+          highlightColorConfig,
+          highlightOpacityConfig
+        )
+        const outlineWidth = getValidatedOutlineWidth(outlineWidthConfig)
+
+        syncSelectionGraphics({
+          graphicsToAdd: pipelineResult.graphicsToAdd,
+          selectedRows: pipelineResult.updatedRows,
           getCurrentView,
           helpers: {
             addGraphicsToMap,
             extractFnr,
             normalizeFnrKey,
           },
-          highlightColor: currentHighlightColor,
-          outlineWidth: currentOutlineWidth,
-        }
-
-        console.log("syncParams created before setState:", {
-          graphicsCount: syncParams.graphicsToAdd.length,
-          selectedRowsCount: syncParams.selectedRows.length,
-          highlightColor: currentHighlightColor,
-          outlineWidth: currentOutlineWidth,
+          highlightColor,
+          outlineWidth,
         })
-
-        // Track toggle removals
-        if (toRemove.size > 0) {
-          const removedRows = state.selectedProperties.filter((row) =>
-            toRemove.has(normalizeFnrKey(row.FNR))
-          )
-          if (removedRows.length > 0) {
-            trackEvent({
-              category: "Property",
-              action: "toggle_remove",
-              value: removedRows.length,
-            })
-          }
-        }
-
-        // Update state
-        setState((prev) => {
-          // Check staleness atomically within setState
-          if (isStaleRequest()) {
-            return prev
-          }
-
-          return {
-            ...prev,
-            selectedProperties: updatedRows,
-            isQueryInFlight: false,
-          }
-        })
-
-        // Revalidate staleness before executing side effects
-        if (isStaleRequest()) {
-          console.log(
-            "Request became stale after setState, aborting side effects"
-          )
-          releaseController(controller)
-          return
-        }
-
-        console.log("After setState - executing sync:", {
-          hasSyncParams: !!syncParams,
-          graphicsCount: syncParams.graphicsToAdd.length,
-        })
-
-        // Cleanup removed graphics
-        cleanupRemovedGraphics({
-          updatedRows,
-          previousRows: state.selectedProperties,
-          removeGraphicsForFnr,
-          normalizeFnrKey,
-        })
-
-        // Sync graphics with map
-        console.log("About to sync graphics:", {
-          graphicsCount: syncParams.graphicsToAdd.length,
-          selectedRowsCount: syncParams.selectedRows.length,
-          highlightColor: syncParams.highlightColor,
-          outlineWidth: syncParams.outlineWidth,
-          hasView: !!getCurrentView(),
-        })
-        syncSelectionGraphics(syncParams)
-
-        if (
-          autoZoomEnabled &&
-          syncParams &&
-          syncParams.selectedRows &&
-          syncParams.selectedRows.length > 0 &&
-          config.propertyDataSourceId
-        ) {
-          const view = getCurrentView()
-          if (view) {
-            const fnrsForZoom = Array.from(
-              new Set(
-                syncParams.selectedRows.map((row) =>
-                  row.FNR != null ? String(row.FNR) : null
-                )
-              )
-            ).filter((fnr): fnr is string => !!fnr)
-
-            if (fnrsForZoom.length > 0) {
-              const zoomController = getController()
-              try {
-                const extent = await queryExtentForProperties(
-                  fnrsForZoom,
-                  config.propertyDataSourceId,
-                  manager,
-                  { signal: zoomController.signal }
-                )
-
-                if (
-                  extent &&
-                  !zoomController.signal.aborted &&
-                  !isStaleRequest()
-                ) {
-                  await view.goTo(extent.expand(1.2), { duration: 1000 })
-                  trackEvent({
-                    category: "Navigation",
-                    action: "auto_zoom_to_results",
-                    value: fnrsForZoom.length,
-                  })
-                }
-              } catch (error) {
-                if (!isAbortError(error)) {
-                  console.error("Auto zoom failed", error)
-                  trackError("auto_zoom", error)
-                  // Reset query state on auto-zoom error
-                  if (isMountedRef.current && !isStaleRequest()) {
-                    setState((prev) => ({ ...prev, isQueryInFlight: false }))
-                  }
-                }
-              } finally {
-                releaseController(zoomController)
-              }
-            }
-          }
-        }
 
         tracker.success()
         trackEvent({
           category: "Query",
           action: "property_query",
           label: "success",
-          value: rowsToProcess.length,
+          value: pipelineResult.rowsToProcess.length,
         })
         trackFeatureUsage("pii_masking", piiMaskingEnabled)
         trackFeatureUsage("toggle_removal", toggleEnabled)
@@ -823,12 +580,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         if (isStaleRequest()) {
           return
         }
+
         if (isAbortError(error)) {
           tracker.failure("aborted")
           return
         }
-        console.error("Property query error:", error)
-        console.error("Error details:", {
+
+        logger.error("Property query error:", error, {
           message: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack : undefined,
           propertyDsId: config.propertyDataSourceId,
@@ -838,12 +596,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         tracker.failure("query_error")
         trackError("property_query", error)
       } finally {
-        if (isMountedRef.current && !isStaleRequest()) {
-          setState((prev) => ({
-            ...prev,
-            isQueryInFlight: false,
-          }))
-        }
         releaseController(controller)
       }
     }
@@ -859,7 +611,336 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       onMapClick: handleMapClick,
     })
 
+  // Cursor point marker tracking
+  const cursorGraphicsStateRef = React.useRef<CursorGraphicsState | null>(null)
+  const pointerMoveHandleRef = React.useRef<__esri.Handle | null>(null)
+  const pointerLeaveHandleRef = React.useRef<__esri.Handle | null>(null)
+  const lastCursorPointRef = React.useRef<__esri.Point | null>(null)
+  const cachedLayerRef = React.useRef<__esri.GraphicsLayer | null>(null)
+  const rafIdRef = React.useRef<number | null>(null)
+  const pendingMapPointRef = React.useRef<__esri.Point | null>(null)
+  const cursorTooltipNoPropertyText = translate("cursorTooltipNoProperty")
+  const cursorTooltipFormatText = translate("cursorTooltipFormat")
+  const tooltipNoPropertyRef = hooks.useLatest(cursorTooltipNoPropertyText)
+  const tooltipFormatRef = hooks.useLatest(cursorTooltipFormatText)
+  const highlightColorConfigRef = hooks.useLatest(highlightColorConfig)
+  const highlightOpacityConfigRef = hooks.useLatest(highlightOpacityConfig)
+  const outlineWidthConfigRef = hooks.useLatest(outlineWidthConfig)
+
+  const clearCursorGraphics = hooks.useEventCallback(() => {
+    // Cancel any pending RAF update
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current)
+      rafIdRef.current = null
+    }
+    pendingMapPointRef.current = null
+
+    if (!cursorGraphicsStateRef.current) {
+      return
+    }
+
+    const layer = cachedLayerRef.current
+    if (layer) {
+      if (cursorGraphicsStateRef.current.pointGraphic) {
+        layer.remove(cursorGraphicsStateRef.current.pointGraphic)
+      }
+      if (cursorGraphicsStateRef.current.tooltipGraphic) {
+        layer.remove(cursorGraphicsStateRef.current.tooltipGraphic)
+      }
+    }
+
+    cursorGraphicsStateRef.current = null
+  })
+
+  // Hover query function - queries property at cursor position
+  const queryPropertyAtPoint = hooks.useEventCallback(
+    async (mapPoint: __esri.Point) => {
+      // Cancel any existing hover query
+      if (hoverQueryAbortRef.current) {
+        hoverQueryAbortRef.current.abort()
+        hoverQueryAbortRef.current = null
+      }
+
+      // Create new abort controller for this hover query
+      const controller = new AbortController()
+      hoverQueryAbortRef.current = controller
+
+      setIsHoverQueryActive(true)
+      try {
+        // Validate data sources
+        const dsValidation = validateDataSources({
+          propertyDsId: config.propertyDataSourceId,
+          ownerDsId: config.ownerDataSourceId,
+          dsManager: dsManagerRef.current,
+          allowedHosts: config.allowedHosts,
+          translate,
+        })
+
+        if (isValidationFailure(dsValidation)) {
+          setIsHoverQueryActive(false)
+          return
+        }
+        const { manager } = dsValidation.data
+
+        // Query property at point
+        const propertyResults = await queryPropertyByPoint(
+          mapPoint,
+          config.propertyDataSourceId,
+          manager,
+          { signal: controller.signal }
+        )
+
+        if (controller.signal.aborted || !isMountedRef.current) {
+          return
+        }
+
+        // No property found at cursor
+        if (!propertyResults.length || !propertyResults[0]?.features?.length) {
+          setHoverTooltipData(null)
+          setIsHoverQueryActive(false)
+          return
+        }
+
+        const feature = propertyResults[0].features[0]
+        const fnr = extractFnr(feature.attributes)
+        const fastighet = feature.attributes?.FASTIGHET || ""
+
+        if (!fnr || !fastighet) {
+          setHoverTooltipData(null)
+          setIsHoverQueryActive(false)
+          return
+        }
+
+        // Query owner data for this property
+        const ownerFeatures = await queryOwnerByFnr(
+          fnr,
+          config.ownerDataSourceId,
+          manager,
+          { signal: controller.signal }
+        )
+
+        if (controller.signal.aborted || !isMountedRef.current) {
+          return
+        }
+
+        // Format owner info
+        let bostadr = translate("unknownOwner")
+        if (ownerFeatures.length > 0) {
+          const ownerAttrs = ownerFeatures[0].attributes as OwnerAttributes
+          bostadr = formatOwnerInfo(
+            ownerAttrs,
+            piiMaskingEnabled,
+            translate("unknownOwner")
+          )
+        }
+
+        // Update hover tooltip data
+        setHoverTooltipData({ fastighet, bostadr })
+        setIsHoverQueryActive(false)
+      } catch (error) {
+        if (isAbortError(error)) return
+
+        logger.debug("Hover query failed", { error })
+        setHoverTooltipData(null)
+        setIsHoverQueryActive(false)
+      }
+    }
+  )
+
+  // Throttled version of hover query
+  const throttledHoverQuery = useThrottle(queryPropertyAtPoint, 100)
+
+  const updateCursorPoint = hooks.useEventCallback(
+    (mapPoint: __esri.Point | null) => {
+      if (!mapPoint) {
+        clearCursorGraphics()
+        return
+      }
+
+      if (!modules?.Graphic || !modules?.TextSymbol) {
+        clearCursorGraphics()
+        return
+      }
+
+      const layer = cachedLayerRef.current
+      if (!layer) {
+        clearCursorGraphics()
+        return
+      }
+
+      const currentHighlightColor = buildHighlightColor(
+        highlightColorConfigRef.current,
+        highlightOpacityConfigRef.current
+      )
+      const currentOutlineWidth = getValidatedOutlineWidth(
+        outlineWidthConfigRef.current
+      )
+
+      let tooltipText: string | null = null
+
+      if (hoverTooltipData) {
+        tooltipText = tooltipFormatRef.current.replace(
+          "{fastighet}",
+          hoverTooltipData.fastighet
+        )
+      } else if (!isHoverQueryActive) {
+        tooltipText = tooltipNoPropertyRef.current
+      }
+
+      cursorGraphicsStateRef.current = syncCursorGraphics({
+        modules,
+        layer,
+        mapPoint,
+        tooltipText,
+        highlightColor: currentHighlightColor,
+        outlineWidth: currentOutlineWidth,
+        existing: cursorGraphicsStateRef.current,
+        style: CURSOR_TOOLTIP_STYLE,
+      })
+    }
+  )
+
+  // Setup pointer-move listener when widget is active
   hooks.useUpdateEffect(() => {
+    const view = getCurrentView()
+    if (!view) return
+
+    const isActive =
+      runtimeState === WidgetState.Opened || runtimeState === WidgetState.Active
+
+    // Clean up existing handler
+    if (pointerMoveHandleRef.current) {
+      pointerMoveHandleRef.current.remove()
+      pointerMoveHandleRef.current = null
+      clearCursorGraphics()
+    }
+
+    if (pointerLeaveHandleRef.current) {
+      pointerLeaveHandleRef.current.remove()
+      pointerLeaveHandleRef.current = null
+    }
+
+    const canTrackCursor =
+      isActive && !!modules?.TextSymbol && !!modules?.Graphic
+
+    // Setup new handler if widget is active
+    if (canTrackCursor) {
+      // Cache layer reference to avoid repeated DOM queries
+      ensureGraphicsLayer(view)
+      cachedLayerRef.current = view.map.findLayerById(
+        `${id}-property-highlight-layer`
+      ) as __esri.GraphicsLayer | null
+
+      pointerMoveHandleRef.current = view.on("pointer-move", (event) => {
+        const screenPoint = { x: event.x, y: event.y }
+        const mapPoint = view.toMap(screenPoint)
+
+        if (mapPoint) {
+          lastCursorPointRef.current = mapPoint
+          pendingMapPointRef.current = mapPoint
+
+          // Use RAF to batch graphic updates at 60fps
+          if (rafIdRef.current === null) {
+            rafIdRef.current = requestAnimationFrame(() => {
+              rafIdRef.current = null
+              const point = pendingMapPointRef.current
+              if (point) {
+                updateCursorPoint(point)
+              }
+            })
+          }
+
+          // Trigger throttled hover query (fires periodically during movement)
+          throttledHoverQuery(mapPoint)
+        } else {
+          lastCursorPointRef.current = null
+          pendingMapPointRef.current = null
+          updateCursorPoint(null)
+          setHoverTooltipData(null)
+          setIsHoverQueryActive(false)
+        }
+      })
+
+      pointerLeaveHandleRef.current = view.on("pointer-leave", () => {
+        lastCursorPointRef.current = null
+        pendingMapPointRef.current = null
+        if (rafIdRef.current !== null) {
+          cancelAnimationFrame(rafIdRef.current)
+          rafIdRef.current = null
+        }
+        updateCursorPoint(null)
+        setHoverTooltipData(null)
+        setIsHoverQueryActive(false)
+      })
+    } else {
+      lastCursorPointRef.current = null
+      pendingMapPointRef.current = null
+      cachedLayerRef.current = null
+      clearCursorGraphics()
+      setHoverTooltipData(null)
+      setIsHoverQueryActive(false)
+    }
+
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current)
+        rafIdRef.current = null
+      }
+      if (pointerMoveHandleRef.current) {
+        pointerMoveHandleRef.current.remove()
+        pointerMoveHandleRef.current = null
+      }
+      if (pointerLeaveHandleRef.current) {
+        pointerLeaveHandleRef.current.remove()
+        pointerLeaveHandleRef.current = null
+      }
+      if (hoverQueryAbortRef.current) {
+        hoverQueryAbortRef.current.abort()
+        hoverQueryAbortRef.current = null
+      }
+      setHoverTooltipData(null)
+      setIsHoverQueryActive(false)
+      pendingMapPointRef.current = null
+      cachedLayerRef.current = null
+      if (!canTrackCursor) {
+        lastCursorPointRef.current = null
+      }
+      clearCursorGraphics()
+    }
+  }, [runtimeState, modules])
+
+  // Cleanup cursor point on unmount
+  hooks.useUnmount(() => {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current)
+      rafIdRef.current = null
+    }
+    if (pointerMoveHandleRef.current) {
+      pointerMoveHandleRef.current.remove()
+      pointerMoveHandleRef.current = null
+    }
+    if (pointerLeaveHandleRef.current) {
+      pointerLeaveHandleRef.current.remove()
+      pointerLeaveHandleRef.current = null
+    }
+    if (hoverQueryAbortRef.current) {
+      hoverQueryAbortRef.current.abort()
+      hoverQueryAbortRef.current = null
+    }
+    pendingMapPointRef.current = null
+    cachedLayerRef.current = null
+    lastCursorPointRef.current = null
+    clearCursorGraphics()
+  })
+
+  hooks.useUpdateEffect(() => {
+    // Update cursor point to refresh tooltip when hover data changes
+    if (!lastCursorPointRef.current) return
+    updateCursorPoint(lastCursorPointRef.current)
+  }, [hoverTooltipData, isHoverQueryActive])
+
+  // Sync selection graphics when highlight config changes
+  const debouncedSyncGraphics = useDebounce(() => {
     if (state.selectedProperties.length === 0) {
       return
     }
@@ -881,15 +962,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       highlightColorConfig,
       highlightOpacityConfig
     )
-    const currentOutlineWidth = (() => {
-      const width = outlineWidthConfig
-      if (typeof width !== "number" || !Number.isFinite(width)) {
-        return OUTLINE_WIDTH
-      }
-      if (width < 0.5) return 0.5
-      if (width > 10) return 10
-      return width
-    })()
+    const currentOutlineWidth = getValidatedOutlineWidth(outlineWidthConfig)
 
     syncSelectionGraphics({
       graphicsToAdd,
@@ -903,6 +976,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       highlightColor: currentHighlightColor,
       outlineWidth: currentOutlineWidth,
     })
+  }, 100)
+
+  hooks.useUpdateEffect(() => {
+    debouncedSyncGraphics()
   }, [highlightColorConfig, highlightOpacityConfig, outlineWidthConfig])
 
   hooks.useUpdateEffect(() => {
@@ -914,7 +991,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         typeof prevRuntimeState === "undefined")
 
     if (isOpening && modules) {
-      console.log("Property Widget: Reactivating on open from controller")
       const currentView = getCurrentView()
       if (currentView) {
         reactivateMapView()
@@ -923,10 +999,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           action: "widget_reopened",
           label: "from_controller",
         })
-      } else {
-        console.log(
-          "Property Widget: Map view not ready yet, will activate on next view change"
-        )
       }
     }
   }, [
@@ -936,6 +1008,28 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     reactivateMapView,
     getCurrentView,
   ])
+
+  hooks.useUpdateEffect(() => {
+    if (
+      runtimeState === WidgetState.Closed &&
+      prevRuntimeState !== WidgetState.Closed
+    ) {
+      handleWidgetReset()
+    }
+  }, [runtimeState, prevRuntimeState, handleWidgetReset])
+
+  hooks.useUpdateEffect(() => {
+    const isOpening =
+      (runtimeState === WidgetState.Opened ||
+        runtimeState === WidgetState.Active) &&
+      (prevRuntimeState === WidgetState.Closed ||
+        prevRuntimeState === WidgetState.Hidden ||
+        typeof prevRuntimeState === "undefined")
+
+    if (isOpening) {
+      closeOtherWidgets()
+    }
+  }, [runtimeState, prevRuntimeState, closeOtherWidgets])
 
   hooks.useUnmount(() => {
     isMountedRef.current = false
@@ -963,6 +1057,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             type={LoadingType.Donut}
             width={125}
             height={125}
+            aria-label={translate("loadingModules")}
           />
         </div>
       </div>
@@ -1013,22 +1108,40 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           <Button
             type="tertiary"
             icon
-            onClick={handleZoomToResults}
-            title={translate("zoomToResults")}
-            disabled={state.selectedProperties.length === 0}
-            aria-label={translate("zoomToResults")}
-          >
-            <SVG src={zoomIcon} size={20} />
-          </Button>
-          <Button
-            type="tertiary"
-            icon
             onClick={handleClearAll}
             title={translate("clearAll")}
             disabled={state.selectedProperties.length === 0}
           >
             <SVG src={clearIcon} size={20} />
           </Button>
+          <Dropdown
+            activeIcon
+            menuRole="listbox"
+            aria-label={translate("exportData")}
+          >
+            <DropdownButton
+              arrow={false}
+              icon
+              type="tertiary"
+              disabled={!hasSelectedRows}
+              title={translate("exportData")}
+              role="combobox"
+            >
+              <SVG src={exportIcon} size={20} />
+            </DropdownButton>
+            <DropdownMenu alignment="start">
+              {EXPORT_FORMATS.map((format) => (
+                <DropdownItem
+                  key={format.id}
+                  onClick={() => handleExportFormatSelect(format.id)}
+                  role="menuitem"
+                  title={translate(`export${format.label}Desc`)}
+                >
+                  {translate(`export${format.label}`)}
+                </DropdownItem>
+              ))}
+            </DropdownMenu>
+          </Dropdown>
         </div>
       </div>
       <div css={styles.body} role="main">

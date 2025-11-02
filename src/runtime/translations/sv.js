@@ -13,6 +13,8 @@ System.register([], function (e) {
         propertySelected: "Fastigheter valda:",
         clickMapToSelectProperties:
           "Börja klicka på kartan för att välja fastigheter",
+        cursorTooltipNoProperty: "Ingen fastighet vid markören",
+        cursorTooltipFormat: "{fastighet}",
         multipleOwnersFound: "Flera ägare hittades",
         emptyStatePrompt: "Klicka på fastighet",
         widgetNotConfigured: "Konfigurera widgeten för att börja använda den",
@@ -33,8 +35,6 @@ System.register([], function (e) {
         unknownOwner: "Okänd ägare",
         removeProperty: "Ta bort fastighet",
         clearAll: "Rensa alla",
-        zoomToResults: "Zooma till resultat",
-        queryingExtent: "Beräknar omfattning...",
         noPropertiesSelected: "Inga fastigheter valda",
         bufferSearch: "Buffertsökning",
         bufferDistance: "Buffertavstånd",
@@ -56,6 +56,13 @@ System.register([], function (e) {
         unknownErrorGeneric: "Ett okänt fel inträffade",
         errorBoundaryMessage: "Widgetfel. Vänligen uppdatera sidan.",
         errorBoundaryConsoleLog: "Fel i fastighetswidget:",
+        exportData: "Exportera",
+        exportJSON: "JSON",
+        exportJSONDesc: "Rådata med fullständig metadata",
+        exportCSV: "CSV",
+        exportCSVDesc: "Kalkylbladsformat (endast attribut)",
+        exportGeoJSON: "GeoJSON",
+        exportGeoJSONDesc: "Geografiskt dataformat",
       })
     },
   }

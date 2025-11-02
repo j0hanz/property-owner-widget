@@ -31,8 +31,6 @@ System.register([], function (e) {
           "Tillåt ett nytt klick för att avmarkera fastigheten.",
         enablePIIMaskingLabel: "PII-maskning",
         enablePIIMaskingDescription: "Maskera namn och adresser i widgeten.",
-        autoZoomOnSelectionLabel: "Zooma till resultat",
-        autoZoomOnSelectionDescription: "Zomma till markerade fastigheter.",
         highlightOptionsDescription:
           "Styr hur markerade fastigheter visas på kartan.",
         highlightColorLabel: "Markeringsfärg",

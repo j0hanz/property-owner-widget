@@ -24,8 +24,6 @@ export default {
   enableToggleRemovalDescription: "Let users click a parcel again to clear it.",
   enablePIIMaskingLabel: "PII masking",
   enablePIIMaskingDescription: "Mask names and addresses inside the widget.",
-  autoZoomOnSelectionLabel: "Auto zoom to results",
-  autoZoomOnSelectionDescription: "Zoom to selected parcels after each query.",
   highlightOptionsDescription: "Adjust how selected parcels appear on the map.",
   highlightColorLabel: "Highlight color",
   highlightOpacityLabel: "Fill opacity",

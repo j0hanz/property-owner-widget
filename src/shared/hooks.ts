@@ -1,16 +1,16 @@
 import { React, hooks } from "jimu-core"
 import { loadArcGISJSAPIModules } from "jimu-arcgis"
-import type { EsriModules } from "../config/types"
+import type {
+  EsriModules,
+  PropertyWidgetState,
+  TelemetryEvent,
+} from "../config/types"
+import type { ErrorType } from "../config/enums"
 import {
   ESRI_MODULES_TO_LOAD,
   ABORT_CONTROLLER_POOL_SIZE,
 } from "../config/constants"
-import {
-  popupSuppressionManager,
-  buildHighlightSymbolJSON,
-  buildHighlightLineSymbolJSON,
-  buildHighlightMarkerSymbolJSON,
-} from "./utils"
+import { popupSuppressionManager, buildHighlightSymbolJSON } from "./utils"
 
 export const useEsriModules = () => {
   const [modules, setModules] = React.useState<EsriModules | null>(null)
@@ -44,6 +44,7 @@ export const useEsriModules = () => {
           SimpleFillSymbol,
           SimpleLineSymbol,
           SimpleMarkerSymbol,
+          TextSymbol,
           Graphic,
           GraphicsLayer,
           Extent,
@@ -52,6 +53,7 @@ export const useEsriModules = () => {
           SimpleFillSymbol,
           SimpleLineSymbol,
           SimpleMarkerSymbol,
+          TextSymbol,
           Graphic,
           GraphicsLayer,
           Extent,
@@ -127,6 +129,113 @@ export const useAbortControllerPool = () => {
   return { getController, releaseController, abortAll }
 }
 
+interface PropertySelectionParams {
+  abortAll: () => void
+  clearGraphics: () => void
+  clearQueryCache: () => void
+  trackEvent: (event: TelemetryEvent) => void
+}
+
+interface PropertySelectionApi {
+  state: PropertyWidgetState
+  updateState: (
+    updater: (prev: PropertyWidgetState) => PropertyWidgetState
+  ) => void
+  setError: (type: ErrorType, message: string, details?: string) => void
+  handleSelectionChange: (selectedIds: Set<string>) => void
+  handleClearAll: () => void
+  handleWidgetReset: () => void
+}
+
+const createInitialSelectionState = (): PropertyWidgetState => ({
+  error: null,
+  selectedProperties: [],
+  isQueryInFlight: false,
+  rawPropertyResults: null,
+  rowSelectionIds: new Set(),
+})
+
+export const usePropertySelectionState = (
+  params: PropertySelectionParams
+): PropertySelectionApi => {
+  const { abortAll, clearGraphics, clearQueryCache, trackEvent } = params
+
+  const isMountedRef = React.useRef(true)
+  const [state, internalSetState] = React.useState<PropertyWidgetState>(
+    createInitialSelectionState()
+  )
+
+  const updateState = hooks.useEventCallback(
+    (updater: (prev: PropertyWidgetState) => PropertyWidgetState) => {
+      if (!isMountedRef.current) {
+        return
+      }
+      internalSetState((prev) => updater(prev))
+    }
+  )
+
+  const setError = hooks.useEventCallback(
+    (type: ErrorType, message: string, details?: string) => {
+      if (!isMountedRef.current) {
+        return
+      }
+      internalSetState((prev) => ({
+        ...prev,
+        error: { type, message, details },
+        isQueryInFlight: false,
+      }))
+    }
+  )
+
+  const handleSelectionChange = hooks.useEventCallback(
+    (selectedIds: Set<string>) => {
+      updateState((prev) => ({
+        ...prev,
+        rowSelectionIds: new Set(selectedIds),
+      }))
+    }
+  )
+
+  const resetState = hooks.useEventCallback((shouldTrackClear: boolean) => {
+    abortAll()
+    clearQueryCache()
+    clearGraphics()
+
+    updateState((prev) => {
+      if (shouldTrackClear) {
+        trackEvent({
+          category: "Property",
+          action: "clear_all",
+          value: prev.selectedProperties.length,
+        })
+      }
+
+      return createInitialSelectionState()
+    })
+  })
+
+  const handleClearAll = hooks.useEventCallback(() => {
+    resetState(true)
+  })
+
+  const handleWidgetReset = hooks.useEventCallback(() => {
+    resetState(false)
+  })
+
+  hooks.useUnmount(() => {
+    isMountedRef.current = false
+  })
+
+  return {
+    state,
+    updateState,
+    setError,
+    handleSelectionChange,
+    handleClearAll,
+    handleWidgetReset,
+  }
+}
+
 export const useGraphicsLayer = (
   modules: EsriModules | null,
   widgetId: string
@@ -194,47 +303,38 @@ export const useGraphicsLayer = (
     const geometryType = geometry.type
 
     if (geometryType === "polygon" || geometryType === "extent") {
-      const polygonJSON = buildHighlightSymbolJSON(highlightColor, outlineWidth)
-      return new currentModules.SimpleFillSymbol(polygonJSON)
+      const symbolJSON = buildHighlightSymbolJSON(
+        highlightColor,
+        outlineWidth,
+        "polygon"
+      )
+      return new currentModules.SimpleFillSymbol(
+        symbolJSON as __esri.SimpleFillSymbolProperties
+      )
     }
 
     if (geometryType === "polyline") {
-      const lineJSON = buildHighlightLineSymbolJSON(
+      const symbolJSON = buildHighlightSymbolJSON(
         highlightColor,
-        outlineWidth
+        outlineWidth,
+        "polyline"
       )
-      return new currentModules.SimpleLineSymbol(lineJSON)
+      return new currentModules.SimpleLineSymbol(
+        symbolJSON as __esri.SimpleLineSymbolProperties
+      )
     }
 
     if (geometryType === "point" || geometryType === "multipoint") {
-      const markerJSON = buildHighlightMarkerSymbolJSON(
+      const symbolJSON = buildHighlightSymbolJSON(
         highlightColor,
-        outlineWidth
+        outlineWidth,
+        "point"
       )
-      return new currentModules.SimpleMarkerSymbol(markerJSON)
-    }
-
-    if ((geometry as any)?.rings) {
-      const polygonJSON = buildHighlightSymbolJSON(highlightColor, outlineWidth)
-      return new currentModules.SimpleFillSymbol(polygonJSON)
-    }
-
-    if ((geometry as any)?.paths) {
-      const lineJSON = buildHighlightLineSymbolJSON(
-        highlightColor,
-        outlineWidth
+      return new currentModules.SimpleMarkerSymbol(
+        symbolJSON as __esri.SimpleMarkerSymbolProperties
       )
-      return new currentModules.SimpleLineSymbol(lineJSON)
     }
-
-    if ((geometry as any)?.points) {
-      const markerJSON = buildHighlightMarkerSymbolJSON(
-        highlightColor,
-        outlineWidth
-      )
-      return new currentModules.SimpleMarkerSymbol(markerJSON)
-    }
-
+    // Unsupported geometry type
     return null
   }
 
@@ -248,13 +348,6 @@ export const useGraphicsLayer = (
       outlineWidth: number
     ) => {
       const currentModules = modulesRef.current
-      console.log("addGraphicsToMap called:", {
-        hasModules: !!currentModules,
-        hasGraphic: !!graphic,
-        hasView: !!view,
-        hasGeometry: !!graphic?.geometry,
-        geometryType: graphic?.geometry?.type,
-      })
       if (!currentModules || !graphic || !view) return
       ensureGraphicsLayer(view)
 
@@ -267,36 +360,30 @@ export const useGraphicsLayer = (
         highlightColor,
         outlineWidth
       )
-      console.log("Symbol and graphic details:", {
-        fnr,
-        hasSymbol: !!symbol,
-        symbolColor: (symbol as any)?.color,
-        symbolOutlineWidth:
-          (symbol as any)?.outline?.width ?? (symbol as any)?.width ?? null,
-        originalGeometry: graphic.geometry?.type,
-      })
       if (!symbol) return
 
-      const highlightGraphic = graphic.clone()
-      highlightGraphic.symbol = symbol
-      highlightGraphic.attributes = {
-        ...(highlightGraphic.attributes || {}),
-        FNR: fnr,
-      }
-
-      console.log("Adding graphic to layer:", {
-        layerId: layer.id,
-        graphicGeometry: highlightGraphic.geometry?.type,
-        graphicSymbol: !!highlightGraphic.symbol,
+      // Create a new graphic with the highlight symbol
+      const highlightGraphic = new currentModules.Graphic({
+        geometry: graphic.geometry,
+        symbol,
+        attributes: graphic.attributes
+          ? { ...graphic.attributes, FNR: fnr }
+          : { FNR: fnr },
       })
+
       removeGraphicsForFnr(fnr, normalizeFnrKey)
       layer.add(highlightGraphic)
 
       if (!fnr) return
 
       const fnrKey = normalizeFnrKey(fnr)
-      const existing = graphicsMapRef.current.get(fnrKey) || []
-      graphicsMapRef.current.set(fnrKey, [...existing, highlightGraphic])
+      // Store reference for future removal
+      const existing = graphicsMapRef.current.get(fnrKey)
+      if (existing) {
+        existing.push(highlightGraphic)
+      } else {
+        graphicsMapRef.current.set(fnrKey, [highlightGraphic])
+      }
     }
   )
 
@@ -380,7 +467,6 @@ export const useMapViewLifecycle = (params: {
   const mapClickHandleRef = React.useRef<__esri.Handle | null>(null)
 
   const setupMapView = hooks.useEventCallback((view: __esri.MapView) => {
-    console.log("Property Widget: Setting up map view with click handler")
     disablePopup(view)
     ensureGraphicsLayer(view)
 
@@ -391,7 +477,7 @@ export const useMapViewLifecycle = (params: {
     try {
       mapClickHandleRef.current = view.on("click", onMapClick)
     } catch (error) {
-      console.error("Failed to register click handler", error)
+      console.error("Failed to register map click handler", error)
       mapClickHandleRef.current = null
     }
   })
@@ -412,31 +498,25 @@ export const useMapViewLifecycle = (params: {
   const onActiveViewChange = hooks.useEventCallback((jimuMapView: any) => {
     const view = jimuMapView?.view
     if (!view) {
-      console.log("Property Widget: No view in jimuMapView")
       return
     }
 
     const previousView = jimuMapViewRef.current?.view
     if (previousView && previousView !== view) {
-      console.log("Property Widget: Cleaning up previous view")
       cleanupPreviousView()
     }
 
-    console.log("Property Widget: Storing jimuMapView reference")
     jimuMapViewRef.current = jimuMapView
 
     // If modules are ready, setup immediately. Otherwise, wait for modules.
     if (modules) {
       setupMapView(view)
-    } else {
-      console.log("Property Widget: Map view ready, waiting for modules")
     }
   })
 
   const reactivateMapView = hooks.useEventCallback(() => {
     const currentView = jimuMapViewRef.current?.view
     if (currentView && modules) {
-      console.log("Property Widget: Reactivating existing map view")
       disablePopup(currentView)
       if (mapClickHandleRef.current) {
         mapClickHandleRef.current.remove()
@@ -445,7 +525,7 @@ export const useMapViewLifecycle = (params: {
       try {
         mapClickHandleRef.current = currentView.on("click", onMapClick)
       } catch (error) {
-        console.error("Failed to reactivate click handler", error)
+        console.error("Failed to reactivate map click handler", error)
         mapClickHandleRef.current = null
       }
     }
@@ -472,9 +552,6 @@ export const useMapViewLifecycle = (params: {
   // Setup map view when modules become ready (if map view is already available)
   hooks.useUpdateEffect(() => {
     if (modules && jimuMapViewRef.current?.view && !mapClickHandleRef.current) {
-      console.log(
-        "Property Widget: Modules loaded, setting up deferred map view"
-      )
       setupMapView(jimuMapViewRef.current.view)
     }
   }, [modules, setupMapView])
@@ -529,11 +606,148 @@ export const useUpdateConfig = (
   })
 }
 
+export const useNumericConfigHandler = (
+  localValue: string,
+  setLocalValue: (val: string) => void,
+  validate: (val: string) => boolean,
+  updateConfig: (key: string, value: any) => void,
+  configKey: string,
+  debounce: (val: string) => void
+) => {
+  const handleChange = hooks.useEventCallback((value: number) => {
+    setLocalValue(String(value))
+    debounce(String(value))
+  })
+
+  const handleBlur = hooks.useEventCallback(() => {
+    ;(debounce as any).cancel?.()
+    const isValid = validate(localValue)
+    if (isValid) {
+      const num = parseInt(localValue, 10)
+      updateConfig(configKey, num)
+    }
+  })
+
+  return { handleChange, handleBlur }
+}
+
+export const useSwitchConfigHandler = (
+  localValue: boolean,
+  setLocalValue: (val: boolean) => void,
+  updateConfig: (key: string, value: any) => void,
+  configKey: string
+) => {
+  return hooks.useEventCallback((evt: React.ChangeEvent<HTMLInputElement>) => {
+    const checked = evt.target.checked
+    setLocalValue(checked)
+    updateConfig(configKey, checked)
+  })
+}
+
+export const useSliderConfigHandler = <T extends number>(
+  localValue: T,
+  setLocalValue: (val: T) => void,
+  updateConfig: (key: string, value: any) => void,
+  configKey: string,
+  normalizer: (rawValue: number) => T
+) => {
+  return hooks.useEventCallback((evt: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = Number.parseFloat(evt?.target?.value ?? "")
+    if (!Number.isFinite(rawValue)) {
+      return
+    }
+    const nextValue = normalizer(rawValue)
+    if (Math.abs(localValue - nextValue) < 0.0001) {
+      return
+    }
+    setLocalValue(nextValue)
+    updateConfig(configKey, nextValue)
+  })
+}
+
 type DebouncedFn<T extends (...args: any[]) => void> = ((
   ...args: Parameters<T>
 ) => void) & {
   cancel: () => void
-  flush: () => void
+}
+
+export const useNumericValidator = (
+  fieldKey: string,
+  min: number,
+  max: number,
+  errorMessage: string,
+  setFieldErrors: (
+    fn: (prev: { [key: string]: string | undefined }) => {
+      [key: string]: string | undefined
+    }
+  ) => void
+) => {
+  return hooks.useEventCallback((value: string): boolean => {
+    const { validateNumericRange } = require("./utils")
+    const result = validateNumericRange({ value, min, max, errorMessage })
+    setFieldErrors((prev) => ({
+      ...prev,
+      [fieldKey]: result.valid ? undefined : result.error,
+    }))
+    return result.valid
+  })
+}
+
+export const useThrottle = <T extends (...args: any[]) => void>(
+  callback: T,
+  delay: number
+): ((...args: Parameters<T>) => void) => {
+  const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0
+  const lastCallTimeRef = React.useRef<number>(0)
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingArgsRef = React.useRef<Parameters<T> | null>(null)
+  const mountedRef = React.useRef(true)
+  const callbackRef = hooks.useLatest(callback)
+
+  const execute = hooks.useEventCallback((args: Parameters<T>) => {
+    if (!mountedRef.current) return
+    lastCallTimeRef.current = Date.now()
+    pendingArgsRef.current = null
+    try {
+      callbackRef.current(...args)
+    } catch (error) {
+      console.error("Throttled function error:", error)
+    }
+  })
+
+  const throttled = hooks.useEventCallback((...args: Parameters<T>) => {
+    const now = Date.now()
+    const timeSinceLastCall = now - lastCallTimeRef.current
+
+    if (timeSinceLastCall >= safeDelay) {
+      // Execute immediately if enough time has passed
+      execute(args)
+    } else {
+      // Schedule execution for remaining time
+      pendingArgsRef.current = args
+      if (!timeoutRef.current) {
+        const remainingTime = safeDelay - timeSinceLastCall
+        timeoutRef.current = setTimeout(() => {
+          timeoutRef.current = null
+          if (pendingArgsRef.current && mountedRef.current) {
+            execute(pendingArgsRef.current)
+          }
+        }, remainingTime)
+      }
+    }
+  })
+
+  hooks.useEffectOnce(() => {
+    return () => {
+      mountedRef.current = false
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+    }
+  })
+
+  return throttled
 }
 
 export const useDebounce = <T extends (...args: any[]) => void>(
@@ -544,6 +758,7 @@ export const useDebounce = <T extends (...args: any[]) => void>(
   const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0
   const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingRef = React.useRef(false)
+  const mountedRef = React.useRef(true)
   const callbackRef = hooks.useLatest(callback)
   const optionsRef = hooks.useLatest(options)
 
@@ -575,6 +790,7 @@ export const useDebounce = <T extends (...args: any[]) => void>(
     notifyPending(true)
     timeoutRef.current = setTimeout(() => {
       timeoutRef.current = null
+      if (!mountedRef.current) return
       try {
         callbackRef.current(...args)
       } finally {
@@ -588,17 +804,16 @@ export const useDebounce = <T extends (...args: any[]) => void>(
   const cancelRef = hooks.useLatest(cancel)
 
   if (!debouncedRef.current) {
-    const noop = () => undefined
     const runner = ((...args: Parameters<T>) => {
       runRef.current(...args)
     }) as DebouncedFn<T>
     runner.cancel = () => cancelRef.current()
-    runner.flush = noop
     debouncedRef.current = runner
   }
 
   hooks.useEffectOnce(() => {
     return () => {
+      mountedRef.current = false
       cancelRef.current()
     }
   })
