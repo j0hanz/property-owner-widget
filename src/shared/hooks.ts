@@ -1,6 +1,11 @@
 import { React, hooks } from "jimu-core"
 import { loadArcGISJSAPIModules } from "jimu-arcgis"
-import type { EsriModules } from "../config/types"
+import type {
+  EsriModules,
+  PropertyWidgetState,
+  TelemetryEvent,
+} from "../config/types"
+import type { ErrorType } from "../config/enums"
 import {
   ESRI_MODULES_TO_LOAD,
   ABORT_CONTROLLER_POOL_SIZE,
@@ -122,6 +127,113 @@ export const useAbortControllerPool = () => {
   })
 
   return { getController, releaseController, abortAll }
+}
+
+interface PropertySelectionParams {
+  abortAll: () => void
+  clearGraphics: () => void
+  clearQueryCache: () => void
+  trackEvent: (event: TelemetryEvent) => void
+}
+
+interface PropertySelectionApi {
+  state: PropertyWidgetState
+  updateState: (
+    updater: (prev: PropertyWidgetState) => PropertyWidgetState
+  ) => void
+  setError: (type: ErrorType, message: string, details?: string) => void
+  handleSelectionChange: (selectedIds: Set<string>) => void
+  handleClearAll: () => void
+  handleWidgetReset: () => void
+}
+
+const createInitialSelectionState = (): PropertyWidgetState => ({
+  error: null,
+  selectedProperties: [],
+  isQueryInFlight: false,
+  rawPropertyResults: null,
+  rowSelectionIds: new Set(),
+})
+
+export const usePropertySelectionState = (
+  params: PropertySelectionParams
+): PropertySelectionApi => {
+  const { abortAll, clearGraphics, clearQueryCache, trackEvent } = params
+
+  const isMountedRef = React.useRef(true)
+  const [state, internalSetState] = React.useState<PropertyWidgetState>(
+    createInitialSelectionState()
+  )
+
+  const updateState = hooks.useEventCallback(
+    (updater: (prev: PropertyWidgetState) => PropertyWidgetState) => {
+      if (!isMountedRef.current) {
+        return
+      }
+      internalSetState((prev) => updater(prev))
+    }
+  )
+
+  const setError = hooks.useEventCallback(
+    (type: ErrorType, message: string, details?: string) => {
+      if (!isMountedRef.current) {
+        return
+      }
+      internalSetState((prev) => ({
+        ...prev,
+        error: { type, message, details },
+        isQueryInFlight: false,
+      }))
+    }
+  )
+
+  const handleSelectionChange = hooks.useEventCallback(
+    (selectedIds: Set<string>) => {
+      updateState((prev) => ({
+        ...prev,
+        rowSelectionIds: new Set(selectedIds),
+      }))
+    }
+  )
+
+  const resetState = hooks.useEventCallback((shouldTrackClear: boolean) => {
+    abortAll()
+    clearQueryCache()
+    clearGraphics()
+
+    updateState((prev) => {
+      if (shouldTrackClear) {
+        trackEvent({
+          category: "Property",
+          action: "clear_all",
+          value: prev.selectedProperties.length,
+        })
+      }
+
+      return createInitialSelectionState()
+    })
+  })
+
+  const handleClearAll = hooks.useEventCallback(() => {
+    resetState(true)
+  })
+
+  const handleWidgetReset = hooks.useEventCallback(() => {
+    resetState(false)
+  })
+
+  hooks.useUnmount(() => {
+    isMountedRef.current = false
+  })
+
+  return {
+    state,
+    updateState,
+    setError,
+    handleSelectionChange,
+    handleClearAll,
+    handleWidgetReset,
+  }
 }
 
 export const useGraphicsLayer = (

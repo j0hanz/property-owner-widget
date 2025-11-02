@@ -25,6 +25,12 @@ import {
   normalizeHostList,
   abortHelpers,
   logger,
+  formatOwnerInfo,
+  formatPropertyWithShare,
+  createRowId,
+  extractFnr,
+  calculatePropertyUpdates,
+  processPropertyQueryResults,
 } from "./utils"
 import { OWNER_QUERY_CONCURRENCY } from "../config/constants"
 
@@ -1087,6 +1093,117 @@ const processIndividualQuery = async (
 export const propertyQueryService = {
   processBatch: processBatchQuery,
   processIndividual: processIndividualQuery,
+}
+
+export interface PropertySelectionPipelineParams {
+  mapPoint: __esri.Point
+  propertyDataSourceId: string
+  ownerDataSourceId: string
+  dsManager: DataSourceManager
+  maxResults: number
+  toggleEnabled: boolean
+  enableBatchOwnerQuery?: boolean
+  relationshipId?: number
+  enablePIIMasking: boolean
+  signal: AbortSignal
+  selectedProperties: GridRowData[]
+  translate: (key: string) => string
+}
+
+export type PropertySelectionPipelineResult =
+  | { status: "empty" }
+  | {
+      status: "success"
+      rowsToProcess: GridRowData[]
+      graphicsToAdd: Array<{
+        graphic: __esri.Graphic
+        fnr: string | number
+      }>
+      updatedRows: GridRowData[]
+      toRemove: Set<string>
+      propertyResults: QueryResult[]
+    }
+
+export const runPropertySelectionPipeline = async (
+  params: PropertySelectionPipelineParams
+): Promise<PropertySelectionPipelineResult> => {
+  const {
+    mapPoint,
+    propertyDataSourceId,
+    ownerDataSourceId,
+    dsManager,
+    maxResults,
+    toggleEnabled,
+    enableBatchOwnerQuery,
+    relationshipId,
+    enablePIIMasking,
+    signal,
+    selectedProperties,
+    translate,
+  } = params
+
+  const propertyResults = await queryPropertyByPoint(
+    mapPoint,
+    propertyDataSourceId,
+    dsManager,
+    { signal }
+  )
+
+  if (propertyResults.length === 0) {
+    return { status: "empty" }
+  }
+
+  const { rowsToProcess, graphicsToAdd } = await processPropertyQueryResults({
+    propertyResults,
+    config: {
+      propertyDataSourceId,
+      ownerDataSourceId,
+      enablePIIMasking,
+      relationshipId,
+      enableBatchOwnerQuery,
+    },
+    processingContext: {
+      dsManager,
+      maxResults,
+      signal,
+      helpers: {
+        extractFnr,
+        queryOwnerByFnr,
+        queryOwnersByRelationship,
+        createRowId,
+        formatPropertyWithShare,
+        formatOwnerInfo,
+        isAbortError,
+      },
+      messages: {
+        unknownOwner: translate("unknownOwner"),
+        errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
+        errorNoDataAvailable: translate("errorNoDataAvailable"),
+      },
+    },
+    services: {
+      processBatch: propertyQueryService.processBatch,
+      processIndividual: propertyQueryService.processIndividual,
+    },
+  })
+
+  abortHelpers.throwIfAborted(signal)
+
+  const { toRemove, updatedRows } = calculatePropertyUpdates(
+    rowsToProcess,
+    selectedProperties,
+    toggleEnabled,
+    maxResults
+  )
+
+  return {
+    status: "success",
+    rowsToProcess,
+    graphicsToAdd,
+    updatedRows,
+    toRemove,
+    propertyResults,
+  }
 }
 
 export const queryPropertiesInBuffer = async (
