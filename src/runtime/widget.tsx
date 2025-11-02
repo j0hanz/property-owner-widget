@@ -859,8 +859,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const pointerMoveHandleRef = React.useRef<__esri.Handle | null>(null)
   const pointerLeaveHandleRef = React.useRef<__esri.Handle | null>(null)
   const lastCursorPointRef = React.useRef<__esri.Point | null>(null)
-  const cursorTooltipText = translate("cursorTooltip")
-  const tooltipTextRef = hooks.useLatest(cursorTooltipText)
+  const cursorTooltipNoPropertyText = translate("cursorTooltipNoProperty")
+  const cursorTooltipFormatText = translate("cursorTooltipFormat")
+  const tooltipNoPropertyRef = hooks.useLatest(cursorTooltipNoPropertyText)
+  const tooltipFormatRef = hooks.useLatest(cursorTooltipFormatText)
 
   // Hover query function - queries property at cursor position
   const queryPropertyAtPoint = hooks.useEventCallback(
@@ -1030,45 +1032,47 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         layer.add(graphic)
         cursorPointGraphicRef.current = graphic
 
-        // Determine tooltip text based on hover query state
-        let tooltipText = tooltipTextRef.current
-        if (isHoverQueryActive) {
-          tooltipText = translate("cursorTooltipLoading")
-        } else if (hoverTooltipData) {
-          const { fastighet, bostadr } = hoverTooltipData
-          tooltipText = `${fastighet}\n${bostadr}`
-        } else if (hoverTooltipData === null && !isHoverQueryActive) {
-          // Query completed but no property found
-          tooltipText = tooltipTextRef.current
+        // Determine tooltip text based on hover query results
+        // Only show tooltip when query is complete (not in flight)
+        let tooltipText: string | null = null
+        if (!isHoverQueryActive) {
+          if (hoverTooltipData) {
+            const { fastighet } = hoverTooltipData
+            tooltipText = tooltipFormatRef.current.replace(
+              "{fastighet}",
+              fastighet
+            )
+          } else {
+            // Query completed but no property found
+            tooltipText = tooltipNoPropertyRef.current
+          }
         }
 
-        const tooltipOffset = HIGHLIGHT_MARKER_SIZE + 4
-        const tooltipSymbol = new modules.TextSymbol({
-          text: tooltipText,
-          color: [255, 255, 255, 1],
-          haloColor: [
-            currentHighlightColor[0],
-            currentHighlightColor[1],
-            currentHighlightColor[2],
-            1,
-          ],
-          haloSize: 1,
-          xoffset: tooltipOffset,
-          yoffset: -tooltipOffset,
-          font: {
-            family: "Arial",
-            size: 12,
-            weight: "bold",
-          },
-        } as __esri.TextSymbolProperties)
+        // Only create tooltip graphic if we have text to show
+        if (tooltipText) {
+          const tooltipOffset = HIGHLIGHT_MARKER_SIZE + 4
+          const tooltipSymbol = new modules.TextSymbol({
+            text: tooltipText,
+            color: "#ffffff",
+            haloColor: "#000000",
+            haloSize: 1,
+            xoffset: tooltipOffset,
+            yoffset: -tooltipOffset,
+            font: {
+              family: "sans-serif",
+              size: 9,
+              weight: "bold",
+            },
+          } as __esri.TextSymbolProperties)
 
-        const tooltipGraphic = new modules.Graphic({
-          geometry: mapPoint,
-          symbol: tooltipSymbol as any,
-        })
+          const tooltipGraphic = new modules.Graphic({
+            geometry: mapPoint,
+            symbol: tooltipSymbol as any,
+          })
 
-        layer.add(tooltipGraphic)
-        cursorTooltipGraphicRef.current = tooltipGraphic
+          layer.add(tooltipGraphic)
+          cursorTooltipGraphicRef.current = tooltipGraphic
+        }
       }
     }
   )
@@ -1159,7 +1163,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     highlightColorConfig,
     highlightOpacityConfig,
     outlineWidthConfig,
-    cursorTooltipText,
+    cursorTooltipNoPropertyText,
+    cursorTooltipFormatText,
   ])
 
   // Cleanup cursor point on unmount
@@ -1185,7 +1190,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     if (!lastCursorPointRef.current) return
     updateCursorPoint(lastCursorPointRef.current)
   }, [
-    cursorTooltipText,
+    cursorTooltipNoPropertyText,
+    cursorTooltipFormatText,
     highlightColorConfig,
     highlightOpacityConfig,
     outlineWidthConfig,
