@@ -314,7 +314,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       return { ...prev, selectedProperties: reformattedProperties }
     })
-  }, [piiMaskingEnabled])
+  }, [piiMaskingEnabled, translate])
 
   hooks.useUpdateEffect(() => {
     setState((prev) => {
