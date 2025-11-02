@@ -4,6 +4,7 @@ export const ESRI_MODULES_TO_LOAD = [
   "esri/symbols/SimpleFillSymbol",
   "esri/symbols/SimpleLineSymbol",
   "esri/symbols/SimpleMarkerSymbol",
+  "esri/symbols/TextSymbol",
   "esri/Graphic",
   "esri/layers/GraphicsLayer",
   "esri/geometry/Extent",

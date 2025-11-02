@@ -9,6 +9,7 @@ export default {
   noResults: "No properties found",
   propertySelected: "Properties selected:",
   clickMapToSelectProperties: "Click on the map to select properties",
+  cursorTooltip: "Move the cursor and click to select a property",
   multipleOwnersFound: "Multiple owners found",
   emptyStatePrompt: "Click on property",
   widgetNotConfigured:

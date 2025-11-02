@@ -13,6 +13,7 @@ System.register([], function (e) {
         propertySelected: "Fastigheter valda:",
         clickMapToSelectProperties:
           "Börja klicka på kartan för att välja fastigheter",
+        cursorTooltip: "Flytta markören och klicka för att välja en fastighet",
         multipleOwnersFound: "Flera ägare hittades",
         emptyStatePrompt: "Klicka på fastighet",
         widgetNotConfigured: "Konfigurera widgeten för att börja använda den",

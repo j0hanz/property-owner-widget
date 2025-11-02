@@ -135,6 +135,9 @@ export interface EsriModules {
   SimpleMarkerSymbol: new (
     properties?: __esri.SimpleMarkerSymbolProperties
   ) => __esri.SimpleMarkerSymbol
+  TextSymbol: new (
+    properties?: __esri.TextSymbolProperties
+  ) => __esri.TextSymbol
   Graphic: new (properties?: __esri.GraphicProperties) => __esri.Graphic
   GraphicsLayer: new (
     properties?: __esri.GraphicsLayerProperties

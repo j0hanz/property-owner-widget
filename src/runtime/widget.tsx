@@ -845,12 +845,23 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   // Cursor point marker tracking
   const cursorPointGraphicRef = React.useRef<__esri.Graphic | null>(null)
+  const cursorTooltipGraphicRef = React.useRef<__esri.Graphic | null>(null)
   const pointerMoveHandleRef = React.useRef<__esri.Handle | null>(null)
+  const pointerLeaveHandleRef = React.useRef<__esri.Handle | null>(null)
+  const lastCursorPointRef = React.useRef<__esri.Point | null>(null)
+  const cursorTooltipText = translate("cursorTooltip")
+  const tooltipTextRef = hooks.useLatest(cursorTooltipText)
 
   const updateCursorPoint = hooks.useEventCallback(
     (mapPoint: __esri.Point | null) => {
       const view = getCurrentView()
-      if (!view || !modules || !modules.Graphic) return
+      if (!view || !modules || !modules.Graphic || !modules.TextSymbol) {
+        if (!mapPoint) {
+          cursorPointGraphicRef.current = null
+          cursorTooltipGraphicRef.current = null
+        }
+        return
+      }
 
       const currentHighlightColor = buildHighlightColor(
         highlightColorConfig,
@@ -863,12 +874,23 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         `${id}-property-highlight-layer`
       ) as __esri.GraphicsLayer
 
-      if (!layer) return
+      if (!layer) {
+        if (!mapPoint) {
+          cursorPointGraphicRef.current = null
+          cursorTooltipGraphicRef.current = null
+        }
+        return
+      }
 
       // Remove existing cursor point
       if (cursorPointGraphicRef.current) {
         layer.remove(cursorPointGraphicRef.current)
         cursorPointGraphicRef.current = null
+      }
+
+      if (cursorTooltipGraphicRef.current) {
+        layer.remove(cursorTooltipGraphicRef.current)
+        cursorTooltipGraphicRef.current = null
       }
 
       // Add new cursor point if mapPoint provided
@@ -896,6 +918,34 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         layer.add(graphic)
         cursorPointGraphicRef.current = graphic
+
+        const tooltipOffset = HIGHLIGHT_MARKER_SIZE + 4
+        const tooltipSymbol = new modules.TextSymbol({
+          text: tooltipTextRef.current,
+          color: [255, 255, 255, 1],
+          haloColor: [
+            currentHighlightColor[0],
+            currentHighlightColor[1],
+            currentHighlightColor[2],
+            1,
+          ],
+          haloSize: 1,
+          xoffset: tooltipOffset,
+          yoffset: -tooltipOffset,
+          font: {
+            family: "Arial",
+            size: 12,
+            weight: "bold",
+          },
+        } as __esri.TextSymbolProperties)
+
+        const tooltipGraphic = new modules.Graphic({
+          geometry: mapPoint,
+          symbol: tooltipSymbol as any,
+        })
+
+        layer.add(tooltipGraphic)
+        cursorTooltipGraphicRef.current = tooltipGraphic
       }
     }
   )
@@ -915,21 +965,51 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       updateCursorPoint(null) // Remove cursor point
     }
 
+    if (pointerLeaveHandleRef.current) {
+      pointerLeaveHandleRef.current.remove()
+      pointerLeaveHandleRef.current = null
+    }
+
+    const canTrackCursor = isActive && !!modules && !!modules?.TextSymbol
+
     // Setup new handler if widget is active
-    if (isActive && modules) {
+    if (canTrackCursor) {
       pointerMoveHandleRef.current = view.on("pointer-move", (event) => {
         const screenPoint = { x: event.x, y: event.y }
         const mapPoint = view.toMap(screenPoint)
         if (mapPoint) {
-          updateCursorPoint(mapPoint)
+          const nextPoint =
+            typeof mapPoint.clone === "function"
+              ? (mapPoint.clone() as __esri.Point)
+              : mapPoint
+          lastCursorPointRef.current = nextPoint
+          updateCursorPoint(nextPoint)
+        } else {
+          lastCursorPointRef.current = null
+          updateCursorPoint(null)
         }
       })
+
+      pointerLeaveHandleRef.current = view.on("pointer-leave", () => {
+        lastCursorPointRef.current = null
+        updateCursorPoint(null)
+      })
+    } else {
+      lastCursorPointRef.current = null
+      updateCursorPoint(null)
     }
 
     return () => {
       if (pointerMoveHandleRef.current) {
         pointerMoveHandleRef.current.remove()
         pointerMoveHandleRef.current = null
+      }
+      if (pointerLeaveHandleRef.current) {
+        pointerLeaveHandleRef.current.remove()
+        pointerLeaveHandleRef.current = null
+      }
+      if (!canTrackCursor) {
+        lastCursorPointRef.current = null
       }
       updateCursorPoint(null)
     }
@@ -939,6 +1019,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     highlightColorConfig,
     highlightOpacityConfig,
     outlineWidthConfig,
+    cursorTooltipText,
   ])
 
   // Cleanup cursor point on unmount
@@ -947,8 +1028,23 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       pointerMoveHandleRef.current.remove()
       pointerMoveHandleRef.current = null
     }
+    if (pointerLeaveHandleRef.current) {
+      pointerLeaveHandleRef.current.remove()
+      pointerLeaveHandleRef.current = null
+    }
+    lastCursorPointRef.current = null
     updateCursorPoint(null)
   })
+
+  hooks.useUpdateEffect(() => {
+    if (!lastCursorPointRef.current) return
+    updateCursorPoint(lastCursorPointRef.current)
+  }, [
+    cursorTooltipText,
+    highlightColorConfig,
+    highlightOpacityConfig,
+    outlineWidthConfig,
+  ])
 
   hooks.useUpdateEffect(() => {
     if (state.selectedProperties.length === 0) {
