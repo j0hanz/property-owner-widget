@@ -552,7 +552,6 @@ type DebouncedFn<T extends (...args: any[]) => void> = ((
   ...args: Parameters<T>
 ) => void) & {
   cancel: () => void
-  flush: () => void
 }
 
 export const useDebounce = <T extends (...args: any[]) => void>(
@@ -609,12 +608,10 @@ export const useDebounce = <T extends (...args: any[]) => void>(
   const cancelRef = hooks.useLatest(cancel)
 
   if (!debouncedRef.current) {
-    const noop = () => undefined
     const runner = ((...args: Parameters<T>) => {
       runRef.current(...args)
     }) as DebouncedFn<T>
     runner.cancel = () => cancelRef.current()
-    runner.flush = noop
     debouncedRef.current = runner
   }
 

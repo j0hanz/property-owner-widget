@@ -70,8 +70,9 @@ import {
   buildHighlightColor,
   computeWidgetsToClose,
   dataSourceHelpers,
+  getValidatedOutlineWidth,
 } from "../shared/utils"
-import { OUTLINE_WIDTH, EXPORT_FORMATS } from "../config/constants"
+import { EXPORT_FORMATS } from "../config/constants"
 import {
   trackEvent,
   trackError,
@@ -672,15 +673,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           config.highlightColor,
           config.highlightOpacity
         )
-        const currentOutlineWidth = (() => {
-          const width = config.outlineWidth
-          if (typeof width !== "number" || !Number.isFinite(width)) {
-            return OUTLINE_WIDTH
-          }
-          if (width < 0.5) return 0.5
-          if (width > 10) return 10
-          return width
-        })()
+        const currentOutlineWidth = getValidatedOutlineWidth(
+          config.outlineWidth
+        )
 
         const syncParams: SelectionGraphicsParams = {
           graphicsToAdd,
@@ -730,15 +725,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             rawPropertyResults: rawResultsForExport,
           }
         })
-
-        // Revalidate staleness before executing side effects
-        if (isStaleRequest()) {
-          console.log(
-            "Request became stale after setState, aborting side effects"
-          )
-          releaseController(controller)
-          return
-        }
 
         console.log("After setState - executing sync:", {
           hasSyncParams: !!syncParams,
@@ -833,15 +819,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       highlightColorConfig,
       highlightOpacityConfig
     )
-    const currentOutlineWidth = (() => {
-      const width = outlineWidthConfig
-      if (typeof width !== "number" || !Number.isFinite(width)) {
-        return OUTLINE_WIDTH
-      }
-      if (width < 0.5) return 0.5
-      if (width > 10) return 10
-      return width
-    })()
+    const currentOutlineWidth = getValidatedOutlineWidth(outlineWidthConfig)
 
     syncSelectionGraphics({
       graphicsToAdd,

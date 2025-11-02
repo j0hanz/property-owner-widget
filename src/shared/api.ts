@@ -22,6 +22,7 @@ import {
   isAbortError,
   ownerIdentity,
   normalizeFnrKey,
+  abortHelpers,
 } from "./utils"
 import { OWNER_QUERY_CONCURRENCY } from "../config/constants"
 
@@ -262,11 +263,7 @@ export const queryPropertyByPoint = async (
   options?: { signal?: AbortSignal }
 ): Promise<QueryResult[]> => {
   try {
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
     if (!ds) {
@@ -315,11 +312,7 @@ export const queryPropertyByPoint = async (
       firstFeature: result?.features?.[0]?.attributes,
     })
 
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     if (!result?.features || result.features.length === 0) {
       console.log("No features found at this location")
@@ -354,11 +347,7 @@ export const queryOwnerByFnr = async (
   options?: { signal?: AbortSignal }
 ): Promise<__esri.Graphic[]> => {
   try {
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
     if (!ds) {
@@ -392,11 +381,7 @@ export const queryOwnerByFnr = async (
       firstRecord: result?.records?.[0]?.getData(),
     })
 
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     if (!result?.records) {
       console.log("⚠️ Owner query returned no records:", {
@@ -463,11 +448,7 @@ export const queryOwnersByRelationship = async (
   options?: { signal?: AbortSignal }
 ): Promise<Map<string, OwnerAttributes[]>> => {
   try {
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     if (!propertyFnrs || propertyFnrs.length === 0) {
       return new Map()
@@ -509,22 +490,14 @@ export const queryOwnersByRelationship = async (
     )
 
     // Check abort immediately after async operation
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     if (!propertyResult?.records || propertyResult.records.length === 0) {
       return new Map()
     }
 
     // Check abort before processing records
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     propertyResult.records.forEach((record: FeatureDataRecord) => {
       const data = record.getData()
@@ -538,22 +511,14 @@ export const queryOwnersByRelationship = async (
     relationshipQuery.relationshipId = relationshipId
     relationshipQuery.outFields = ["*"]
 
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     const result = await queryTask.executeRelationshipQuery(
       relationshipQuery,
       createSignalOptions(options?.signal)
     )
 
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     const ownersByFnr = new Map<string, OwnerAttributes[]>()
 
@@ -846,10 +811,6 @@ const processBatchOfProperties = async (params: {
       continue
     }
 
-    if (!result.value) {
-      continue
-    }
-
     const {
       validated: validatedFromValue,
       ownerFeatures,
@@ -1052,11 +1013,7 @@ export const queryPropertiesInBuffer = async (
   options?: { signal?: AbortSignal }
 ): Promise<PropertyAttributes[]> => {
   try {
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     const modules = await loadArcGISJSAPIModules([
       "esri/geometry/geometryEngine",
@@ -1073,11 +1030,7 @@ export const queryPropertiesInBuffer = async (
       throw new Error("Failed to create buffer geometry")
     }
 
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
     if (!ds) {
@@ -1094,11 +1047,7 @@ export const queryPropertiesInBuffer = async (
       createSignalOptions(options?.signal)
     )
 
-    if (options?.signal?.aborted) {
-      const abortError = new Error("AbortError")
-      abortError.name = "AbortError"
-      throw abortError
-    }
+    abortHelpers.throwIfAborted(options?.signal)
 
     if (!result?.records || result.records.length === 0) {
       return []

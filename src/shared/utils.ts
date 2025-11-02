@@ -9,6 +9,7 @@ import {
   DEFAULT_HIGHLIGHT_COLOR,
   HIGHLIGHT_SYMBOL_ALPHA,
   HIGHLIGHT_MARKER_SIZE,
+  OUTLINE_WIDTH,
 } from "../config/constants"
 
 /** Sanitize arbitrary HTML/text content */
@@ -292,6 +293,48 @@ export const isAbortError = (error: unknown): boolean => {
   )
 }
 
+export const numberHelpers = {
+  isFiniteNumber: (value: unknown): value is number => {
+    return typeof value === "number" && Number.isFinite(value)
+  },
+
+  clamp: (value: number, min: number, max: number): number => {
+    if (!Number.isFinite(value)) return min
+    if (value < min) return min
+    if (value > max) return max
+    return value
+  },
+
+  clampWithDefault: (
+    value: unknown,
+    min: number,
+    max: number,
+    defaultValue: number
+  ): number => {
+    if (!numberHelpers.isFiniteNumber(value)) return defaultValue
+    return numberHelpers.clamp(value, min, max)
+  },
+}
+
+export const abortHelpers = {
+  throwIfAborted: (signal?: AbortSignal): void => {
+    if (signal?.aborted) {
+      const error = new Error("AbortError")
+      error.name = "AbortError"
+      throw error
+    }
+  },
+
+  checkAbortedOrStale: (
+    signal: AbortSignal,
+    isStale: () => boolean
+  ): "aborted" | "stale" | "active" => {
+    if (isStale()) return "stale"
+    if (signal.aborted) return "aborted"
+    return "active"
+  },
+}
+
 export const parseArcGISError = (
   error: unknown,
   defaultMessage: string
@@ -305,6 +348,32 @@ export const parseArcGISError = (
     return (error as any).message
   }
   return defaultMessage
+}
+
+export const getValidatedOutlineWidth = (
+  width: unknown,
+  defaultWidth: number = OUTLINE_WIDTH
+): number => {
+  if (typeof width !== "number" || !Number.isFinite(width)) {
+    return defaultWidth
+  }
+  if (width < 0.5) return 0.5
+  if (width > 10) return 10
+  return width
+}
+
+export const typeGuards = {
+  isString: (value: unknown): value is string => {
+    return typeof value === "string"
+  },
+
+  isFiniteNumber: (value: unknown): value is number => {
+    return typeof value === "number" && Number.isFinite(value)
+  },
+
+  isNonEmptyString: (value: unknown): value is string => {
+    return typeof value === "string" && value.length > 0
+  },
 }
 
 export const buildFnrWhereClause = (
