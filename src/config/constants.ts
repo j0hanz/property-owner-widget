@@ -31,7 +31,7 @@ export const OUTLINE_WIDTH = 1
 export const DEFAULT_MAX_RESULTS = 100
 export const OWNER_QUERY_CONCURRENCY = 5
 
-export const HIGHLIGHT_MARKER_SIZE = 6
+export const HIGHLIGHT_MARKER_SIZE = 12
 
 export const CURSOR_TOOLTIP_STYLE = {
   textColor: "#ffffff",

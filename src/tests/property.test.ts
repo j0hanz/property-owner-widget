@@ -328,7 +328,7 @@ describe("Property Widget - Highlight Styling", () => {
     const symbolJSON = buildHighlightSymbolJSON([5, 15, 25, 0.8], 2, "point")
 
     expect(symbolJSON).toMatchObject({
-      style: "circle",
+      style: "cross",
       color: [5, 15, 25, 0.8],
       outline: {
         style: "solid",

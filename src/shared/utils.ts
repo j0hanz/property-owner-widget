@@ -229,7 +229,7 @@ export const syncCursorGraphics = ({
       geometry: mapPoint,
       symbol: {
         type: "simple-marker",
-        style: "circle",
+        style: "cross",
         size: HIGHLIGHT_MARKER_SIZE,
         color: highlightColor,
         outline: {
@@ -425,7 +425,7 @@ export const buildHighlightSymbolJSON = (
 
   if (geometryType === "point") {
     return {
-      style: "circle",
+      style: "cross",
       color: [r, g, b, a],
       size: HIGHLIGHT_MARKER_SIZE,
       outline: {
