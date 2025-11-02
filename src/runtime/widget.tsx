@@ -490,6 +490,179 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
   })
 
+  // Extracted from handleMapClick: Step 3 - Query properties
+  const executePropertyQuery = hooks.useEventCallback(
+    async (params: {
+      mapPoint: __esri.Point
+      propertyDsId: string
+      manager: DataSourceManager
+      signal: AbortSignal
+    }) => {
+      const { mapPoint, propertyDsId, manager, signal } = params
+      const results = await queryPropertyByPoint(
+        mapPoint,
+        propertyDsId,
+        manager,
+        { signal }
+      )
+
+      if (!results.length) {
+        logger.debug("No property results returned from query")
+        trackEvent({
+          category: "Query",
+          action: "property_query",
+          label: "no_results",
+        })
+        return { empty: true as const, results: [] }
+      }
+
+      logger.debug("Property results received", {
+        count: results.length,
+        firstFeatureCount: results[0]?.features?.length ?? 0,
+        hasFirstGeometry: !!results[0]?.features?.[0]?.geometry,
+      })
+
+      return { empty: false as const, results }
+    }
+  )
+
+  // Extracted from handleMapClick: Step 4 - Process results
+  const processPropertyResults = hooks.useEventCallback(
+    async (params: {
+      propertyResults: Array<{ features: __esri.Graphic[]; sourceLayer: any }>
+      config: {
+        propertyDataSourceId: string
+        ownerDataSourceId: string
+        enablePIIMasking: boolean
+        relationshipId: number
+        enableBatchOwnerQuery: boolean
+      }
+      maxResults: number
+      manager: DataSourceManager
+      signal: AbortSignal
+    }) => {
+      const { propertyResults, config, maxResults, manager, signal } = params
+
+      const { rowsToProcess, graphicsToAdd } =
+        await processPropertyQueryResults({
+          propertyResults,
+          config: {
+            propertyDataSourceId: config.propertyDataSourceId,
+            ownerDataSourceId: config.ownerDataSourceId,
+            enablePIIMasking: config.enablePIIMasking,
+            relationshipId: config.relationshipId,
+            enableBatchOwnerQuery: config.enableBatchOwnerQuery,
+          },
+          processingContext: {
+            dsManager: manager,
+            maxResults,
+            signal,
+            helpers: {
+              extractFnr,
+              queryOwnerByFnr,
+              queryOwnersByRelationship,
+              createRowId,
+              formatPropertyWithShare,
+              formatOwnerInfo,
+              isAbortError,
+            },
+            messages: {
+              unknownOwner: translate("unknownOwner"),
+              errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
+              errorNoDataAvailable: translate("errorNoDataAvailable"),
+            },
+          },
+          services: {
+            processBatch: propertyQueryService.processBatch,
+            processIndividual: propertyQueryService.processIndividual,
+          },
+        })
+
+      logger.debug("Processing complete", {
+        rowsToProcessCount: rowsToProcess.length,
+        graphicsToAddCount: graphicsToAdd.length,
+        hasFirstGraphic: !!graphicsToAdd[0]?.graphic,
+        firstGraphicGeometryType: graphicsToAdd[0]?.graphic?.geometry?.type,
+      })
+
+      return { rowsToProcess, graphicsToAdd }
+    }
+  )
+
+  // Extracted from handleMapClick: Step 5 & 6 - Apply updates
+  const applyPropertyUpdates = hooks.useEventCallback(
+    (params: {
+      rowsToProcess: GridRowData[]
+      graphicsToAdd: Array<{ graphic: __esri.Graphic; fnr: string | number }>
+      config: {
+        highlightColor: string
+        highlightOpacity: number
+        outlineWidth: number
+      }
+      toggleEnabled: boolean
+      maxResults: number
+    }) => {
+      const {
+        rowsToProcess,
+        graphicsToAdd,
+        config,
+        toggleEnabled,
+        maxResults,
+      } = params
+
+      // Step 5: Calculate updates with toggle logic
+      const { updatedRows, toRemove } = calculatePropertyUpdates(
+        rowsToProcess,
+        state.selectedProperties,
+        toggleEnabled,
+        maxResults
+      )
+
+      // Compute highlight values fresh from current config
+      const currentHighlightColor = buildHighlightColor(
+        config.highlightColor,
+        config.highlightOpacity
+      )
+      const currentOutlineWidth = getValidatedOutlineWidth(config.outlineWidth)
+
+      const syncParams: SelectionGraphicsParams = {
+        graphicsToAdd,
+        selectedRows: updatedRows,
+        getCurrentView,
+        helpers: {
+          addGraphicsToMap,
+          extractFnr,
+          normalizeFnrKey,
+        },
+        highlightColor: currentHighlightColor,
+        outlineWidth: currentOutlineWidth,
+      }
+
+      logger.debug("syncParams created before setState", {
+        graphicsCount: syncParams.graphicsToAdd.length,
+        selectedRowsCount: syncParams.selectedRows.length,
+        highlightColor: currentHighlightColor,
+        outlineWidth: currentOutlineWidth,
+      })
+
+      // Track toggle removals
+      if (toRemove.size > 0) {
+        const removedRows = state.selectedProperties.filter((row) =>
+          toRemove.has(normalizeFnrKey(row.FNR))
+        )
+        if (removedRows.length > 0) {
+          trackEvent({
+            category: "Property",
+            action: "toggle_remove",
+            value: removedRows.length,
+          })
+        }
+      }
+
+      return { updatedRows, toRemove, syncParams }
+    }
+  )
+
   const handleMapClick = hooks.useEventCallback(
     async (event: __esri.ViewClickEvent) => {
       abortAll()
@@ -527,12 +700,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       try {
         // Step 3: Query properties
-        const propertyResults = await queryPropertyByPoint(
+        const queryResult = await executePropertyQuery({
           mapPoint,
-          config.propertyDataSourceId,
+          propertyDsId: config.propertyDataSourceId,
           manager,
-          { signal: controller.signal }
-        )
+          signal: controller.signal,
+        })
 
         const abortStatus = abortHelpers.checkAbortedOrStale(
           controller.signal,
@@ -544,69 +717,29 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           return
         }
 
-        if (!propertyResults.length) {
+        if (queryResult.empty) {
           if (isStaleRequest()) {
             releaseController(controller)
             return
           }
-          logger.debug("No property results returned from query")
           tracker.success()
-          trackEvent({
-            category: "Query",
-            action: "property_query",
-            label: "no_results",
-          })
           releaseController(controller)
           return
         }
 
-        logger.debug("Property results received", {
-          count: propertyResults.length,
-          firstFeatureCount: propertyResults[0]?.features?.length ?? 0,
-          hasFirstGeometry: !!propertyResults[0]?.features?.[0]?.geometry,
-        })
-
         // Step 4: Process results and enrich with owner data
-        const { rowsToProcess, graphicsToAdd } =
-          await processPropertyQueryResults({
-            propertyResults,
-            config: {
-              propertyDataSourceId: config.propertyDataSourceId,
-              ownerDataSourceId: config.ownerDataSourceId,
-              enablePIIMasking: piiMaskingEnabled,
-              relationshipId: config.relationshipId,
-              enableBatchOwnerQuery: config.enableBatchOwnerQuery,
-            },
-            processingContext: {
-              dsManager: manager,
-              maxResults,
-              signal: controller.signal,
-              helpers: {
-                extractFnr,
-                queryOwnerByFnr,
-                queryOwnersByRelationship,
-                createRowId,
-                formatPropertyWithShare,
-                formatOwnerInfo,
-                isAbortError,
-              },
-              messages: {
-                unknownOwner: translate("unknownOwner"),
-                errorOwnerQueryFailed: translate("errorOwnerQueryFailed"),
-                errorNoDataAvailable: translate("errorNoDataAvailable"),
-              },
-            },
-            services: {
-              processBatch: propertyQueryService.processBatch,
-              processIndividual: propertyQueryService.processIndividual,
-            },
-          })
-
-        logger.debug("Processing complete", {
-          rowsToProcessCount: rowsToProcess.length,
-          graphicsToAddCount: graphicsToAdd.length,
-          hasFirstGraphic: !!graphicsToAdd[0]?.graphic,
-          firstGraphicGeometryType: graphicsToAdd[0]?.graphic?.geometry?.type,
+        const { rowsToProcess, graphicsToAdd } = await processPropertyResults({
+          propertyResults: queryResult.results,
+          config: {
+            propertyDataSourceId: config.propertyDataSourceId,
+            ownerDataSourceId: config.ownerDataSourceId,
+            enablePIIMasking: piiMaskingEnabled,
+            relationshipId: config.relationshipId,
+            enableBatchOwnerQuery: config.enableBatchOwnerQuery,
+          },
+          maxResults,
+          manager,
+          signal: controller.signal,
         })
 
         const abortStatus2 = abortHelpers.checkAbortedOrStale(
@@ -623,56 +756,18 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           return
         }
 
-        // Step 5: Calculate updates with toggle logic
-        const { updatedRows, toRemove } = calculatePropertyUpdates(
+        // Step 5 & 6: Calculate updates and prepare sync
+        const { updatedRows, toRemove, syncParams } = applyPropertyUpdates({
           rowsToProcess,
-          state.selectedProperties,
-          toggleEnabled,
-          maxResults
-        )
-
-        // Compute highlight values fresh from current config
-        const currentHighlightColor = buildHighlightColor(
-          config.highlightColor,
-          config.highlightOpacity
-        )
-        const currentOutlineWidth = getValidatedOutlineWidth(
-          config.outlineWidth
-        )
-
-        const syncParams: SelectionGraphicsParams = {
           graphicsToAdd,
-          selectedRows: updatedRows,
-          getCurrentView,
-          helpers: {
-            addGraphicsToMap,
-            extractFnr,
-            normalizeFnrKey,
+          config: {
+            highlightColor: config.highlightColor,
+            highlightOpacity: config.highlightOpacity,
+            outlineWidth: config.outlineWidth,
           },
-          highlightColor: currentHighlightColor,
-          outlineWidth: currentOutlineWidth,
-        }
-
-        logger.debug("syncParams created before setState", {
-          graphicsCount: syncParams.graphicsToAdd.length,
-          selectedRowsCount: syncParams.selectedRows.length,
-          highlightColor: currentHighlightColor,
-          outlineWidth: currentOutlineWidth,
+          toggleEnabled,
+          maxResults,
         })
-
-        // Track toggle removals
-        if (toRemove.size > 0) {
-          const removedRows = state.selectedProperties.filter((row) =>
-            toRemove.has(normalizeFnrKey(row.FNR))
-          )
-          if (removedRows.length > 0) {
-            trackEvent({
-              category: "Property",
-              action: "toggle_remove",
-              value: removedRows.length,
-            })
-          }
-        }
 
         // Step 6: Update state
         setState((prev) => {
@@ -684,7 +779,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           const updatedRawResults = updateRawPropertyResults(
             prev.rawPropertyResults || new Map(),
             rowsToProcess,
-            propertyResults,
+            queryResult.results,
             toRemove,
             prev.selectedProperties,
             normalizeFnrKey
@@ -730,13 +825,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         trackFeatureUsage("pii_masking", piiMaskingEnabled)
         trackFeatureUsage("toggle_removal", toggleEnabled)
       } catch (error) {
-        if (isStaleRequest()) {
-          return
-        }
+        if (isStaleRequest()) return
+
         if (isAbortError(error)) {
           tracker.failure("aborted")
           return
         }
+
         logger.error("Property query error:", error, {
           message: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack : undefined,
@@ -889,9 +984,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         setHoverTooltipData({ fastighet, bostadr })
         setIsHoverQueryActive(false)
       } catch (error) {
-        if (isAbortError(error)) {
-          return
-        }
+        if (isAbortError(error)) return
+
         logger.debug("Hover query failed", { error })
         setHoverTooltipData(null)
         setIsHoverQueryActive(false)

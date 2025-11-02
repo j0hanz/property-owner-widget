@@ -2,6 +2,15 @@ import type { ImmutableObject, DataSourceManager } from "jimu-core"
 import type { ColumnDef } from "@tanstack/react-table"
 import type { WidgetStyles } from "./style"
 
+// =============================================================================
+// WIDGET CONFIGURATION
+// Core configuration interface for property widget settings
+// =============================================================================
+
+/**
+ * Widget configuration stored in app config
+ * All properties are immutable at runtime - updates via onSettingChange only
+ */
 export interface Config {
   propertyDataSourceId: string
   ownerDataSourceId: string
@@ -19,6 +28,11 @@ export interface Config {
 }
 
 export type IMConfig = ImmutableObject<Config>
+
+// =============================================================================
+// DATA ATTRIBUTES
+// Property and owner data structures from ArcGIS feature layers
+// =============================================================================
 
 export interface PropertyAttributes {
   OBJECTID: number
@@ -42,6 +56,11 @@ export interface OwnerAttributes {
   AGARLISTA?: string
   [key: string]: any
 }
+
+// =============================================================================
+// GRID & EXPORT
+// Data grid row structure and export format definitions
+// =============================================================================
 
 export interface GridRowData {
   id: string
@@ -78,6 +97,11 @@ export interface ExportOptions {
   definition?: ExportFormatDefinition
 }
 
+// =============================================================================
+// GRAPHICS & SELECTION
+// Graphics layer manipulation and selection management
+// =============================================================================
+
 export interface SelectionGraphicsHelpers {
   addGraphicsToMap: (
     graphic: __esri.Graphic | null | undefined,
@@ -99,6 +123,11 @@ export interface SelectionGraphicsParams {
   highlightColor: [number, number, number, number]
   outlineWidth: number
 }
+
+// =============================================================================
+// ERROR & STATE MANAGEMENT
+// Widget error states and runtime state structure
+// =============================================================================
 
 export interface ErrorBoundaryProps {
   children: React.ReactNode
@@ -124,6 +153,11 @@ export interface QueryResult {
   features: __esri.Graphic[]
   propertyId: string | number
 }
+
+// =============================================================================
+// ARCGIS JS API MODULES
+// TypeScript interfaces for lazy-loaded ArcGIS modules
+// =============================================================================
 
 export interface EsriModules {
   SimpleFillSymbol: new (
@@ -182,14 +216,25 @@ export interface PerformanceMetric {
 // =============================================================================
 // VALIDATION RESULT TYPES
 // Discriminated unions for type-safe validation results
+// Use isValidationSuccess() and isValidationFailure() type guards
 // =============================================================================
 
+/**
+ * Validation success result
+ * Contains validated data of type T
+ * Use type guard: if (isValidationSuccess(result)) { result.data... }
+ */
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
 export type ValidationSuccess<T> = {
   readonly valid: true
   readonly data: T
 }
 
+/**
+ * Validation failure result
+ * Contains error state and failure reason for debugging
+ * Use type guard: if (isValidationFailure(result)) { result.error... }
+ */
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
 export type ValidationFailure = {
   readonly valid: false
@@ -197,6 +242,11 @@ export type ValidationFailure = {
   readonly failureReason: string
 }
 
+/**
+ * Discriminated union for validation results
+ * Check result.valid to determine success/failure
+ * Prefer type guards for type narrowing
+ */
 export type ValidationResult<T> = ValidationSuccess<T> | ValidationFailure
 
 /** Type guard for validation success */
@@ -216,6 +266,7 @@ export function isValidationFailure<T>(
 // =============================================================================
 // QUERY PROCESSING TYPES
 // Interfaces for property query operations and context
+// Used by processPropertyQueryResults pipeline
 // =============================================================================
 
 export interface PropertyQueryHelpers {

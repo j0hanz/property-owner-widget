@@ -28,9 +28,91 @@ import {
 } from "./utils"
 import { OWNER_QUERY_CONCURRENCY } from "../config/constants"
 
+// ============================================================================
+// QUERY CACHE SERVICE
+// LRU cache with size limits and automatic eviction
+// ============================================================================
+
+const queryCacheService = {
+  cache: new Map<string, { value: any; timestamp: number }>(),
+  maxSize: 100,
+  hits: 0,
+  misses: 0,
+
+  get(key: string): unknown {
+    const entry = this.cache.get(key)
+    if (entry) {
+      this.hits++
+      // Update timestamp for LRU
+      entry.timestamp = Date.now()
+      return entry.value
+    }
+    this.misses++
+    return undefined
+  },
+
+  set(key: string, value: unknown): void {
+    if (this.cache.size >= this.maxSize) {
+      this.evictOldest()
+    }
+    this.cache.set(key, { value, timestamp: Date.now() })
+  },
+
+  evictOldest(): void {
+    const entriesToRemove = Math.floor(this.maxSize * 0.2)
+    const sorted = Array.from(this.cache.entries()).sort(
+      (a, b) => a[1].timestamp - b[1].timestamp
+    )
+    sorted.slice(0, entriesToRemove).forEach(([key]) => this.cache.delete(key))
+  },
+
+  clear(): void {
+    this.cache.clear()
+    this.hits = 0
+    this.misses = 0
+  },
+
+  getMetrics() {
+    return {
+      size: this.cache.size,
+      hits: this.hits,
+      misses: this.misses,
+      hitRate:
+        this.hits + this.misses > 0 ? this.hits / (this.hits + this.misses) : 0,
+    }
+  },
+}
+
+/**
+ * Clear all query caches
+ * Called when config changes or widget unmounts
+ */
+export const clearQueryCache = (): void => {
+  queryCacheService.clear()
+  featureLayerCache.forEach((layer) => {
+    try {
+      if (layer && typeof layer.destroy === "function") {
+        layer.destroy()
+      }
+    } catch (error) {
+      logger.warn("Failed to destroy cached FeatureLayer", {
+        error,
+      })
+    }
+  })
+  featureLayerCache.clear()
+  cachedFeatureLayerCtor = null
+  cachedQueryCtor = null
+}
+
 const createSignalOptions = (signal?: AbortSignal): any => {
   return signal ? { signal } : undefined
 }
+
+// ============================================================================
+// MODULE CONSTRUCTOR CACHING
+// Cache ArcGIS JS API constructors for performance
+// ============================================================================
 
 let cachedFeatureLayerCtor:
   | (new (props: __esri.FeatureLayerProperties) => __esri.FeatureLayer)
@@ -43,6 +125,11 @@ const featureLayerCache = new Map<string, __esri.FeatureLayer>()
 // Cache constructors for relationship queries
 let cachedQueryTaskCtor: (new (props: any) => any) | null = null
 let cachedRelationshipQueryCtor: (new (props?: any) => any) | null = null
+
+// ============================================================================
+// URL VALIDATION
+// Security checks for ArcGIS service URLs
+// ============================================================================
 
 // Check if hostname is private/local
 const isPrivateHost = (hostname: string): boolean => {
@@ -315,9 +402,10 @@ export const queryPropertyByPoint = async (
     }
 
     const mappedResults = result.features.map((feature: __esri.Graphic) => {
+      const attrs = feature.attributes as PropertyAttributes
       return {
         features: [feature],
-        propertyId: (feature.attributes as PropertyAttributes).FNR,
+        propertyId: attrs.FNR,
       }
     })
 
@@ -329,11 +417,16 @@ export const queryPropertyByPoint = async (
     return mappedResults
   } catch (error) {
     if (isAbortError(error)) {
-      throw error as Error
+      throw error
     }
     throw new Error(parseArcGISError(error, "Property query failed"))
   }
 }
+
+// ============================================================================
+// OWNER QUERIES
+// Query owner information by property FNR (Fastighetsbeteckning)
+// ============================================================================
 
 export const queryOwnerByFnr = async (
   fnr: string | number,
@@ -414,27 +507,15 @@ export const queryOwnerByFnr = async (
       return graphic as __esri.Graphic
     })
   } catch (error) {
-    if (isAbortError(error)) {
-      throw error as Error
-    }
+    abortHelpers.handleOrThrow(error)
     throw new Error(parseArcGISError(error, "Owner query failed"))
   }
 }
 
-export const clearQueryCache = () => {
-  featureLayerCache.forEach((layer) => {
-    try {
-      layer.destroy()
-    } catch (error) {
-      logger.warn("Failed to destroy cached FeatureLayer", {
-        error,
-      })
-    }
-  })
-  featureLayerCache.clear()
-  cachedFeatureLayerCtor = null
-  cachedQueryCtor = null
-}
+// ============================================================================
+// RELATIONSHIP QUERIES
+// Batch query owners using ArcGIS relationship class
+// ============================================================================
 
 export const queryOwnersByRelationship = async (
   propertyFnrs: Array<string | number>,
@@ -544,9 +625,7 @@ export const queryOwnersByRelationship = async (
 
     return ownersByFnr
   } catch (error) {
-    if (isAbortError(error)) {
-      throw error as Error
-    }
+    abortHelpers.handleOrThrow(error)
     throw new Error(parseArcGISError(error, "Relationship query failed"))
   }
 }
@@ -884,12 +963,14 @@ const processBatchQuery = async (
     )
   } catch (error) {
     if (helpers.isAbortError(error)) {
-      throw error as Error
+      throw error instanceof Error ? error : new Error(String(error))
     }
     console.error("Batch owner query failed", error)
     ownersByFnr = new Map()
     fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)))
   }
+
+  abortHelpers.throwIfAborted(context.signal)
   for (const { fnr, attrs, graphic } of validatedProperties) {
     const owners = ownersByFnr.get(String(fnr)) || []
 
@@ -1061,9 +1142,7 @@ export const queryPropertiesInBuffer = async (
       (record: FeatureDataRecord) => record.getData() as PropertyAttributes
     )
   } catch (error) {
-    if (isAbortError(error)) {
-      throw error as Error
-    }
+    abortHelpers.handleOrThrow(error)
     throw new Error(parseArcGISError(error, "Buffer query failed"))
   }
 }

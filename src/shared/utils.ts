@@ -19,6 +19,10 @@ import {
   CURSOR_TOOLTIP_STYLE,
 } from "../config/constants"
 
+// ============================================================================
+// HTML SANITIZATION & TEXT PROCESSING
+// ============================================================================
+
 /** Sanitize arbitrary HTML/text content */
 const sanitizeText = (value: string): string => {
   if (!value) return ""
@@ -35,6 +39,10 @@ export const textSanitizer = {
 export const stripHtml = (value: string): string =>
   textSanitizer.stripHtml(value)
 
+// ============================================================================
+// LOGGING UTILITIES
+// ============================================================================
+
 export const logger = {
   debug: (context: string, data?: { [key: string]: any }) => {
     // Debug logging disabled in production
@@ -46,6 +54,11 @@ export const logger = {
     console.error(`Property Widget: ${context}`, error, data || {})
   },
 }
+
+// ============================================================================
+// PII MASKING & PRIVACY
+// Owner name and address masking for privacy protection
+// ============================================================================
 
 const maskText = (text: string, minLength: number): string => {
   const normalized = sanitizeText(text)
@@ -82,6 +95,11 @@ export const ownerPrivacy = {
 export const maskName = ownerPrivacy.maskName
 export const maskAddress = ownerPrivacy.maskAddress
 
+// ============================================================================
+// OWNER PROCESSING PIPELINE
+// Format, mask, and process owner information
+// ============================================================================
+
 const normalizeOwnerValue = (value: unknown): string => {
   if (value === null || value === undefined) return ""
   if (typeof value === "number") return sanitizeText(String(value))
@@ -94,47 +112,42 @@ const buildOwnerIdentityKey = (
   context: { fnr?: string | number; propertyId?: string },
   sequence?: number
 ): string => {
+  // Priority 1: Use AGARLISTA if available (unique identifier)
   const agarLista = normalizeOwnerValue(owner.AGARLISTA)
-  if (agarLista) return `agarlista:${agarLista.toLowerCase()}`
+  if (agarLista) return `A:${agarLista.toLowerCase()}`
 
-  const identityParts = [
-    normalizeOwnerValue(owner.NAMN),
-    normalizeOwnerValue(owner.BOSTADR),
-    normalizeOwnerValue(owner.POSTNR),
-    normalizeOwnerValue(owner.POSTADR),
-    normalizeOwnerValue(owner.ORGNR),
-    normalizeOwnerValue(owner.ANDEL),
-  ]
+  // Priority 2: Build identity from owner attributes
+  const parts = [
+    owner.NAMN && `N:${normalizeOwnerValue(owner.NAMN)}`,
+    owner.BOSTADR && `B:${normalizeOwnerValue(owner.BOSTADR)}`,
+    owner.POSTNR && `P:${normalizeOwnerValue(owner.POSTNR)}`,
+    owner.POSTADR && `C:${normalizeOwnerValue(owner.POSTADR)}`,
+    owner.ORGNR && `O:${normalizeOwnerValue(owner.ORGNR)}`,
+    owner.ANDEL && `S:${normalizeOwnerValue(owner.ANDEL)}`,
+  ].filter(Boolean)
 
-  const hasIdentity = identityParts.some((part) => part !== "")
-  if (hasIdentity) {
-    return `owner:${identityParts.map((part) => part.toLowerCase()).join("|")}`
-  }
-
-  const fallbackParts: string[] = []
-  if (context.propertyId) {
-    fallbackParts.push(
-      `property:${normalizeOwnerValue(context.propertyId).toLowerCase()}`
-    )
-  }
-  if (context.fnr !== undefined && context.fnr !== null) {
-    const normalizedFnr = String(context.fnr).toLowerCase()
-    fallbackParts.push(`fnr:${normalizedFnr}`)
-  }
-  if (owner.OBJECTID !== undefined && owner.OBJECTID !== null) {
-    fallbackParts.push(`objectid:${String(owner.OBJECTID).toLowerCase()}`)
-  }
-  if (owner.UUID_FASTIGHET) {
-    fallbackParts.push(
-      `uuid:${normalizeOwnerValue(owner.UUID_FASTIGHET).toLowerCase()}`
-    )
+  if (parts.length > 0) {
+    return parts.join("|").toLowerCase()
   }
 
-  if (fallbackParts.length === 0) {
-    fallbackParts.push(`index:${sequence ?? 0}`)
+  // Priority 3: Fallback to context identifiers
+  const fallback = [
+    context.propertyId && `PR:${normalizeOwnerValue(context.propertyId)}`,
+    context.fnr !== undefined &&
+      context.fnr !== null &&
+      `FN:${String(context.fnr)}`,
+    owner.OBJECTID !== undefined &&
+      owner.OBJECTID !== null &&
+      `OB:${String(owner.OBJECTID)}`,
+    owner.UUID_FASTIGHET && `UU:${normalizeOwnerValue(owner.UUID_FASTIGHET)}`,
+  ].filter(Boolean)
+
+  if (fallback.length > 0) {
+    return fallback.join("|").toLowerCase()
   }
 
-  return fallbackParts.join("|")
+  // Priority 4: Use sequence as last resort
+  return `IX:${sequence ?? 0}`
 }
 
 export const ownerIdentity = {
@@ -345,6 +358,25 @@ export const formatPropertyWithShare = (
   return trimmedShare ? `${property} (${trimmedShare})` : property
 }
 
+/**
+ * Owner Processing Pipeline
+ * Consolidated API for owner data formatting and masking
+ */
+export const ownerProcessing = {
+  format: formatOwnerInfo,
+  mask: { name: maskName, address: maskAddress },
+  buildIdentity: ownerIdentity.buildKey,
+  processBatch: (
+    owners: OwnerAttributes[],
+    maskPII: boolean,
+    unknownText: string
+  ) => owners.map((o) => formatOwnerInfo(o, maskPII, unknownText)),
+}
+
+// ============================================================================
+// GRAPHICS & HIGHLIGHTING
+// ============================================================================
+
 const HEX_COLOR_PATTERN = /^#?([0-9a-fA-F]{6})$/
 
 export const buildHighlightColor = (
@@ -416,6 +448,10 @@ export const buildHighlightSymbolJSON = (
   } as __esri.SimpleFillSymbolProperties
 }
 
+// ============================================================================
+// PROPERTY & DATA UTILITIES
+// ============================================================================
+
 export const createRowId = (fnr: string | number, objectId: number): string =>
   `${fnr}_${objectId}`
 
@@ -423,8 +459,7 @@ export const extractFnr = (
   attributes: { [key: string]: unknown } | null | undefined
 ): string | number | null => {
   if (!attributes) return null
-  const candidate = attributes as { [key: string]: unknown }
-  const fnr = candidate.FNR ?? candidate.fnr
+  const fnr = attributes.FNR ?? attributes.fnr
   if (typeof fnr === "string" || typeof fnr === "number") {
     return fnr
   }
@@ -437,7 +472,7 @@ export const normalizeFnrKey = (
   return fnr != null ? String(fnr) : ""
 }
 
-export const isAbortError = (error: unknown): boolean => {
+export const isAbortError = (error: unknown): error is Error => {
   if (!error || typeof error !== "object") return false
   const candidate = error as { name?: string; message?: string }
   if (candidate.name === "AbortError") return true
@@ -446,6 +481,10 @@ export const isAbortError = (error: unknown): boolean => {
     candidate.message.toLowerCase().includes("abort")
   )
 }
+
+// ============================================================================
+// NUMBER UTILITIES
+// ============================================================================
 
 export const numberHelpers = {
   isFiniteNumber: (value: unknown): value is number => {
@@ -470,6 +509,10 @@ export const numberHelpers = {
   },
 }
 
+// ============================================================================
+// ABORT SIGNAL MANAGEMENT
+// ============================================================================
+
 export const abortHelpers = {
   throwIfAborted: (signal?: AbortSignal): void => {
     if (signal?.aborted) {
@@ -486,6 +529,13 @@ export const abortHelpers = {
     if (isStale()) return "stale"
     if (signal.aborted) return "aborted"
     return "active"
+  },
+
+  handleOrThrow: (error: unknown, onAbort?: () => void): void => {
+    if (isAbortError(error)) {
+      onAbort?.()
+      throw error
+    }
   },
 }
 
