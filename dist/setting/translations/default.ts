@@ -50,4 +50,7 @@ export default {
   errorInvalidNumber: "Enter a whole number greater than zero.",
   errorMaxResultsInvalid: "Max results must be between 1 and 1000.",
   errorRelationshipIdInvalid: "Relationship ID must be between 0 and 99.",
+  runtimeStateQuerying: "Query in progress...",
+  runtimeStateError: "Query error occurred. Check widget for details.",
+  runtimeStateSelected: "{count} properties currently selected",
 }
