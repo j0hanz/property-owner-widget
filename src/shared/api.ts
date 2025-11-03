@@ -2,8 +2,8 @@ import type {
   DataSourceManager,
   FeatureLayerDataSource,
   FeatureDataRecord,
-} from "jimu-core"
-import { loadArcGISJSAPIModules } from "jimu-arcgis"
+} from "jimu-core";
+import { loadArcGISJSAPIModules } from "jimu-arcgis";
 import type {
   PropertyAttributes,
   OwnerAttributes,
@@ -16,8 +16,8 @@ import type {
   ValidationResult,
   PropertySelectionPipelineParams,
   PropertySelectionPipelineResult,
-} from "../config/types"
-import { isValidationFailure } from "../config/types"
+} from "../config/types";
+import { isValidationFailure } from "../config/types";
 import {
   buildFnrWhereClause,
   parseArcGISError,
@@ -33,12 +33,12 @@ import {
   extractFnr,
   calculatePropertyUpdates,
   processPropertyQueryResults,
-} from "./utils"
+} from "./utils";
 import {
   OWNER_QUERY_CONCURRENCY,
   QUERY_CACHE_MAX_SIZE,
   QUERY_CACHE_EVICTION_PERCENTAGE,
-} from "../config/constants"
+} from "../config/constants";
 
 // ============================================================================
 // QUERY CACHE SERVICE
@@ -52,38 +52,38 @@ const queryCacheService = {
   misses: 0,
 
   get(key: string): unknown {
-    const entry = this.cache.get(key)
+    const entry = this.cache.get(key);
     if (entry) {
-      this.hits++
+      this.hits++;
       // Update timestamp for LRU
-      entry.timestamp = Date.now()
-      return entry.value
+      entry.timestamp = Date.now();
+      return entry.value;
     }
-    this.misses++
-    return undefined
+    this.misses++;
+    return undefined;
   },
 
   set(key: string, value: unknown): void {
     if (this.cache.size >= this.maxSize) {
-      this.evictOldest()
+      this.evictOldest();
     }
-    this.cache.set(key, { value, timestamp: Date.now() })
+    this.cache.set(key, { value, timestamp: Date.now() });
   },
 
   evictOldest(): void {
     const entriesToRemove = Math.floor(
       this.maxSize * QUERY_CACHE_EVICTION_PERCENTAGE
-    )
+    );
     const sorted = Array.from(this.cache.entries()).sort(
       (a, b) => a[1].timestamp - b[1].timestamp
-    )
-    sorted.slice(0, entriesToRemove).forEach(([key]) => this.cache.delete(key))
+    );
+    sorted.slice(0, entriesToRemove).forEach(([key]) => this.cache.delete(key));
   },
 
   clear(): void {
-    this.cache.clear()
-    this.hits = 0
-    this.misses = 0
+    this.cache.clear();
+    this.hits = 0;
+    this.misses = 0;
   },
 
   getMetrics() {
@@ -93,35 +93,35 @@ const queryCacheService = {
       misses: this.misses,
       hitRate:
         this.hits + this.misses > 0 ? this.hits / (this.hits + this.misses) : 0,
-    }
+    };
   },
-}
+};
 
 /**
  * Clear all query caches
  * Called when config changes or widget unmounts
  */
 export const clearQueryCache = (): void => {
-  queryCacheService.clear()
+  queryCacheService.clear();
   featureLayerCache.forEach((layer) => {
     try {
       if (layer && typeof layer.destroy === "function") {
-        layer.destroy()
+        layer.destroy();
       }
     } catch (error) {
       logger.warn("Failed to destroy cached FeatureLayer", {
         error,
-      })
+      });
     }
-  })
-  featureLayerCache.clear()
-  cachedFeatureLayerCtor = null
-  cachedQueryCtor = null
-}
+  });
+  featureLayerCache.clear();
+  cachedFeatureLayerCtor = null;
+  cachedQueryCtor = null;
+};
 
 const createSignalOptions = (signal?: AbortSignal): any => {
-  return signal ? { signal } : undefined
-}
+  return signal ? { signal } : undefined;
+};
 
 // ============================================================================
 // MODULE CONSTRUCTOR CACHING
@@ -130,15 +130,15 @@ const createSignalOptions = (signal?: AbortSignal): any => {
 
 let cachedFeatureLayerCtor:
   | (new (props: __esri.FeatureLayerProperties) => __esri.FeatureLayer)
-  | null = null
+  | null = null;
 let cachedQueryCtor:
   | (new (props: __esri.QueryProperties) => __esri.Query)
-  | null = null
-const featureLayerCache = new Map<string, __esri.FeatureLayer>()
+  | null = null;
+const featureLayerCache = new Map<string, __esri.FeatureLayer>();
 
 // Cache constructors for relationship queries
-let cachedQueryTaskCtor: (new (props: any) => any) | null = null
-let cachedRelationshipQueryCtor: (new (props?: any) => any) | null = null
+let cachedQueryTaskCtor: (new (props: any) => any) | null = null;
+let cachedRelationshipQueryCtor: (new (props?: any) => any) | null = null;
 
 // ============================================================================
 // URL VALIDATION
@@ -151,22 +151,22 @@ const dataSourcePredicates = {
   hasDataSource: (ds: FeatureLayerDataSource | null): boolean => ds !== null,
 
   isQueryableDataSource: (ds: FeatureLayerDataSource | null): boolean => {
-    return ds !== null && typeof ds.query === "function"
+    return ds !== null && typeof ds.query === "function";
   },
 
   hasValidatedUrl: (
     ds: FeatureLayerDataSource,
     allowedHosts: readonly string[] | undefined
   ): boolean => {
-    const url = getDataSourceUrl(ds)
-    if (!url) return false
-    const normalizedHosts = normalizeHostList(allowedHosts)
-    return isValidArcGISUrl(url, normalizedHosts)
+    const url = getDataSourceUrl(ds);
+    if (!url) return false;
+    const normalizedHosts = normalizeHostList(allowedHosts);
+    return isValidArcGISUrl(url, normalizedHosts);
   },
-}
+};
 
 const isPrivateHost = (hostname: string): boolean => {
-  const lower = hostname.toLowerCase()
+  const lower = hostname.toLowerCase();
   return (
     lower === "localhost" ||
     lower === "127.0.0.1" ||
@@ -175,32 +175,32 @@ const isPrivateHost = (hostname: string): boolean => {
     /^10\./.test(lower) ||
     /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(lower) ||
     /^192\.168\./.test(lower)
-  )
-}
+  );
+};
 
 const isValidHttpsUrl = (parsed: URL): boolean => {
   return (
     parsed.protocol === "https:" &&
     (parsed.port === "" || parsed.port === "443")
-  )
-}
+  );
+};
 
 const isValidArcGISPath = (pathname: string): boolean => {
-  if (pathname.length > 500) return false
-  return /\/(MapServer|FeatureServer)\/\d+(\/query)?$/.test(pathname)
-}
+  if (pathname.length > 500) return false;
+  return /\/(MapServer|FeatureServer)\/\d+(\/query)?$/.test(pathname);
+};
 
 const isHostAllowed = (
   hostname: string,
   allowedHosts?: readonly string[]
 ): boolean => {
-  if (!allowedHosts || allowedHosts.length === 0) return true
+  if (!allowedHosts || allowedHosts.length === 0) return true;
   return allowedHosts.some((host) => {
-    if (hostname === host) return true
-    const suffix = `.${host}`
-    return hostname.endsWith(suffix)
-  })
-}
+    if (hostname === host) return true;
+    const suffix = `.${host}`;
+    return hostname.endsWith(suffix);
+  });
+};
 
 /** Validate ArcGIS REST service URL with host allowlist enforcement */
 export const isValidArcGISUrl = (
@@ -208,32 +208,32 @@ export const isValidArcGISUrl = (
   allowedHosts?: readonly string[]
 ): boolean => {
   try {
-    const parsed = new URL(url)
+    const parsed = new URL(url);
 
     return (
       !isPrivateHost(parsed.hostname) &&
       isValidHttpsUrl(parsed) &&
       isValidArcGISPath(parsed.pathname) &&
       isHostAllowed(parsed.hostname, allowedHosts)
-    )
+    );
   } catch (_error) {
-    return false
+    return false;
   }
-}
+};
 
 const getDataSourceUrl = (
   dataSource: FeatureLayerDataSource | null | undefined
 ): string | null => {
-  if (!dataSource) return null
+  if (!dataSource) return null;
 
-  const layerUrl = (dataSource.getLayerDefinition?.() as any)?.url
-  if (layerUrl) return layerUrl
+  const layerUrl = (dataSource.getLayerDefinition?.() as any)?.url;
+  if (layerUrl) return layerUrl;
 
-  const jsonUrl = (dataSource.getDataSourceJson?.() as any)?.url
-  if (jsonUrl) return jsonUrl
+  const jsonUrl = (dataSource.getDataSourceJson?.() as any)?.url;
+  if (jsonUrl) return jsonUrl;
 
-  return (dataSource as any)?.url || (dataSource as any)?.layer?.url || null
-}
+  return (dataSource as any)?.url || (dataSource as any)?.layer?.url || null;
+};
 
 const createValidationError = (
   type: "VALIDATION_ERROR" | "QUERY_ERROR",
@@ -243,7 +243,7 @@ const createValidationError = (
   valid: false as const,
   error: { type, message },
   failureReason: reason,
-})
+});
 
 const validateDataSourceUrl = (
   ds: FeatureLayerDataSource,
@@ -256,11 +256,11 @@ const validateDataSourceUrl = (
       "VALIDATION_ERROR",
       translate("errorHostNotAllowed"),
       `${dsType}_disallowed_host`
-    )
+    );
   }
 
-  return { valid: true, data: null }
-}
+  return { valid: true, data: null };
+};
 
 const validateSingleDataSource = (
   ds: FeatureLayerDataSource | null,
@@ -272,7 +272,7 @@ const validateSingleDataSource = (
       "VALIDATION_ERROR",
       translate("errorNoDataAvailable"),
       `${dsType}_ds_not_found`
-    )
+    );
   }
 
   if (!dataSourcePredicates.isQueryableDataSource(ds)) {
@@ -280,27 +280,28 @@ const validateSingleDataSource = (
       "VALIDATION_ERROR",
       translate("errorNoDataAvailable"),
       `${dsType}_ds_not_queryable`
-    )
+    );
   }
 
-  return { valid: true, data: null }
-}
+  return { valid: true, data: null };
+};
 
 export const validateDataSources = (params: {
-  propertyDsId: string | undefined
-  ownerDsId: string | undefined
-  dsManager: DataSourceManager | null
-  allowedHosts?: readonly string[]
-  translate: (key: string) => string
+  propertyDsId: string | undefined;
+  ownerDsId: string | undefined;
+  dsManager: DataSourceManager | null;
+  allowedHosts?: readonly string[];
+  translate: (key: string) => string;
 }): ValidationResult<{ manager: DataSourceManager }> => {
-  const { propertyDsId, ownerDsId, dsManager, allowedHosts, translate } = params
+  const { propertyDsId, ownerDsId, dsManager, allowedHosts, translate } =
+    params;
 
   if (!propertyDsId || !ownerDsId) {
     return createValidationError(
       "VALIDATION_ERROR",
       translate("errorNoDataAvailable"),
       "missing_data_sources"
-    )
+    );
   }
 
   if (!dsManager) {
@@ -308,32 +309,32 @@ export const validateDataSources = (params: {
       "QUERY_ERROR",
       translate("errorQueryFailed"),
       "no_data_source_manager"
-    )
+    );
   }
 
   const propertyDs = dsManager.getDataSource(
     propertyDsId
-  ) as FeatureLayerDataSource | null
+  ) as FeatureLayerDataSource | null;
   const ownerDs = dsManager.getDataSource(
     ownerDsId
-  ) as FeatureLayerDataSource | null
+  ) as FeatureLayerDataSource | null;
 
   const propertyDsValidation = validateSingleDataSource(
     propertyDs,
     "property",
     translate
-  )
+  );
   if (isValidationFailure(propertyDsValidation)) {
-    return propertyDsValidation
+    return propertyDsValidation;
   }
 
   const ownerDsValidation = validateSingleDataSource(
     ownerDs,
     "owner",
     translate
-  )
+  );
   if (isValidationFailure(ownerDsValidation)) {
-    return ownerDsValidation
+    return ownerDsValidation;
   }
 
   if (!propertyDs || !ownerDs) {
@@ -341,7 +342,7 @@ export const validateDataSources = (params: {
       "VALIDATION_ERROR",
       translate("errorNoDataAvailable"),
       "missing_data_source_instance"
-    )
+    );
   }
 
   const propertyUrlValidation = validateDataSourceUrl(
@@ -349,9 +350,9 @@ export const validateDataSources = (params: {
     "property",
     allowedHosts,
     translate
-  )
+  );
   if (isValidationFailure(propertyUrlValidation)) {
-    return propertyUrlValidation
+    return propertyUrlValidation;
   }
 
   const ownerUrlValidation = validateDataSourceUrl(
@@ -359,13 +360,13 @@ export const validateDataSources = (params: {
     "owner",
     allowedHosts,
     translate
-  )
+  );
   if (isValidationFailure(ownerUrlValidation)) {
-    return ownerUrlValidation
+    return ownerUrlValidation;
   }
 
-  return { valid: true, data: { manager: dsManager } }
-}
+  return { valid: true, data: { manager: dsManager } };
+};
 
 export const queryPropertyByPoint = async (
   point: __esri.Point,
@@ -374,39 +375,39 @@ export const queryPropertyByPoint = async (
   options?: { signal?: AbortSignal }
 ): Promise<QueryResult[]> => {
   try {
-    abortHelpers.throwIfAborted(options?.signal)
+    abortHelpers.throwIfAborted(options?.signal);
 
-    const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
+    const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource;
     if (!ds) {
-      throw new Error("Property data source not found")
+      throw new Error("Property data source not found");
     }
 
-    const layerUrl = ds.url
+    const layerUrl = ds.url;
     if (!layerUrl) {
-      throw new Error("Data source URL not available")
+      throw new Error("Data source URL not available");
     }
 
     if (!cachedFeatureLayerCtor || !cachedQueryCtor) {
       const [FeatureLayer, Query] = await loadArcGISJSAPIModules([
         "esri/layers/FeatureLayer",
         "esri/rest/support/Query",
-      ])
-      cachedFeatureLayerCtor = FeatureLayer as typeof __esri.FeatureLayer
-      cachedQueryCtor = Query as typeof __esri.Query
+      ]);
+      cachedFeatureLayerCtor = FeatureLayer as typeof __esri.FeatureLayer;
+      cachedQueryCtor = Query as typeof __esri.Query;
     }
 
-    const FeatureLayerCtor = cachedFeatureLayerCtor
-    const QueryCtor = cachedQueryCtor
+    const FeatureLayerCtor = cachedFeatureLayerCtor;
+    const QueryCtor = cachedQueryCtor;
     if (!FeatureLayerCtor || !QueryCtor) {
-      throw new Error("Property query modules failed to load")
+      throw new Error("Property query modules failed to load");
     }
 
-    let layer = featureLayerCache.get(layerUrl)
+    let layer = featureLayerCache.get(layerUrl);
     if (!layer) {
       layer = new FeatureLayerCtor({
         url: layerUrl,
-      })
-      featureLayerCache.set(layerUrl, layer)
+      });
+      featureLayerCache.set(layerUrl, layer);
     }
 
     const query = new QueryCtor({
@@ -414,35 +415,35 @@ export const queryPropertyByPoint = async (
       returnGeometry: true,
       outFields: ["*"],
       spatialRelationship: "intersects",
-    })
+    });
 
     const result = await layer.queryFeatures(
       query,
       createSignalOptions(options?.signal)
-    )
+    );
 
-    abortHelpers.throwIfAborted(options?.signal)
+    abortHelpers.throwIfAborted(options?.signal);
 
     if (!result?.features || result.features.length === 0) {
-      return []
+      return [];
     }
 
     const mappedResults = result.features.map((feature: __esri.Graphic) => {
-      const attrs = feature.attributes as PropertyAttributes
+      const attrs = feature.attributes as PropertyAttributes;
       return {
         features: [feature],
         propertyId: attrs.FNR,
-      }
-    })
+      };
+    });
 
-    return mappedResults
+    return mappedResults;
   } catch (error) {
     if (isAbortError(error)) {
-      throw error
+      throw error;
     }
-    throw new Error(parseArcGISError(error, "Property query failed"))
+    throw new Error(parseArcGISError(error, "Property query failed"));
   }
-}
+};
 
 // ============================================================================
 // OWNER QUERIES
@@ -456,11 +457,11 @@ export const queryOwnerByFnr = async (
   options?: { signal?: AbortSignal }
 ): Promise<__esri.Graphic[]> => {
   try {
-    abortHelpers.throwIfAborted(options?.signal)
+    abortHelpers.throwIfAborted(options?.signal);
 
-    const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
+    const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource;
     if (!ds) {
-      throw new Error("Owner data source not found")
+      throw new Error("Owner data source not found");
     }
 
     const result = await ds.query(
@@ -470,30 +471,30 @@ export const queryOwnerByFnr = async (
         outFields: ["*"],
       },
       createSignalOptions(options?.signal)
-    )
+    );
 
-    abortHelpers.throwIfAborted(options?.signal)
+    abortHelpers.throwIfAborted(options?.signal);
 
     if (!result?.records) {
-      return []
+      return [];
     }
 
     if (result.records.length === 0) {
-      return []
+      return [];
     }
 
     return result.records.map((record: FeatureDataRecord) => {
-      const data = record.getData()
+      const data = record.getData();
       const graphic: any = {
         attributes: data,
-      }
-      return graphic as __esri.Graphic
-    })
+      };
+      return graphic as __esri.Graphic;
+    });
   } catch (error) {
-    abortHelpers.handleOrThrow(error)
-    throw new Error(parseArcGISError(error, "Owner query failed"))
+    abortHelpers.handleOrThrow(error);
+    throw new Error(parseArcGISError(error, "Owner query failed"));
   }
-}
+};
 
 // ============================================================================
 // RELATIONSHIP QUERIES
@@ -509,24 +510,24 @@ export const queryOwnersByRelationship = async (
   options?: { signal?: AbortSignal }
 ): Promise<Map<string, OwnerAttributes[]>> => {
   try {
-    abortHelpers.throwIfAborted(options?.signal)
+    abortHelpers.throwIfAborted(options?.signal);
 
     if (!propertyFnrs || propertyFnrs.length === 0) {
-      return new Map()
+      return new Map();
     }
 
     const propertyDs = dsManager.getDataSource(
       propertyDataSourceId
-    ) as FeatureLayerDataSource
+    ) as FeatureLayerDataSource;
     if (!propertyDs) {
-      throw new Error("Property data source not found")
+      throw new Error("Property data source not found");
     }
 
-    const layerDefinition = propertyDs.getLayerDefinition() as any
-    const layerUrl = layerDefinition?.url
+    const layerDefinition = propertyDs.getLayerDefinition() as any;
+    const layerUrl = layerDefinition?.url;
 
     if (!layerUrl) {
-      throw new Error("Property layer URL not available")
+      throw new Error("Property layer URL not available");
     }
 
     // Load relationship query modules if not cached
@@ -534,23 +535,23 @@ export const queryOwnersByRelationship = async (
       const modules = await loadArcGISJSAPIModules([
         "esri/tasks/QueryTask",
         "esri/rest/support/RelationshipQuery",
-      ])
-      const [QueryTask, RelationshipQuery] = modules
-      cachedQueryTaskCtor = QueryTask
-      cachedRelationshipQueryCtor = RelationshipQuery
+      ]);
+      const [QueryTask, RelationshipQuery] = modules;
+      cachedQueryTaskCtor = QueryTask;
+      cachedRelationshipQueryCtor = RelationshipQuery;
     }
 
-    const QueryTaskCtor = cachedQueryTaskCtor
-    const RelationshipQueryCtor = cachedRelationshipQueryCtor
+    const QueryTaskCtor = cachedQueryTaskCtor;
+    const RelationshipQueryCtor = cachedRelationshipQueryCtor;
     if (!QueryTaskCtor || !RelationshipQueryCtor) {
-      throw new Error("Relationship query modules failed to load")
+      throw new Error("Relationship query modules failed to load");
     }
 
-    const queryTask = new QueryTaskCtor({ url: layerUrl })
-    const relationshipQuery = new RelationshipQueryCtor()
+    const queryTask = new QueryTaskCtor({ url: layerUrl });
+    const relationshipQuery = new RelationshipQueryCtor();
 
-    const objectIds: number[] = []
-    const fnrToObjectIdMap = new Map<number, string>()
+    const objectIds: number[] = [];
+    const fnrToObjectIdMap = new Map<number, string>();
 
     const propertyResult = await propertyDs.query(
       {
@@ -559,65 +560,65 @@ export const queryOwnersByRelationship = async (
         returnGeometry: false,
       },
       createSignalOptions(options?.signal)
-    )
+    );
 
     // Check abort immediately after async operation
-    abortHelpers.throwIfAborted(options?.signal)
+    abortHelpers.throwIfAborted(options?.signal);
 
     if (!propertyResult?.records || propertyResult.records.length === 0) {
-      return new Map()
+      return new Map();
     }
 
     // Check abort before processing records
-    abortHelpers.throwIfAborted(options?.signal)
+    abortHelpers.throwIfAborted(options?.signal);
 
     propertyResult.records.forEach((record: FeatureDataRecord) => {
-      const data = record.getData()
-      const objectId = data.OBJECTID as number
-      const fnr = String(data.FNR)
+      const data = record.getData();
+      const objectId = data.OBJECTID as number;
+      const fnr = String(data.FNR);
       if (objectId != null && fnr) {
-        objectIds.push(objectId)
-        fnrToObjectIdMap.set(objectId, fnr)
+        objectIds.push(objectId);
+        fnrToObjectIdMap.set(objectId, fnr);
       }
-    })
+    });
 
     if (objectIds.length === 0) {
-      return new Map()
+      return new Map();
     }
 
-    relationshipQuery.objectIds = objectIds
-    relationshipQuery.relationshipId = relationshipId
-    relationshipQuery.outFields = ["*"]
+    relationshipQuery.objectIds = objectIds;
+    relationshipQuery.relationshipId = relationshipId;
+    relationshipQuery.outFields = ["*"];
 
-    abortHelpers.throwIfAborted(options?.signal)
+    abortHelpers.throwIfAborted(options?.signal);
 
     const result = await queryTask.executeRelationshipQuery(
       relationshipQuery,
       createSignalOptions(options?.signal)
-    )
+    );
 
-    abortHelpers.throwIfAborted(options?.signal)
+    abortHelpers.throwIfAborted(options?.signal);
 
-    const ownersByFnr = new Map<string, OwnerAttributes[]>()
+    const ownersByFnr = new Map<string, OwnerAttributes[]>();
 
     objectIds.forEach((objectId) => {
-      const relatedRecords = result[objectId]
-      const fnr = fnrToObjectIdMap.get(objectId)
+      const relatedRecords = result[objectId];
+      const fnr = fnrToObjectIdMap.get(objectId);
 
       if (fnr && relatedRecords && relatedRecords.features) {
         const owners = relatedRecords.features.map(
           (feature: __esri.Graphic) => feature.attributes as OwnerAttributes
-        )
-        ownersByFnr.set(fnr, owners)
+        );
+        ownersByFnr.set(fnr, owners);
       }
-    })
+    });
 
-    return ownersByFnr
+    return ownersByFnr;
   } catch (error) {
-    abortHelpers.handleOrThrow(error)
-    throw new Error(parseArcGISError(error, "Relationship query failed"))
+    abortHelpers.handleOrThrow(error);
+    throw new Error(parseArcGISError(error, "Relationship query failed"));
   }
-}
+};
 
 // Deduplicate owner entries based on identity keys
 const deduplicateOwnerEntries = (
@@ -626,33 +627,33 @@ const deduplicateOwnerEntries = (
   >,
   context: { fnr: string | number; propertyId?: string }
 ): OwnerAttributes[] => {
-  const seen = new Set<string>()
-  const uniqueOwners: OwnerAttributes[] = []
+  const seen = new Set<string>();
+  const uniqueOwners: OwnerAttributes[] = [];
 
   entries.forEach((entry, index) => {
     const attrs = (entry as __esri.Graphic)?.attributes
       ? ((entry as __esri.Graphic).attributes as OwnerAttributes)
-      : (entry as OwnerAttributes)
+      : (entry as OwnerAttributes);
 
     if (!attrs || typeof attrs !== "object") {
-      return
+      return;
     }
 
     try {
-      const identityKey = ownerIdentity.buildKey(attrs, context, index)
+      const identityKey = ownerIdentity.buildKey(attrs, context, index);
       if (seen.has(identityKey)) {
-        return
+        return;
       }
 
-      seen.add(identityKey)
-      uniqueOwners.push(attrs)
+      seen.add(identityKey);
+      uniqueOwners.push(attrs);
     } catch (error) {
-      uniqueOwners.push(attrs)
+      uniqueOwners.push(attrs);
     }
-  })
+  });
 
-  return uniqueOwners
-}
+  return uniqueOwners;
+};
 
 // ============================================================================
 // OWNER QUERY PROCESSING HELPERS
@@ -665,53 +666,53 @@ const shouldSkipOwnerResult = (
 ): { skip: boolean; reason?: string } => {
   if (result.error) {
     if (helpers.isAbortError(result.error)) {
-      return { skip: true, reason: "aborted" }
+      return { skip: true, reason: "aborted" };
     }
-    return { skip: false }
+    return { skip: false };
   }
 
   if (!result.value || !result.value.validated) {
-    return { skip: true, reason: "invalid_value" }
+    return { skip: true, reason: "invalid_value" };
   }
 
-  return { skip: false }
-}
+  return { skip: false };
+};
 
 const accumulatePropertyRows = (params: {
-  propertyRows: GridRowData[]
-  currentTotal: number
-  maxResults: number
+  propertyRows: GridRowData[];
+  currentTotal: number;
+  maxResults: number;
   accumulator: {
-    rows: GridRowData[]
-    graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>
-  }
-  graphic: __esri.Graphic
-  fnr: string | number
+    rows: GridRowData[];
+    graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>;
+  };
+  graphic: __esri.Graphic;
+  fnr: string | number;
 }): boolean => {
   const { propertyRows, currentTotal, maxResults, accumulator, graphic, fnr } =
-    params
-  const remaining = maxResults - currentTotal
-  const rowsToAdd = propertyRows.slice(0, remaining)
+    params;
+  const remaining = maxResults - currentTotal;
+  const rowsToAdd = propertyRows.slice(0, remaining);
 
-  accumulator.rows.push(...rowsToAdd)
+  accumulator.rows.push(...rowsToAdd);
 
   if (rowsToAdd.length > 0) {
-    accumulator.graphics.push({ graphic, fnr })
+    accumulator.graphics.push({ graphic, fnr });
   }
 
-  return currentTotal + rowsToAdd.length >= maxResults
-}
+  return currentTotal + rowsToAdd.length >= maxResults;
+};
 
 const processOwnerQueryError = (params: {
-  validated: { fnr: string | number; attrs: any; graphic: __esri.Graphic }
-  context: PropertyProcessingContext
-  config: { enablePIIMasking: boolean }
+  validated: { fnr: string | number; attrs: any; graphic: __esri.Graphic };
+  context: PropertyProcessingContext;
+  config: { enablePIIMasking: boolean };
   accumulator: {
-    rows: GridRowData[]
-    graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>
-  }
-  currentRowCount: number
-  maxResults: number
+    rows: GridRowData[];
+    graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>;
+  };
+  currentRowCount: number;
+  maxResults: number;
 }): boolean => {
   const {
     validated,
@@ -720,10 +721,10 @@ const processOwnerQueryError = (params: {
     accumulator,
     currentRowCount,
     maxResults,
-  } = params
+  } = params;
 
   if (currentRowCount + accumulator.rows.length >= maxResults) {
-    return true
+    return true;
   }
 
   const propertyRows = buildPropertyRows({
@@ -734,7 +735,7 @@ const processOwnerQueryError = (params: {
     propertyGraphic: validated.graphic,
     config: { enablePIIMasking: config.enablePIIMasking },
     context,
-  })
+  });
 
   return accumulatePropertyRows({
     propertyRows,
@@ -743,28 +744,28 @@ const processOwnerQueryError = (params: {
     accumulator,
     graphic: validated.graphic,
     fnr: validated.fnr,
-  })
-}
+  });
+};
 
 const processOwnerQuerySuccess = (params: {
-  result: any
-  context: PropertyProcessingContext
-  config: { enablePIIMasking: boolean }
+  result: any;
+  context: PropertyProcessingContext;
+  config: { enablePIIMasking: boolean };
   accumulator: {
-    rows: GridRowData[]
-    graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>
-  }
-  currentRowCount: number
-  maxResults: number
+    rows: GridRowData[];
+    graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>;
+  };
+  currentRowCount: number;
+  maxResults: number;
 }): boolean => {
   const { result, context, config, accumulator, currentRowCount, maxResults } =
-    params
+    params;
 
   if (currentRowCount + accumulator.rows.length >= maxResults) {
-    return true
+    return true;
   }
 
-  const { validated, ownerFeatures, queryFailed } = result.value
+  const { validated, ownerFeatures, queryFailed } = result.value;
 
   const propertyRows = buildPropertyRows({
     fnr: validated.fnr,
@@ -774,7 +775,7 @@ const processOwnerQuerySuccess = (params: {
     propertyGraphic: validated.graphic,
     config: { enablePIIMasking: config.enablePIIMasking },
     context,
-  })
+  });
 
   return accumulatePropertyRows({
     propertyRows,
@@ -783,89 +784,89 @@ const processOwnerQuerySuccess = (params: {
     accumulator,
     graphic: validated.graphic,
     fnr: validated.fnr,
-  })
-}
+  });
+};
 
 const validatePropertyFeature = (
   propertyResult: any,
   extractFnr: (attrs: any) => string | number | null
 ): { fnr: string | number; attrs: any; graphic: __esri.Graphic } | null => {
-  const graphic = propertyResult?.features?.[0]
+  const graphic = propertyResult?.features?.[0];
   if (!graphic?.attributes || !graphic?.geometry) {
-    return null
+    return null;
   }
 
-  const fnr = extractFnr(graphic.attributes)
+  const fnr = extractFnr(graphic.attributes);
   if (!fnr) {
-    return null
+    return null;
   }
 
-  return { fnr, attrs: graphic.attributes, graphic }
-}
+  return { fnr, attrs: graphic.attributes, graphic };
+};
 
 const validateAndDeduplicateProperties = (
   propertyResults: any[],
   extractFnr: (attrs: any) => string | number | null,
   maxResults?: number
 ): Array<{ fnr: string | number; attrs: any; graphic: __esri.Graphic }> => {
-  const processedFnrs = new Set<string>()
+  const processedFnrs = new Set<string>();
   const validatedProperties: Array<{
-    fnr: string | number
-    attrs: any
-    graphic: __esri.Graphic
-  }> = []
+    fnr: string | number;
+    attrs: any;
+    graphic: __esri.Graphic;
+  }> = [];
 
   for (const propertyResult of propertyResults) {
-    const validated = validatePropertyFeature(propertyResult, extractFnr)
+    const validated = validatePropertyFeature(propertyResult, extractFnr);
     if (!validated) {
-      continue
+      continue;
     }
-    const fnrKey = normalizeFnrKey(validated.fnr)
+    const fnrKey = normalizeFnrKey(validated.fnr);
     if (processedFnrs.has(fnrKey)) {
-      continue
+      continue;
     }
-    processedFnrs.add(fnrKey)
-    validatedProperties.push(validated)
-    if (maxResults && validatedProperties.length >= maxResults) break
+    processedFnrs.add(fnrKey);
+    validatedProperties.push(validated);
+    if (maxResults && validatedProperties.length >= maxResults) break;
   }
 
-  return validatedProperties
-}
+  return validatedProperties;
+};
 
 const fetchOwnerDataForProperty = async (
   fnr: string | number,
   context: PropertyProcessingContext,
   config: { ownerDataSourceId: string }
 ): Promise<{ ownerFeatures: __esri.Graphic[]; queryFailed: boolean }> => {
-  const { dsManager, signal, helpers } = context
+  const { dsManager, signal, helpers } = context;
 
   try {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
     const ownerFeatures = await helpers.queryOwnerByFnr(
       fnr,
       config.ownerDataSourceId,
       dsManager,
       { signal }
-    )
-    return { ownerFeatures, queryFailed: false }
+    );
+    return { ownerFeatures, queryFailed: false };
   } catch (error) {
     if (helpers.isAbortError(error)) {
-      throw error instanceof Error ? error : new Error(String(error))
+      throw error instanceof Error ? error : new Error(String(error));
     }
-    return { ownerFeatures: [], queryFailed: true }
+    return { ownerFeatures: [], queryFailed: true };
   }
-}
+};
 
 const createGridRow = (params: {
-  fnr: string | number
-  objectId: number
-  uuidFastighet: string
-  fastighet: string
-  bostadr: string
-  geometryType: string | null
-  createRowId: (fnr: string | number, objectId: number) => string
-  rawOwner?: OwnerAttributes
+  fnr: string | number;
+  objectId: number;
+  uuidFastighet: string;
+  fastighet: string;
+  bostadr: string;
+  geometryType: string | null;
+  createRowId: (fnr: string | number, objectId: number) => string;
+  rawOwner?: OwnerAttributes;
 }): GridRowData => ({
   id: params.createRowId(params.fnr, params.objectId),
   FNR: params.fnr,
@@ -874,16 +875,16 @@ const createGridRow = (params: {
   BOSTADR: params.bostadr,
   geometryType: params.geometryType,
   rawOwner: params.rawOwner,
-})
+});
 
 const buildPropertyRows = (options: {
-  fnr: string | number
-  propertyAttrs: any
-  ownerFeatures: Array<OwnerAttributes | __esri.Graphic>
-  queryFailed: boolean
-  propertyGraphic: __esri.Graphic
-  config: { enablePIIMasking: boolean }
-  context: PropertyProcessingContext
+  fnr: string | number;
+  propertyAttrs: any;
+  ownerFeatures: Array<OwnerAttributes | __esri.Graphic>;
+  queryFailed: boolean;
+  propertyGraphic: __esri.Graphic;
+  config: { enablePIIMasking: boolean };
+  context: PropertyProcessingContext;
 }): GridRowData[] => {
   const {
     fnr,
@@ -893,15 +894,15 @@ const buildPropertyRows = (options: {
     propertyGraphic,
     config,
     context,
-  } = options
+  } = options;
 
-  const geometryType = propertyGraphic?.geometry?.type ?? null
+  const geometryType = propertyGraphic?.geometry?.type ?? null;
 
   if (ownerFeatures.length > 0) {
     const uniqueOwners = deduplicateOwnerEntries(ownerFeatures, {
       fnr,
       propertyId: propertyAttrs?.UUID_FASTIGHET,
-    })
+    });
 
     return uniqueOwners.map((attrs) => {
       return createGridRow({
@@ -920,13 +921,13 @@ const buildPropertyRows = (options: {
         geometryType,
         createRowId: context.helpers.createRowId,
         rawOwner: attrs,
-      })
-    })
+      });
+    });
   }
 
   const fallbackMessage = queryFailed
     ? context.messages.errorOwnerQueryFailed
-    : context.messages.unknownOwner
+    : context.messages.unknownOwner;
 
   const fallbackOwner = {
     NAMN: fallbackMessage,
@@ -935,7 +936,7 @@ const buildPropertyRows = (options: {
     POSTADR: "",
     ORGNR: "",
     FNR: fnr,
-  } as OwnerAttributes
+  } as OwnerAttributes;
 
   return [
     createGridRow({
@@ -948,25 +949,25 @@ const buildPropertyRows = (options: {
       createRowId: context.helpers.createRowId,
       rawOwner: fallbackOwner,
     }),
-  ]
-}
+  ];
+};
 
 const processBatchOfProperties = async (params: {
-  batch: Array<{ fnr: string | number; attrs: any; graphic: __esri.Graphic }>
-  currentRowCount: number
-  context: PropertyProcessingContext
-  config: { ownerDataSourceId: string; enablePIIMasking: boolean }
+  batch: Array<{ fnr: string | number; attrs: any; graphic: __esri.Graphic }>;
+  currentRowCount: number;
+  context: PropertyProcessingContext;
+  config: { ownerDataSourceId: string; enablePIIMasking: boolean };
 }): Promise<{
-  rows: GridRowData[]
-  graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>
+  rows: GridRowData[];
+  graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>;
 }> => {
-  const { batch, context, config, currentRowCount } = params
-  const { maxResults, helpers } = context
+  const { batch, context, config, currentRowCount } = params;
+  const { maxResults, helpers } = context;
 
   const [promiseUtils] = await loadArcGISJSAPIModules([
     "esri/core/promiseUtils",
-  ])
-  abortHelpers.throwIfAborted(context.signal)
+  ]);
+  abortHelpers.throwIfAborted(context.signal);
 
   const ownerData = await promiseUtils.eachAlways(
     batch.map((validated) =>
@@ -974,21 +975,21 @@ const processBatchOfProperties = async (params: {
         (result) => ({ ...result, validated })
       )
     )
-  )
+  );
 
   const accumulator = {
     rows: [] as GridRowData[],
     graphics: [] as Array<{ graphic: __esri.Graphic; fnr: string | number }>,
-  }
+  };
 
   for (let i = 0; i < ownerData.length; i++) {
-    const result = ownerData[i]
-    const validated = batch[i]
-    const skipCheck = shouldSkipOwnerResult(result, helpers)
+    const result = ownerData[i];
+    const validated = batch[i];
+    const skipCheck = shouldSkipOwnerResult(result, helpers);
 
     if (skipCheck.skip) {
-      if (skipCheck.reason === "aborted") continue
-      if (skipCheck.reason === "invalid_value") continue
+      if (skipCheck.reason === "aborted") continue;
+      if (skipCheck.reason === "invalid_value") continue;
     }
 
     if (result.error) {
@@ -999,9 +1000,9 @@ const processBatchOfProperties = async (params: {
         accumulator,
         currentRowCount,
         maxResults,
-      })
-      if (shouldBreak) break
-      continue
+      });
+      if (shouldBreak) break;
+      continue;
     }
 
     const shouldBreak = processOwnerQuerySuccess({
@@ -1011,39 +1012,39 @@ const processBatchOfProperties = async (params: {
       accumulator,
       currentRowCount,
       maxResults,
-    })
-    if (shouldBreak) break
+    });
+    if (shouldBreak) break;
   }
 
-  return accumulator
-}
+  return accumulator;
+};
 
 const processBatchQuery = async (
   params: PropertyBatchQueryParams
 ): Promise<ProcessPropertyResult> => {
-  const { propertyResults, config, context } = params
-  const { helpers, maxResults } = context
+  const { propertyResults, config, context } = params;
+  const { helpers, maxResults } = context;
 
   const graphicsToAdd: Array<{
-    graphic: __esri.Graphic
-    fnr: string | number
-  }> = []
-  const rowsToProcess: GridRowData[] = []
+    graphic: __esri.Graphic;
+    fnr: string | number;
+  }> = [];
+  const rowsToProcess: GridRowData[] = [];
 
   const validatedProperties = validateAndDeduplicateProperties(
     propertyResults,
     helpers.extractFnr,
     maxResults
-  )
+  );
 
   if (validatedProperties.length === 0) {
-    return { rowsToProcess: [], graphicsToAdd: [] }
+    return { rowsToProcess: [], graphicsToAdd: [] };
   }
 
-  const fnrsToQuery = validatedProperties.map((p) => p.fnr)
+  const fnrsToQuery = validatedProperties.map((p) => p.fnr);
 
-  let ownersByFnr: Map<string, OwnerAttributes[]>
-  const failedFnrs = new Set<string>()
+  let ownersByFnr: Map<string, OwnerAttributes[]>;
+  const failedFnrs = new Set<string>();
   try {
     ownersByFnr = await helpers.queryOwnersByRelationship(
       fnrsToQuery,
@@ -1052,42 +1053,42 @@ const processBatchQuery = async (
       context.dsManager,
       config.relationshipId,
       { signal: context.signal }
-    )
+    );
   } catch (error) {
     if (helpers.isAbortError(error)) {
-      throw error instanceof Error ? error : new Error(String(error))
+      throw error instanceof Error ? error : new Error(String(error));
     }
-    logger.error("Batch owner query failed", error)
-    ownersByFnr = new Map()
-    fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)))
+    logger.error("Batch owner query failed", error);
+    ownersByFnr = new Map();
+    fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)));
   }
 
-  abortHelpers.throwIfAborted(context.signal)
+  abortHelpers.throwIfAborted(context.signal);
 
   // Process in chunks to avoid memory spikes with large datasets
-  const CHUNK_SIZE = 100
+  const CHUNK_SIZE = 100;
   for (let i = 0; i < validatedProperties.length; i += CHUNK_SIZE) {
-    const chunk = validatedProperties.slice(i, i + CHUNK_SIZE)
+    const chunk = validatedProperties.slice(i, i + CHUNK_SIZE);
 
     for (const { fnr, attrs, graphic } of chunk) {
-      const owners = ownersByFnr.get(String(fnr)) || []
+      const owners = ownersByFnr.get(String(fnr)) || [];
 
       if (owners.length > 0) {
         const ownersToProcess = deduplicateOwnerEntries(owners, {
           fnr,
           propertyId: attrs.UUID_FASTIGHET,
-        })
+        });
 
         for (const owner of ownersToProcess) {
           const formattedOwner = context.helpers.formatOwnerInfo(
             owner,
             config.enablePIIMasking,
             context.messages.unknownOwner
-          )
+          );
           const propertyWithShare = context.helpers.formatPropertyWithShare(
             attrs.FASTIGHET,
             owner.ANDEL
-          )
+          );
 
           rowsToProcess.push(
             createGridRow({
@@ -1100,12 +1101,12 @@ const processBatchQuery = async (
               createRowId: context.helpers.createRowId,
               rawOwner: owner,
             })
-          )
+          );
         }
       } else {
         const fallbackMessage = failedFnrs.has(String(fnr))
           ? context.messages.errorOwnerQueryFailed
-          : context.messages.unknownOwner
+          : context.messages.unknownOwner;
         const fallbackOwner = {
           NAMN: fallbackMessage,
           BOSTADR: "",
@@ -1113,7 +1114,7 @@ const processBatchQuery = async (
           POSTADR: "",
           ORGNR: "",
           FNR: fnr,
-        } as OwnerAttributes
+        } as OwnerAttributes;
         rowsToProcess.push(
           createGridRow({
             fnr,
@@ -1125,50 +1126,50 @@ const processBatchQuery = async (
             createRowId: context.helpers.createRowId,
             rawOwner: fallbackOwner,
           })
-        )
+        );
       }
 
-      graphicsToAdd.push({ graphic, fnr })
+      graphicsToAdd.push({ graphic, fnr });
     }
 
     // Yield to event loop between chunks for large datasets
     if (i + CHUNK_SIZE < validatedProperties.length) {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-      abortHelpers.throwIfAborted(context.signal)
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      abortHelpers.throwIfAborted(context.signal);
     }
   }
 
-  return { rowsToProcess, graphicsToAdd }
-}
+  return { rowsToProcess, graphicsToAdd };
+};
 
 const processIndividualQuery = async (
   params: PropertyIndividualQueryParams
 ): Promise<ProcessPropertyResult> => {
-  const { propertyResults, config, context } = params
-  const { helpers, maxResults } = context
+  const { propertyResults, config, context } = params;
+  const { helpers, maxResults } = context;
 
   const graphicsToAdd: Array<{
-    graphic: __esri.Graphic
-    fnr: string | number
-  }> = []
-  const rowsToProcess: GridRowData[] = []
+    graphic: __esri.Graphic;
+    fnr: string | number;
+  }> = [];
+  const rowsToProcess: GridRowData[] = [];
 
   const validatedProperties = validateAndDeduplicateProperties(
     propertyResults,
     helpers.extractFnr
-  )
+  );
 
   for (let index = 0; index < validatedProperties.length; ) {
-    const remainingSlots = maxResults - rowsToProcess.length
-    if (remainingSlots <= 0) break
+    const remainingSlots = maxResults - rowsToProcess.length;
+    if (remainingSlots <= 0) break;
 
     const batchSize = Math.min(
       remainingSlots,
       OWNER_QUERY_CONCURRENCY,
       validatedProperties.length - index
-    )
+    );
 
-    const batch = validatedProperties.slice(index, index + batchSize)
+    const batch = validatedProperties.slice(index, index + batchSize);
 
     const { rows, graphics } = await processBatchOfProperties({
       batch,
@@ -1178,21 +1179,21 @@ const processIndividualQuery = async (
         ownerDataSourceId: config.ownerDataSourceId,
         enablePIIMasking: config.enablePIIMasking,
       },
-    })
+    });
 
-    rowsToProcess.push(...rows)
-    graphicsToAdd.push(...graphics)
+    rowsToProcess.push(...rows);
+    graphicsToAdd.push(...graphics);
 
-    index += batchSize
+    index += batchSize;
   }
 
-  return { rowsToProcess, graphicsToAdd }
-}
+  return { rowsToProcess, graphicsToAdd };
+};
 
 export const propertyQueryService = {
   processBatch: processBatchQuery,
   processIndividual: processIndividualQuery,
-}
+};
 
 export const runPropertySelectionPipeline = async (
   params: PropertySelectionPipelineParams
@@ -1210,17 +1211,17 @@ export const runPropertySelectionPipeline = async (
     signal,
     selectedProperties,
     translate,
-  } = params
+  } = params;
 
-  const propQueryStart = performance.now()
-  console.log("[PERF-API] Property query started")
+  const propQueryStart = performance.now();
+  console.log("[PERF-API] Property query started");
   const propertyResults = await queryPropertyByPoint(
     mapPoint,
     propertyDataSourceId,
     dsManager,
     { signal }
-  )
-  const propQueryEnd = performance.now()
+  );
+  const propQueryEnd = performance.now();
   console.log(
     "[PERF-API] Property query completed in",
     propQueryEnd - propQueryStart,
@@ -1228,14 +1229,14 @@ export const runPropertySelectionPipeline = async (
     "(returned",
     propertyResults.length,
     "results)"
-  )
+  );
 
   if (propertyResults.length === 0) {
-    return { status: "empty" }
+    return { status: "empty" };
   }
 
-  const processStart = performance.now()
-  console.log("[PERF-API] Processing property results started")
+  const processStart = performance.now();
+  console.log("[PERF-API] Processing property results started");
   const { rowsToProcess, graphicsToAdd } = await processPropertyQueryResults({
     propertyResults,
     config: {
@@ -1268,8 +1269,8 @@ export const runPropertySelectionPipeline = async (
       processBatch: propertyQueryService.processBatch,
       processIndividual: propertyQueryService.processIndividual,
     },
-  })
-  const processEnd = performance.now()
+  });
+  const processEnd = performance.now();
   console.log(
     "[PERF-API] Processing completed in",
     processEnd - processStart,
@@ -1277,16 +1278,16 @@ export const runPropertySelectionPipeline = async (
     "(produced",
     rowsToProcess.length,
     "rows)"
-  )
+  );
 
-  abortHelpers.throwIfAborted(signal)
+  abortHelpers.throwIfAborted(signal);
 
   const { toRemove, updatedRows } = calculatePropertyUpdates(
     rowsToProcess,
     selectedProperties,
     toggleEnabled,
     maxResults
-  )
+  );
 
   return {
     status: "success",
@@ -1295,8 +1296,8 @@ export const runPropertySelectionPipeline = async (
     updatedRows,
     toRemove,
     propertyResults,
-  }
-}
+  };
+};
 
 export const queryPropertiesInBuffer = async (
   point: __esri.Point,
@@ -1307,32 +1308,32 @@ export const queryPropertiesInBuffer = async (
   options?: { signal?: AbortSignal }
 ): Promise<PropertyAttributes[]> => {
   try {
-    abortHelpers.throwIfAborted(options?.signal)
+    abortHelpers.throwIfAborted(options?.signal);
 
     const modules = await loadArcGISJSAPIModules([
       "esri/geometry/geometryEngine",
-    ])
-    const [geometryEngine] = modules
+    ]);
+    const [geometryEngine] = modules;
 
     const bufferGeometry = geometryEngine.buffer(
       point,
       bufferDistance,
       bufferUnit
-    ) as __esri.Polygon
+    ) as __esri.Polygon;
 
     if (!bufferGeometry) {
-      throw new Error("Failed to create buffer geometry")
+      throw new Error("Failed to create buffer geometry");
     }
 
     if (!bufferGeometry.extent || bufferGeometry.extent.width === 0) {
-      throw new Error("Invalid buffer geometry: empty extent")
+      throw new Error("Invalid buffer geometry: empty extent");
     }
 
-    abortHelpers.throwIfAborted(options?.signal)
+    abortHelpers.throwIfAborted(options?.signal);
 
-    const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource
+    const ds = dsManager.getDataSource(dataSourceId) as FeatureLayerDataSource;
     if (!ds) {
-      throw new Error("Property data source not found")
+      throw new Error("Property data source not found");
     }
 
     const result = await ds.query(
@@ -1343,19 +1344,19 @@ export const queryPropertiesInBuffer = async (
         outFields: ["*"],
       },
       createSignalOptions(options?.signal)
-    )
+    );
 
-    abortHelpers.throwIfAborted(options?.signal)
+    abortHelpers.throwIfAborted(options?.signal);
 
     if (!result?.records || result.records.length === 0) {
-      return []
+      return [];
     }
 
     return result.records.map(
       (record: FeatureDataRecord) => record.getData() as PropertyAttributes
-    )
+    );
   } catch (error) {
-    abortHelpers.handleOrThrow(error)
-    throw new Error(parseArcGISError(error, "Buffer query failed"))
+    abortHelpers.handleOrThrow(error);
+    throw new Error(parseArcGISError(error, "Buffer query failed"));
   }
-}
+};

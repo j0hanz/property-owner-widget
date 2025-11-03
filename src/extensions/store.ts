@@ -1,5 +1,5 @@
-import * as SeamlessImmutableNs from "seamless-immutable"
-import type { extensionSpec, ImmutableObject } from "jimu-core"
+import * as SeamlessImmutableNs from "seamless-immutable";
+import type { extensionSpec, ImmutableObject } from "jimu-core";
 import type {
   ErrorState,
   GridRowData,
@@ -7,7 +7,7 @@ import type {
   IMStateWithProperty,
   PropertyWidgetState,
   SerializedQueryResult,
-} from "../config/types"
+} from "../config/types";
 
 export enum PropertyActionType {
   SET_ERROR = "PROPERTY_WIDGET/SET_ERROR",
@@ -19,41 +19,41 @@ export enum PropertyActionType {
   REMOVE_WIDGET_STATE = "PROPERTY_WIDGET/REMOVE_WIDGET_STATE",
 }
 
-export const PROPERTY_ACTION_TYPES = Object.values(PropertyActionType)
+export const PROPERTY_ACTION_TYPES = Object.values(PropertyActionType);
 
 export type PropertyAction =
   | {
-      type: PropertyActionType.SET_ERROR
-      error: ErrorState | null
-      widgetId: string
+      type: PropertyActionType.SET_ERROR;
+      error: ErrorState | null;
+      widgetId: string;
     }
   | {
-      type: PropertyActionType.CLEAR_ERROR
-      widgetId: string
+      type: PropertyActionType.CLEAR_ERROR;
+      widgetId: string;
     }
   | {
-      type: PropertyActionType.SET_SELECTED_PROPERTIES
-      properties: GridRowData[]
-      widgetId: string
+      type: PropertyActionType.SET_SELECTED_PROPERTIES;
+      properties: GridRowData[];
+      widgetId: string;
     }
   | {
-      type: PropertyActionType.CLEAR_ALL
-      widgetId: string
+      type: PropertyActionType.CLEAR_ALL;
+      widgetId: string;
     }
   | {
-      type: PropertyActionType.SET_QUERY_IN_FLIGHT
-      inFlight: boolean
-      widgetId: string
+      type: PropertyActionType.SET_QUERY_IN_FLIGHT;
+      inFlight: boolean;
+      widgetId: string;
     }
   | {
-      type: PropertyActionType.SET_RAW_RESULTS
-      results: { [key: string]: SerializedQueryResult } | null
-      widgetId: string
+      type: PropertyActionType.SET_RAW_RESULTS;
+      results: { [key: string]: SerializedQueryResult } | null;
+      widgetId: string;
     }
   | {
-      type: PropertyActionType.REMOVE_WIDGET_STATE
-      widgetId: string
-    }
+      type: PropertyActionType.REMOVE_WIDGET_STATE;
+      widgetId: string;
+    };
 
 export const propertyActions = {
   setError: (error: ErrorState | null, widgetId: string): PropertyAction => ({
@@ -94,46 +94,46 @@ export const propertyActions = {
     type: PropertyActionType.REMOVE_WIDGET_STATE,
     widgetId,
   }),
-}
+};
 
 const resolveImmutableFactory = () => {
-  const candidate = SeamlessImmutableNs as unknown
+  const candidate = SeamlessImmutableNs as unknown;
 
   if (typeof candidate === "function") {
-    return candidate as (input: any) => any
+    return candidate as (input: any) => any;
   }
 
   const candidateObj = candidate as {
-    default?: (input: any) => any
-    Immutable?: (input: any) => any
-  }
+    default?: (input: any) => any;
+    Immutable?: (input: any) => any;
+  };
 
   if (candidateObj && typeof candidateObj.default === "function") {
-    return candidateObj.default
+    return candidateObj.default;
   }
 
   if (candidateObj && typeof candidateObj.Immutable === "function") {
-    return candidateObj.Immutable
+    return candidateObj.Immutable;
   }
 
-  return <T>(input: T): T => input
-}
+  return <T>(input: T): T => input;
+};
 
-const Immutable = resolveImmutableFactory()
+const Immutable = resolveImmutableFactory();
 
 const initialPropertyState: PropertyWidgetState = {
   error: null,
   selectedProperties: [],
   isQueryInFlight: false,
   rawPropertyResults: null,
-}
+};
 
 const createImmutableState = (): ImmutableObject<PropertyWidgetState> =>
-  Immutable(initialPropertyState) as ImmutableObject<PropertyWidgetState>
+  Immutable(initialPropertyState) as ImmutableObject<PropertyWidgetState>;
 
 const initialGlobalState = Immutable({
   byId: {},
-}) as unknown as IMPropertyGlobalState
+}) as unknown as IMPropertyGlobalState;
 
 const ensureSubState = (
   global: IMPropertyGlobalState,
@@ -141,19 +141,19 @@ const ensureSubState = (
 ): ImmutableObject<PropertyWidgetState> => {
   const current = (global as any).byId?.[widgetId] as
     | ImmutableObject<PropertyWidgetState>
-    | undefined
-  return current ?? createImmutableState()
-}
+    | undefined;
+  return current ?? createImmutableState();
+};
 
 const setSubState = (
   global: IMPropertyGlobalState,
   widgetId: string,
   next: ImmutableObject<PropertyWidgetState>
 ): IMPropertyGlobalState => {
-  const byId = { ...((global as any).byId || {}) }
-  byId[widgetId] = next
-  return Immutable({ byId }) as unknown as IMPropertyGlobalState
-}
+  const byId = { ...((global as any).byId || {}) };
+  byId[widgetId] = next;
+  return Immutable({ byId }) as unknown as IMPropertyGlobalState;
+};
 
 const reduceOne = (
   state: ImmutableObject<PropertyWidgetState>,
@@ -161,63 +161,63 @@ const reduceOne = (
 ): ImmutableObject<PropertyWidgetState> => {
   switch (action.type) {
     case PropertyActionType.SET_ERROR:
-      return state.set("error", action.error).set("isQueryInFlight", false)
+      return state.set("error", action.error).set("isQueryInFlight", false);
     case PropertyActionType.CLEAR_ERROR:
-      return state.set("error", null)
+      return state.set("error", null);
     case PropertyActionType.SET_SELECTED_PROPERTIES:
-      return state.set("selectedProperties", action.properties)
+      return state.set("selectedProperties", action.properties);
     case PropertyActionType.CLEAR_ALL:
-      return createImmutableState()
+      return createImmutableState();
     case PropertyActionType.SET_QUERY_IN_FLIGHT:
-      return state.set("isQueryInFlight", action.inFlight)
+      return state.set("isQueryInFlight", action.inFlight);
     case PropertyActionType.SET_RAW_RESULTS:
-      return state.set("rawPropertyResults", action.results)
+      return state.set("rawPropertyResults", action.results);
     default:
-      return state
+      return state;
   }
-}
+};
 
 const isPropertyAction = (candidate: unknown): candidate is PropertyAction => {
-  if (!candidate || typeof candidate !== "object") return false
-  const action = candidate as { type?: unknown; widgetId?: unknown }
-  if (typeof action.type !== "string") return false
+  if (!candidate || typeof candidate !== "object") return false;
+  const action = candidate as { type?: unknown; widgetId?: unknown };
+  if (typeof action.type !== "string") return false;
   if (!PROPERTY_ACTION_TYPES.includes(action.type as PropertyActionType)) {
-    return false
+    return false;
   }
-  return typeof action.widgetId === "string"
-}
+  return typeof action.widgetId === "string";
+};
 
 const propertyReducer = (
   state: IMPropertyGlobalState = initialGlobalState,
   action: unknown
 ): IMPropertyGlobalState => {
-  if (!isPropertyAction(action)) return state
+  if (!isPropertyAction(action)) return state;
 
   if (action.type === PropertyActionType.REMOVE_WIDGET_STATE) {
-    const currentById = (state as any)?.byId
-    if (!currentById || typeof currentById !== "object") return state
-    const byId = { ...currentById }
-    if (!(action.widgetId in byId)) return state
-    delete byId[action.widgetId]
-    return Immutable({ byId }) as unknown as IMPropertyGlobalState
+    const currentById = (state as any)?.byId;
+    if (!currentById || typeof currentById !== "object") return state;
+    const byId = { ...currentById };
+    if (!(action.widgetId in byId)) return state;
+    delete byId[action.widgetId];
+    return Immutable({ byId }) as unknown as IMPropertyGlobalState;
   }
 
-  const widgetId = action.widgetId
-  if (!widgetId) return state
+  const widgetId = action.widgetId;
+  if (!widgetId) return state;
 
-  const prevSub = ensureSubState(state, widgetId)
-  const nextSub = reduceOne(prevSub, action)
-  if (nextSub === prevSub) return state
-  return setSubState(state, widgetId, nextSub)
-}
+  const prevSub = ensureSubState(state, widgetId);
+  const nextSub = reduceOne(prevSub, action);
+  if (nextSub === prevSub) return state;
+  return setSubState(state, widgetId, nextSub);
+};
 
 export const createPropertySelectors = (widgetId: string) => {
   const getSlice = (
     state: IMStateWithProperty
   ): ImmutableObject<PropertyWidgetState> | null => {
-    const slice = state?.["property-state"]?.byId?.[widgetId]
-    return slice ?? null
-  }
+    const slice = state?.["property-state"]?.byId?.[widgetId];
+    return slice ?? null;
+  };
 
   return {
     selectSlice: getSlice,
@@ -228,27 +228,27 @@ export const createPropertySelectors = (widgetId: string) => {
       getSlice(state)?.isQueryInFlight ?? false,
     selectRawResults: (state: IMStateWithProperty) =>
       getSlice(state)?.rawPropertyResults ?? null,
-  }
-}
+  };
+};
 
 export default class PropertyReduxStoreExtension
   implements extensionSpec.ReduxStoreExtension
 {
-  readonly id = "property-widget_store"
+  readonly id = "property-widget_store";
 
   getActions(): string[] {
-    return [...PROPERTY_ACTION_TYPES]
+    return [...PROPERTY_ACTION_TYPES];
   }
 
   getInitLocalState(): { byId: { [id: string]: PropertyWidgetState } } {
-    return { byId: {} }
+    return { byId: {} };
   }
 
   getReducer() {
-    return propertyReducer
+    return propertyReducer;
   }
 
   getStoreKey() {
-    return "property-state"
+    return "property-state";
   }
 }

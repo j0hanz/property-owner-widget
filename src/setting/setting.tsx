@@ -9,7 +9,7 @@ import {
   type ImmutableObject,
   DataSourceTypes,
   Immutable,
-} from "jimu-core"
+} from "jimu-core";
 import {
   Alert,
   Button,
@@ -21,19 +21,19 @@ import {
   TextInput,
   SVG,
   defaultMessages as jimuUIMessages,
-} from "jimu-ui"
-import { ColorPicker } from "jimu-ui/basic/color-picker"
-import type { AllWidgetSettingProps } from "jimu-for-builder"
+} from "jimu-ui";
+import { ColorPicker } from "jimu-ui/basic/color-picker";
+import type { AllWidgetSettingProps } from "jimu-for-builder";
 import {
   SettingSection,
   SettingRow,
   MapWidgetSelector,
-} from "jimu-ui/advanced/setting-components"
-import { DataSourceSelector } from "jimu-ui/advanced/data-source-selector"
-import defaultMessages from "./translations/default"
-import type { IMConfig } from "../config/types"
-import { isFBWebbConfigured } from "../config/types"
-import { useSettingStyles } from "../config/style"
+} from "jimu-ui/advanced/setting-components";
+import { DataSourceSelector } from "jimu-ui/advanced/data-source-selector";
+import defaultMessages from "./translations/default";
+import type { IMConfig } from "../config/types";
+import { isFBWebbConfigured } from "../config/types";
+import { useSettingStyles } from "../config/style";
 import {
   useBooleanConfigValue,
   useUpdateConfig,
@@ -41,50 +41,50 @@ import {
   useSliderConfigHandler,
   useNumericValidator,
   useValidatedNumericHandler,
-} from "../shared/hooks"
+} from "../shared/hooks";
 import {
   opacityHelpers,
   outlineWidthHelpers,
   normalizeHostValue,
   normalizeHostList,
   isValidFbwebbBaseUrl,
-} from "../shared/utils"
-import addIcon from "../assets/plus.svg"
-import removeIcon from "../assets/close.svg"
-import infoIcon from "../assets/info.svg"
-import { createPropertySelectors } from "../extensions/store"
+} from "../shared/utils";
+import addIcon from "../assets/plus.svg";
+import removeIcon from "../assets/close.svg";
+import infoIcon from "../assets/info.svg";
+import { createPropertySelectors } from "../extensions/store";
 
 interface FieldErrors {
-  [key: string]: string | undefined
+  [key: string]: string | undefined;
 }
 
 const Setting = (
   props: AllWidgetSettingProps<IMConfig>
 ): React.ReactElement => {
-  const { config, id, onSettingChange, useMapWidgetIds } = props
-  const translate = hooks.useTranslation(jimuUIMessages, defaultMessages)
-  const styles = useSettingStyles()
+  const { config, id, onSettingChange, useMapWidgetIds } = props;
+  const translate = hooks.useTranslation(jimuUIMessages, defaultMessages);
+  const styles = useSettingStyles();
 
   // Redux integration for runtime state visibility
-  const selectorsRef = React.useRef(createPropertySelectors(id))
-  const selectors = selectorsRef.current
+  const selectorsRef = React.useRef(createPropertySelectors(id));
+  const selectors = selectorsRef.current;
   const selectedProperties = ReactRedux.useSelector(
     selectors.selectSelectedProperties
-  )
+  );
   const isQueryInFlight = ReactRedux.useSelector(
     selectors.selectIsQueryInFlight
-  )
-  const hasError = ReactRedux.useSelector(selectors.selectError) !== null
+  );
+  const hasError = ReactRedux.useSelector(selectors.selectError) !== null;
   const selectedCount = Array.isArray(selectedProperties)
     ? selectedProperties.length
-    : 0
+    : 0;
 
   const renderLabelWithTooltip = (
     labelKey: string,
     descriptionKey: string
   ): React.ReactNode => {
-    const labelText = translate(labelKey)
-    const descriptionText = translate(descriptionKey)
+    const labelText = translate(labelKey);
+    const descriptionText = translate(descriptionKey);
 
     return (
       <div css={styles.labelWithTooltip}>
@@ -100,95 +100,95 @@ const Setting = (
           </Button>
         </Tooltip>
       </div>
-    )
-  }
+    );
+  };
 
   const toMutableUseDataSource = (
     source: ImmutableObject<UseDataSource> | UseDataSource | null
   ): UseDataSource | null => {
     if (!source) {
-      return null
+      return null;
     }
-    const asMutable = (source as any).asMutable
+    const asMutable = (source as any).asMutable;
     if (typeof asMutable === "function") {
-      return asMutable.call(source, { deep: true }) as UseDataSource
+      return asMutable.call(source, { deep: true }) as UseDataSource;
     }
-    return source as unknown as UseDataSource
-  }
+    return source as unknown as UseDataSource;
+  };
 
   const buildSelectorValue = (dataSourceId?: string) => {
     if (!dataSourceId || !props.useDataSources) {
-      return Immutable([])
+      return Immutable([]);
     }
 
-    const collection = props.useDataSources as any
+    const collection = props.useDataSources as any;
     const matches =
       typeof collection.filter === "function"
         ? collection.filter(
             (ds: UseDataSource) => ds?.dataSourceId === dataSourceId
           )
-        : []
+        : [];
 
     const mutableMatches: UseDataSource[] =
       typeof matches?.asMutable === "function"
         ? matches.asMutable({ deep: true })
-        : matches
+        : matches;
 
-    return Immutable(mutableMatches)
-  }
+    return Immutable(mutableMatches);
+  };
 
-  const getBooleanConfig = useBooleanConfigValue(config)
-  const updateConfig = useUpdateConfig(id, config, onSettingChange)
+  const getBooleanConfig = useBooleanConfigValue(config);
+  const updateConfig = useUpdateConfig(id, config, onSettingChange);
 
   const [localMaxResults, setLocalMaxResults] = React.useState<string>(() =>
     String(config.maxResults || 50)
-  )
+  );
   const [localToggleRemoval, setLocalToggleRemoval] = React.useState(() =>
     getBooleanConfig("enableToggleRemoval")
-  )
+  );
   const [localPIIMasking, setLocalPIIMasking] = React.useState(() =>
     getBooleanConfig("enablePIIMasking")
-  )
+  );
   const [localBatchOwnerQuery, setLocalBatchOwnerQuery] = React.useState(() =>
     getBooleanConfig("enableBatchOwnerQuery", false)
-  )
+  );
   const [localRelationshipId, setLocalRelationshipId] = React.useState<string>(
     () => String(config.relationshipId ?? 0)
-  )
-  const [localAllowedHostInput, setLocalAllowedHostInput] = React.useState("")
+  );
+  const [localAllowedHostInput, setLocalAllowedHostInput] = React.useState("");
   const [localAllowedHostsList, setLocalAllowedHostsList] = React.useState(() =>
     normalizeHostList(config.allowedHosts)
-  )
+  );
   const [localHighlightColor, setLocalHighlightColor] = React.useState(
     config.highlightColor
-  )
+  );
   const [localHighlightOpacity, setLocalHighlightOpacity] = React.useState(
     () => {
       const baseValue =
         typeof config.highlightOpacity === "number"
           ? config.highlightOpacity
-          : 0.4
-      return opacityHelpers.fromPercent(opacityHelpers.toPercent(baseValue))
+          : 0.4;
+      return opacityHelpers.fromPercent(opacityHelpers.toPercent(baseValue));
     }
-  )
+  );
   const [localOutlineWidth, setLocalOutlineWidth] = React.useState(() => {
-    const value = config.outlineWidth
-    return typeof value === "number" && Number.isFinite(value) ? value : 1
-  })
+    const value = config.outlineWidth;
+    return typeof value === "number" && Number.isFinite(value) ? value : 1;
+  });
   const [localFbwebbBaseUrl, setLocalFbwebbBaseUrl] = React.useState(
     config.fbwebbBaseUrl ?? ""
-  )
+  );
   const [localFbwebbUser, setLocalFbwebbUser] = React.useState(
     config.fbwebbUser ?? ""
-  )
+  );
   const [localFbwebbPassword, setLocalFbwebbPassword] = React.useState(
     config.fbwebbPassword ?? ""
-  )
+  );
   const [localFbwebbDatabase, setLocalFbwebbDatabase] = React.useState(
     config.fbwebbDatabase ?? ""
-  )
+  );
 
-  const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
+  const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({});
 
   const validateMaxResults = useNumericValidator(
     "maxResults",
@@ -196,7 +196,7 @@ const Setting = (
     1000,
     translate("errorMaxResultsInvalid"),
     setFieldErrors
-  )
+  );
 
   const validateRelationshipId = useNumericValidator(
     "relationshipId",
@@ -204,7 +204,7 @@ const Setting = (
     99,
     translate("errorRelationshipIdInvalid"),
     setFieldErrors
-  )
+  );
 
   const {
     handleChange: handleMaxResultsChange,
@@ -216,7 +216,7 @@ const Setting = (
     updateConfig,
     configField: "maxResults",
     debounce: 500,
-  })
+  });
 
   const {
     handleChange: handleRelationshipIdChange,
@@ -228,139 +228,139 @@ const Setting = (
     updateConfig,
     configField: "relationshipId",
     clamp: { min: 0, max: 99 },
-  })
+  });
 
   const handleToggleRemovalChange = useSwitchConfigHandler(
     localToggleRemoval,
     setLocalToggleRemoval,
     updateConfig,
     "enableToggleRemoval"
-  )
+  );
 
   const handlePIIMaskingChange = useSwitchConfigHandler(
     localPIIMasking,
     setLocalPIIMasking,
     updateConfig,
     "enablePIIMasking"
-  )
+  );
 
   const handleBatchOwnerQueryChange = useSwitchConfigHandler(
     localBatchOwnerQuery,
     setLocalBatchOwnerQuery,
     updateConfig,
     "enableBatchOwnerQuery"
-  )
+  );
 
   const handleAllowedHostInputChange = hooks.useEventCallback(
     (evt: React.ChangeEvent<HTMLInputElement>) => {
-      setLocalAllowedHostInput(evt.target.value)
+      setLocalAllowedHostInput(evt.target.value);
     }
-  )
+  );
 
   const handleAddAllowedHost = hooks.useEventCallback(() => {
-    const sanitized = normalizeHostValue(localAllowedHostInput)
+    const sanitized = normalizeHostValue(localAllowedHostInput);
     if (!sanitized) {
-      setLocalAllowedHostInput("")
-      return
+      setLocalAllowedHostInput("");
+      return;
     }
     if (localAllowedHostsList.includes(sanitized)) {
-      return
+      return;
     }
-    const nextHosts = [...localAllowedHostsList, sanitized]
-    setLocalAllowedHostsList(nextHosts)
-    updateConfig("allowedHosts", nextHosts)
-    setLocalAllowedHostInput("")
-  })
+    const nextHosts = [...localAllowedHostsList, sanitized];
+    setLocalAllowedHostsList(nextHosts);
+    updateConfig("allowedHosts", nextHosts);
+    setLocalAllowedHostInput("");
+  });
 
   const handleRemoveAllowedHost = hooks.useEventCallback((host: string) => {
-    const sanitized = normalizeHostValue(host)
-    const nextHosts = localAllowedHostsList.filter((h) => h !== sanitized)
+    const sanitized = normalizeHostValue(host);
+    const nextHosts = localAllowedHostsList.filter((h) => h !== sanitized);
     if (nextHosts.length === localAllowedHostsList.length) {
-      return
+      return;
     }
-    setLocalAllowedHostsList(nextHosts)
-    updateConfig("allowedHosts", nextHosts)
-  })
+    setLocalAllowedHostsList(nextHosts);
+    updateConfig("allowedHosts", nextHosts);
+  });
 
   const handleAllowedHostInputKeyDown = hooks.useEventCallback(
     (event: React.KeyboardEvent<HTMLInputElement>) => {
       if (event.key !== "Enter") {
-        return
+        return;
       }
-      event.preventDefault()
+      event.preventDefault();
       if (!canAddAllowedHost) {
-        return
+        return;
       }
-      handleAddAllowedHost()
+      handleAddAllowedHost();
     }
-  )
+  );
 
   const handleFbwebbBaseUrlChange = hooks.useEventCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
-      const value = event.target.value
-      setLocalFbwebbBaseUrl(value)
+      const value = event.target.value;
+      setLocalFbwebbBaseUrl(value);
 
       if (!value) {
-        setFieldErrors((prev) => ({ ...prev, fbwebbBaseUrl: undefined }))
-        return
+        setFieldErrors((prev) => ({ ...prev, fbwebbBaseUrl: undefined }));
+        return;
       }
 
-      const isValid = isValidFbwebbBaseUrl(value)
+      const isValid = isValidFbwebbBaseUrl(value);
       setFieldErrors((prev) => ({
         ...prev,
         fbwebbBaseUrl: isValid ? undefined : translate("errorUrlMustBeHttps"),
-      }))
+      }));
     }
-  )
+  );
 
   const handleFbwebbBaseUrlBlur = hooks.useEventCallback(() => {
-    const trimmed = localFbwebbBaseUrl.trim()
+    const trimmed = localFbwebbBaseUrl.trim();
     if (trimmed && !isValidFbwebbBaseUrl(trimmed)) {
-      return
+      return;
     }
-    setLocalFbwebbBaseUrl(trimmed)
-    updateConfig("fbwebbBaseUrl", trimmed || undefined)
-  })
+    setLocalFbwebbBaseUrl(trimmed);
+    updateConfig("fbwebbBaseUrl", trimmed || undefined);
+  });
 
   const handleFbwebbUserChange = hooks.useEventCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
-      setLocalFbwebbUser(event.target.value)
+      setLocalFbwebbUser(event.target.value);
     }
-  )
+  );
 
   const handleFbwebbUserBlur = hooks.useEventCallback(() => {
-    const trimmed = localFbwebbUser.trim()
-    setLocalFbwebbUser(trimmed)
-    updateConfig("fbwebbUser", trimmed || undefined)
-  })
+    const trimmed = localFbwebbUser.trim();
+    setLocalFbwebbUser(trimmed);
+    updateConfig("fbwebbUser", trimmed || undefined);
+  });
 
   const handleFbwebbPasswordChange = hooks.useEventCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
-      setLocalFbwebbPassword(event.target.value)
+      setLocalFbwebbPassword(event.target.value);
     }
-  )
+  );
 
   const handleFbwebbPasswordBlur = hooks.useEventCallback(() => {
-    updateConfig("fbwebbPassword", localFbwebbPassword || undefined)
-  })
+    updateConfig("fbwebbPassword", localFbwebbPassword || undefined);
+  });
 
   const handleFbwebbDatabaseChange = hooks.useEventCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
-      setLocalFbwebbDatabase(event.target.value)
+      setLocalFbwebbDatabase(event.target.value);
     }
-  )
+  );
 
   const handleFbwebbDatabaseBlur = hooks.useEventCallback(() => {
-    const trimmed = localFbwebbDatabase.trim()
-    setLocalFbwebbDatabase(trimmed)
-    updateConfig("fbwebbDatabase", trimmed || undefined)
-  })
+    const trimmed = localFbwebbDatabase.trim();
+    setLocalFbwebbDatabase(trimmed);
+    updateConfig("fbwebbDatabase", trimmed || undefined);
+  });
 
   const handleHighlightColorChange = hooks.useEventCallback((color: string) => {
-    const nextColor = color || config.highlightColor
-    setLocalHighlightColor(nextColor)
-    updateConfig("highlightColor", nextColor)
-  })
+    const nextColor = color || config.highlightColor;
+    setLocalHighlightColor(nextColor);
+    updateConfig("highlightColor", nextColor);
+  });
 
   const handleHighlightOpacityChange = useSliderConfigHandler(
     localHighlightOpacity,
@@ -368,7 +368,7 @@ const Setting = (
     updateConfig,
     "highlightOpacity",
     opacityHelpers.fromPercent
-  )
+  );
 
   const handleOutlineWidthChange = useSliderConfigHandler(
     localOutlineWidth,
@@ -376,26 +376,27 @@ const Setting = (
     updateConfig,
     "outlineWidth",
     outlineWidthHelpers.normalize
-  )
+  );
 
   const handlePropertyDataSourceChange = hooks.useEventCallback(
     (useDataSources: UseDataSource[]) => {
-      const selectedDs = useDataSources?.[0] ?? null
-      const propertyId = selectedDs?.dataSourceId ?? ""
+      const selectedDs = useDataSources?.[0] ?? null;
+      const propertyId = selectedDs?.dataSourceId ?? "";
       const ownerSource =
         ((props.useDataSources as any)?.find?.(
           (ds: UseDataSource) => ds?.dataSourceId === config.ownerDataSourceId
-        ) as ImmutableObject<UseDataSource> | UseDataSource | undefined) ?? null
-      const ownerMutable = toMutableUseDataSource(ownerSource)
+        ) as ImmutableObject<UseDataSource> | UseDataSource | undefined) ??
+        null;
+      const ownerMutable = toMutableUseDataSource(ownerSource);
       const shouldSyncOwner =
         (!!propertyId && !config.ownerDataSourceId) ||
         (!!propertyId &&
           config.ownerDataSourceId &&
-          config.ownerDataSourceId === config.propertyDataSourceId)
+          config.ownerDataSourceId === config.propertyDataSourceId);
 
-      const updatedUseDataSources: UseDataSource[] = []
+      const updatedUseDataSources: UseDataSource[] = [];
       if (selectedDs) {
-        updatedUseDataSources.push(selectedDs)
+        updatedUseDataSources.push(selectedDs);
       }
       if (
         ownerMutable &&
@@ -403,174 +404,175 @@ const Setting = (
         ownerMutable.dataSourceId !== propertyId &&
         !shouldSyncOwner
       ) {
-        updatedUseDataSources.push(ownerMutable)
+        updatedUseDataSources.push(ownerMutable);
       }
 
       const nextConfig = shouldSyncOwner
         ? config
             .set("propertyDataSourceId", propertyId)
             .set("ownerDataSourceId", propertyId)
-        : config.set("propertyDataSourceId", propertyId)
+        : config.set("propertyDataSourceId", propertyId);
 
       onSettingChange({
         id,
         useDataSources: updatedUseDataSources,
         config: nextConfig,
-      })
+      });
     }
-  )
+  );
 
   const handleOwnerDataSourceChange = hooks.useEventCallback(
     (useDataSources: UseDataSource[]) => {
-      const selectedOwner = useDataSources?.[0] ?? null
-      const ownerId = selectedOwner?.dataSourceId ?? ""
+      const selectedOwner = useDataSources?.[0] ?? null;
+      const ownerId = selectedOwner?.dataSourceId ?? "";
 
       // Find existing property data source
       const propertySource =
         ((props.useDataSources as any)?.find?.(
           (ds: UseDataSource) =>
             ds?.dataSourceId === config.propertyDataSourceId
-        ) as ImmutableObject<UseDataSource> | UseDataSource | undefined) ?? null
+        ) as ImmutableObject<UseDataSource> | UseDataSource | undefined) ??
+        null;
 
       // Ensure property source is mutable
-      let propertyMutable = toMutableUseDataSource(propertySource)
+      let propertyMutable = toMutableUseDataSource(propertySource);
       if (!propertyMutable && config.propertyDataSourceId) {
         propertyMutable = {
           dataSourceId: config.propertyDataSourceId,
           mainDataSourceId: config.propertyDataSourceId,
           rootDataSourceId: config.propertyDataSourceId,
-        } as UseDataSource
+        } as UseDataSource;
       }
 
       // Build updated data sources list
-      const updatedUseDataSources: UseDataSource[] = []
+      const updatedUseDataSources: UseDataSource[] = [];
       if (propertyMutable) {
-        updatedUseDataSources.push(propertyMutable)
+        updatedUseDataSources.push(propertyMutable);
       }
 
       // Add owner source if different from property
       const ownerIsDifferent =
         !propertyMutable ||
-        propertyMutable.dataSourceId !== selectedOwner?.dataSourceId
+        propertyMutable.dataSourceId !== selectedOwner?.dataSourceId;
       if (selectedOwner && ownerIsDifferent) {
-        updatedUseDataSources.push(selectedOwner)
+        updatedUseDataSources.push(selectedOwner);
       }
 
-      const nextConfig = config.set("ownerDataSourceId", ownerId)
+      const nextConfig = config.set("ownerDataSourceId", ownerId);
 
       onSettingChange({
         id,
         useDataSources: updatedUseDataSources,
         config: nextConfig,
-      })
+      });
     }
-  )
+  );
 
   const handleMapWidgetChange = hooks.useEventCallback(
     (useMapWidgetIds: string[]) => {
       onSettingChange({
         id,
         useMapWidgetIds,
-      })
+      });
     }
-  )
+  );
 
   hooks.useUpdateEffect(() => {
-    setLocalMaxResults(String(config.maxResults || 50))
-  }, [config.maxResults])
+    setLocalMaxResults(String(config.maxResults || 50));
+  }, [config.maxResults]);
 
   hooks.useUpdateEffect(() => {
-    setLocalToggleRemoval(getBooleanConfig("enableToggleRemoval"))
-  }, [config.enableToggleRemoval])
+    setLocalToggleRemoval(getBooleanConfig("enableToggleRemoval"));
+  }, [config.enableToggleRemoval]);
 
   hooks.useUpdateEffect(() => {
-    setLocalPIIMasking(getBooleanConfig("enablePIIMasking"))
-  }, [config.enablePIIMasking])
+    setLocalPIIMasking(getBooleanConfig("enablePIIMasking"));
+  }, [config.enablePIIMasking]);
 
   hooks.useUpdateEffect(() => {
-    setLocalBatchOwnerQuery(getBooleanConfig("enableBatchOwnerQuery", false))
-  }, [config.enableBatchOwnerQuery])
+    setLocalBatchOwnerQuery(getBooleanConfig("enableBatchOwnerQuery", false));
+  }, [config.enableBatchOwnerQuery]);
 
   hooks.useUpdateEffect(() => {
-    setLocalRelationshipId(String(config.relationshipId ?? 0))
-  }, [config.relationshipId])
+    setLocalRelationshipId(String(config.relationshipId ?? 0));
+  }, [config.relationshipId]);
 
   hooks.useUpdateEffect(() => {
-    const uniqueHosts = normalizeHostList(config.allowedHosts)
-    setLocalAllowedHostsList(uniqueHosts)
-  }, [config.allowedHosts])
+    const uniqueHosts = normalizeHostList(config.allowedHosts);
+    setLocalAllowedHostsList(uniqueHosts);
+  }, [config.allowedHosts]);
 
   hooks.useUpdateEffect(() => {
-    setLocalHighlightColor(config.highlightColor)
-  }, [config.highlightColor])
+    setLocalHighlightColor(config.highlightColor);
+  }, [config.highlightColor]);
 
   hooks.useUpdateEffect(() => {
     const baseValue =
       typeof config.highlightOpacity === "number"
         ? config.highlightOpacity
-        : 0.4
+        : 0.4;
     setLocalHighlightOpacity(
       opacityHelpers.fromPercent(opacityHelpers.toPercent(baseValue))
-    )
-  }, [config.highlightOpacity])
+    );
+  }, [config.highlightOpacity]);
 
   hooks.useUpdateEffect(() => {
     const baseValue =
-      typeof config.outlineWidth === "number" ? config.outlineWidth : 1
-    setLocalOutlineWidth(outlineWidthHelpers.normalize(baseValue))
-  }, [config.outlineWidth])
+      typeof config.outlineWidth === "number" ? config.outlineWidth : 1;
+    setLocalOutlineWidth(outlineWidthHelpers.normalize(baseValue));
+  }, [config.outlineWidth]);
 
   hooks.useUpdateEffect(() => {
-    setLocalFbwebbBaseUrl(config.fbwebbBaseUrl ?? "")
-  }, [config.fbwebbBaseUrl])
+    setLocalFbwebbBaseUrl(config.fbwebbBaseUrl ?? "");
+  }, [config.fbwebbBaseUrl]);
 
   hooks.useUpdateEffect(() => {
-    setLocalFbwebbUser(config.fbwebbUser ?? "")
-  }, [config.fbwebbUser])
+    setLocalFbwebbUser(config.fbwebbUser ?? "");
+  }, [config.fbwebbUser]);
 
   hooks.useUpdateEffect(() => {
-    setLocalFbwebbPassword(config.fbwebbPassword ?? "")
-  }, [config.fbwebbPassword])
+    setLocalFbwebbPassword(config.fbwebbPassword ?? "");
+  }, [config.fbwebbPassword]);
 
   hooks.useUpdateEffect(() => {
-    setLocalFbwebbDatabase(config.fbwebbDatabase ?? "")
-  }, [config.fbwebbDatabase])
+    setLocalFbwebbDatabase(config.fbwebbDatabase ?? "");
+  }, [config.fbwebbDatabase]);
 
   hooks.useEffectOnce(() => {
     // Settings panel mounted
-  })
+  });
 
   const hasMapSelection =
-    Array.isArray(useMapWidgetIds) && useMapWidgetIds.length > 0
-  const hasPropertyDataSource = Boolean(config.propertyDataSourceId)
-  const hasOwnerDataSource = Boolean(config.ownerDataSourceId)
-  const hasRequiredDataSources = hasPropertyDataSource && hasOwnerDataSource
-  const canShowDisplayOptions = hasMapSelection && hasRequiredDataSources
-  const canShowRelationshipSettings = hasMapSelection && hasRequiredDataSources
-  const shouldDisableRelationshipSettings = !canShowRelationshipSettings
+    Array.isArray(useMapWidgetIds) && useMapWidgetIds.length > 0;
+  const hasPropertyDataSource = Boolean(config.propertyDataSourceId);
+  const hasOwnerDataSource = Boolean(config.ownerDataSourceId);
+  const hasRequiredDataSources = hasPropertyDataSource && hasOwnerDataSource;
+  const canShowDisplayOptions = hasMapSelection && hasRequiredDataSources;
+  const canShowRelationshipSettings = hasMapSelection && hasRequiredDataSources;
+  const shouldDisableRelationshipSettings = !canShowRelationshipSettings;
 
   hooks.useEffectWithPreviousValues(() => {
     if (!shouldDisableRelationshipSettings) {
-      return
+      return;
     }
 
     if (localBatchOwnerQuery) {
-      setLocalBatchOwnerQuery(false)
+      setLocalBatchOwnerQuery(false);
     }
 
     if (config.enableBatchOwnerQuery) {
-      updateConfig("enableBatchOwnerQuery", false)
+      updateConfig("enableBatchOwnerQuery", false);
     }
 
     if (config.relationshipId !== undefined) {
-      updateConfig("relationshipId", undefined)
+      updateConfig("relationshipId", undefined);
     }
 
     if (localRelationshipId !== "0") {
-      setLocalRelationshipId("0")
+      setLocalRelationshipId("0");
     }
 
-    setFieldErrors((prev) => ({ ...prev, relationshipId: undefined }))
+    setFieldErrors((prev) => ({ ...prev, relationshipId: undefined }));
   }, [
     shouldDisableRelationshipSettings,
     localBatchOwnerQuery,
@@ -578,23 +580,24 @@ const Setting = (
     config.relationshipId,
     localRelationshipId,
     updateConfig,
-  ])
+  ]);
 
   const highlightOpacityPercent = opacityHelpers.toPercent(
     localHighlightOpacity
-  )
+  );
   const highlightOpacityLabel = opacityHelpers.formatPercent(
     highlightOpacityPercent
-  )
-  const outlineWidthValue = outlineWidthHelpers.normalize(localOutlineWidth)
-  const outlineWidthLabel = outlineWidthHelpers.formatDisplay(localOutlineWidth)
-  const sanitizedAllowedHostInput = normalizeHostValue(localAllowedHostInput)
+  );
+  const outlineWidthValue = outlineWidthHelpers.normalize(localOutlineWidth);
+  const outlineWidthLabel =
+    outlineWidthHelpers.formatDisplay(localOutlineWidth);
+  const sanitizedAllowedHostInput = normalizeHostValue(localAllowedHostInput);
   const canAddAllowedHost =
     sanitizedAllowedHostInput.length > 0 &&
-    !localAllowedHostsList.includes(sanitizedAllowedHostInput)
+    !localAllowedHostsList.includes(sanitizedAllowedHostInput);
 
-  const propertySelectorValue = buildSelectorValue(config.propertyDataSourceId)
-  const ownerSelectorValue = buildSelectorValue(config.ownerDataSourceId)
+  const propertySelectorValue = buildSelectorValue(config.propertyDataSourceId);
+  const ownerSelectorValue = buildSelectorValue(config.ownerDataSourceId);
 
   return (
     <>
@@ -1112,7 +1115,7 @@ const Setting = (
         </>
       )}
     </>
-  )
-}
+  );
+};
 
-export default Setting
+export default Setting;

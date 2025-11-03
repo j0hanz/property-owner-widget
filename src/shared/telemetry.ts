@@ -1,53 +1,53 @@
-import type { TelemetryEvent, PerformanceMetric } from "../config/types"
+import type { TelemetryEvent, PerformanceMetric } from "../config/types";
 
 export const isAllowedToTrack = (): boolean => {
   try {
-    if (typeof window === "undefined") return false
+    if (typeof window === "undefined") return false;
 
     // Check Global Privacy Control (GPC) signal first - always honored
-    const gpc = (navigator as any)?.globalPrivacyControl
-    if (gpc === true) return false
+    const gpc = (navigator as any)?.globalPrivacyControl;
+    if (gpc === true) return false;
 
     // Check Do Not Track signal - always honored
     const dt =
       (navigator as any)?.doNotTrack ||
       (window as any)?.doNotTrack ||
-      (navigator as any)?.msDoNotTrack
-    if (dt === "1" || dt === "yes") return false
+      (navigator as any)?.msDoNotTrack;
+    if (dt === "1" || dt === "yes") return false;
 
     // Check cookie opt-out with proper parsing to avoid cross-domain pollution
-    const cookie = typeof document !== "undefined" ? document.cookie || "" : ""
-    const cookiePairs = cookie.split(";").map((c) => c.trim())
+    const cookie = typeof document !== "undefined" ? document.cookie || "" : "";
+    const cookiePairs = cookie.split(";").map((c) => c.trim());
     if (cookiePairs.some((pair) => pair === "esri_disallow_tracking=1")) {
-      return false
+      return false;
     }
 
     // Check localStorage opt-in/opt-out (cannot override GPC/DNT)
     const storage = window.localStorage
       ? window.localStorage.getItem("esri_allow_tracking")
-      : null
-    if (storage === "false") return false
-    if (storage === "true") return true
+      : null;
+    if (storage === "false") return false;
+    if (storage === "true") return true;
 
     // Default to NOT tracking (privacy-by-default)
-    return false
+    return false;
   } catch (e) {
-    return false
+    return false;
   }
-}
+};
 
 export const trackEvent = (event: TelemetryEvent): void => {
-  if (!isAllowedToTrack()) return
+  if (!isAllowedToTrack()) return;
 
   try {
     // Event tracking implementation here (silent)
   } catch (error) {
     // Silent fail for telemetry
   }
-}
+};
 
 export const trackPerformance = (metric: PerformanceMetric): void => {
-  if (!isAllowedToTrack()) return
+  if (!isAllowedToTrack()) return;
 
   try {
     trackEvent({
@@ -55,73 +55,73 @@ export const trackPerformance = (metric: PerformanceMetric): void => {
       action: metric.operation,
       label: metric.success ? "success" : "failure",
       value: Math.round(metric.duration),
-    })
+    });
 
     if (metric.error) {
       trackEvent({
         category: "Error",
         action: metric.operation,
         label: metric.error,
-      })
+      });
     }
   } catch (error) {
     // Silent fail for telemetry
   }
-}
+};
 
 export const trackError = (
   operation: string,
   error: any,
   details?: string
 ): void => {
-  if (!isAllowedToTrack()) return
+  if (!isAllowedToTrack()) return;
 
   try {
     const errorMessage =
       typeof error === "string"
         ? error
-        : error?.message || error?.details?.message || "Unknown error"
+        : error?.message || error?.details?.message || "Unknown error";
 
     trackEvent({
       category: "Error",
       action: operation,
       label: details ? `${errorMessage}: ${details}` : errorMessage,
-    })
+    });
   } catch (trackingError) {
     // Silent fail for telemetry
   }
-}
+};
 
 export const createPerformanceTracker = (operation: string) => {
-  const startTime = performance.now()
+  const startTime = performance.now();
 
   return {
     success: () => {
-      const duration = performance.now() - startTime
+      const duration = performance.now() - startTime;
       trackPerformance({
         operation,
         duration,
         success: true,
-      })
+      });
     },
     failure: (error: string) => {
-      const duration = performance.now() - startTime
+      const duration = performance.now() - startTime;
       trackPerformance({
         operation,
         duration,
         success: false,
         error,
-      })
+      });
     },
-  }
-}
+  };
+};
 
 export const trackFeatureUsage = (feature: string, enabled: boolean): void => {
-  if (!isAllowedToTrack()) return
+  if (!isAllowedToTrack()) return;
 
   trackEvent({
     category: "Feature",
     action: feature,
     label: enabled ? "enabled" : "disabled",
-  })
-}
+  });
+};

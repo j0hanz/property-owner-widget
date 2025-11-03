@@ -65,4 +65,4 @@ export default {
   fbwebbDatabaseDescription: "FBWebb database name (for example, Lund).",
   fbwebbConfiguredMessage: "FBWebb URL generation is enabled.",
   errorUrlMustBeHttps: "Enter a valid HTTPS URL.",
-}
+};

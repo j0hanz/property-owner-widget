@@ -1,6 +1,6 @@
-import { css, type IMThemeVariables } from "jimu-core"
-import { useTheme } from "jimu-theme"
-import type { FlexDirection, StyleObject } from "./types"
+import { css, type IMThemeVariables } from "jimu-core";
+import { useTheme } from "jimu-theme";
+import type { FlexDirection, StyleObject } from "./types";
 
 const createFlex = (
   direction: FlexDirection,
@@ -10,19 +10,19 @@ const createFlex = (
     display: "flex",
     flexFlow: `${direction} nowrap`,
     ...additionalStyles,
-  })
+  });
 
 const createFlexAuto = (
   direction: FlexDirection,
   additionalStyles: StyleObject = {}
-) => createFlex(direction, { flex: "0 0 auto", ...additionalStyles })
+) => createFlex(direction, { flex: "0 0 auto", ...additionalStyles });
 
-const createBorder = (color?: string) => `2px solid ${color}`
+const createBorder = (color?: string) => `2px solid ${color}`;
 
 export const createWidgetStyles = (theme: IMThemeVariables) => {
-  const { spacing, color, typography } = theme.sys
-  const borderColor = color?.surface?.background
-  const border = createBorder(borderColor)
+  const { spacing, color, typography } = theme.sys;
+  const borderColor = color?.surface?.background;
+  const border = createBorder(borderColor);
 
   const centeredFlex = {
     display: "flex",
@@ -30,7 +30,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     alignItems: "center",
     justifyContent: "center",
     flex: "1 1 0",
-  }
+  };
 
   return {
     parent: createFlex("column", {
@@ -192,19 +192,19 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       padding: spacing?.(1),
       gap: spacing?.(1),
     }),
-  } as const
-}
+  } as const;
+};
 
-export type WidgetStyles = ReturnType<typeof createWidgetStyles>
+export type WidgetStyles = ReturnType<typeof createWidgetStyles>;
 
 export const useWidgetStyles = (): WidgetStyles => {
-  const theme = useTheme()
-  return createWidgetStyles(theme)
-}
+  const theme = useTheme();
+  return createWidgetStyles(theme);
+};
 
 export const createSettingStyles = (theme: IMThemeVariables) => {
-  const spacing = theme.sys.spacing
-  const typography = theme.sys.typography
+  const spacing = theme.sys.spacing;
+  const typography = theme.sys.typography;
 
   return {
     row: css({ width: "100%", margin: "16px 0 !important" }),
@@ -280,12 +280,12 @@ export const createSettingStyles = (theme: IMThemeVariables) => {
       inlineSize: "100%",
       minInlineSize: 0,
     }),
-  } as const
-}
+  } as const;
+};
 
-export type SettingStyles = ReturnType<typeof createSettingStyles>
+export type SettingStyles = ReturnType<typeof createSettingStyles>;
 
 export const useSettingStyles = (): SettingStyles => {
-  const theme = useTheme()
-  return createSettingStyles(theme)
-}
+  const theme = useTheme();
+  return createSettingStyles(theme);
+};

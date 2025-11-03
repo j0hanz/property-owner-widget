@@ -1,4 +1,4 @@
-import type { ExportFormatDefinition } from "./types"
+import type { ExportFormatDefinition } from "./types";
 
 export const ESRI_MODULES_TO_LOAD = [
   "esri/symbols/SimpleFillSymbol",
@@ -8,12 +8,12 @@ export const ESRI_MODULES_TO_LOAD = [
   "esri/Graphic",
   "esri/layers/GraphicsLayer",
   "esri/geometry/Extent",
-] as const
+] as const;
 
 export const GRID_COLUMN_KEYS = {
   FASTIGHET: "FASTIGHET",
   BOSTADR: "BOSTADR",
-} as const
+} as const;
 
 export const QUERY_DEFAULTS = {
   RETURN_GEOMETRY: true,
@@ -21,13 +21,13 @@ export const QUERY_DEFAULTS = {
   SPATIAL_RELATIONSHIP: "intersects" as const,
   MAX_RETRY_ATTEMPTS: 2,
   TIMEOUT_MS: 15_000,
-} as const
-export const MIN_MASK_LENGTH = 3
-export const MAX_MASK_ASTERISKS = 3
-export const DEFAULT_MAX_RESULTS = 100
-export const OWNER_QUERY_CONCURRENCY = 20
+} as const;
+export const MIN_MASK_LENGTH = 3;
+export const MAX_MASK_ASTERISKS = 3;
+export const DEFAULT_MAX_RESULTS = 100;
+export const OWNER_QUERY_CONCURRENCY = 20;
 
-export const HIGHLIGHT_MARKER_SIZE = 12
+export const HIGHLIGHT_MARKER_SIZE = 12;
 
 export const CURSOR_TOOLTIP_STYLE = {
   textColor: "#000000",
@@ -42,16 +42,16 @@ export const CURSOR_TOOLTIP_STYLE = {
   lineWidth: 192,
   lineHeight: 1,
   kerning: true,
-} as const
+} as const;
 
 // Size matches OWNER_QUERY_CONCURRENCY to handle typical concurrent operations
-export const ABORT_CONTROLLER_POOL_SIZE = 5
+export const ABORT_CONTROLLER_POOL_SIZE = 5;
 
 // Debounce duration for loading indicator visibility to prevent flicker
-export const LOADING_VISIBILITY_DEBOUNCE_MS = 200
+export const LOADING_VISIBILITY_DEBOUNCE_MS = 200;
 
 // Pixel tolerance for hover queries to improve usability
-export const HOVER_QUERY_TOLERANCE_PX = 10
+export const HOVER_QUERY_TOLERANCE_PX = 10;
 
 export const EXPORT_FORMATS: ExportFormatDefinition[] = [
   {
@@ -75,14 +75,14 @@ export const EXPORT_FORMATS: ExportFormatDefinition[] = [
     extension: "geojson",
     mimeType: "application/geo+json",
   },
-]
+];
 
 // Hex color validation pattern
-export const HEX_COLOR_PATTERN = /^#?([0-9a-fA-F]{6})$/
+export const HEX_COLOR_PATTERN = /^#?([0-9a-fA-F]{6})$/;
 
 // Query cache settings
-export const QUERY_CACHE_MAX_SIZE = 100
-export const QUERY_CACHE_EVICTION_PERCENTAGE = 0.2
+export const QUERY_CACHE_MAX_SIZE = 100;
+export const QUERY_CACHE_EVICTION_PERCENTAGE = 0.2;
 
 // CSV export settings
 export const CSV_HEADERS = [
@@ -90,7 +90,7 @@ export const CSV_HEADERS = [
   "UUID_FASTIGHET",
   "FASTIGHET",
   "BOSTADR",
-] as const
+] as const;
 
 // Hover query settings
-export const HOVER_QUERY_THROTTLE_MS = 50
+export const HOVER_QUERY_THROTTLE_MS = 50;

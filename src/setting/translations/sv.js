@@ -76,7 +76,7 @@ System.register([], function (e) {
         fbwebbDatabaseDescription: "FBWebb-databasnamn (t.ex. Lund).",
         fbwebbConfiguredMessage: "FBWebb URL-generering är aktiverad.",
         errorUrlMustBeHttps: "Ange en giltig HTTPS-URL.",
-      })
+      });
     },
-  }
-})
+  };
+});
