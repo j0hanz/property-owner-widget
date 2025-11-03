@@ -602,6 +602,7 @@ const Setting = (
         <SettingSection>
           <SettingRow flow="wrap" level={1} css={styles.row}>
             <Alert
+              fullWidth
               css={styles.fullWidth}
               type={isQueryInFlight ? "info" : hasError ? "warning" : "success"}
               text={
@@ -679,6 +680,7 @@ const Setting = (
             {!hasRequiredDataSources && (
               <SettingRow flow="wrap" level={1} css={styles.row}>
                 <Alert
+                  fullWidth
                   css={styles.fullWidth}
                   type="warning"
                   text={translate("dataSourcesDescription")}
@@ -723,6 +725,7 @@ const Setting = (
               {fieldErrors.maxResults && (
                 <SettingRow flow="wrap" level={1} css={styles.row}>
                   <Alert
+                    fullWidth
                     css={styles.fullWidth}
                     type="error"
                     text={fieldErrors.maxResults}
@@ -957,6 +960,7 @@ const Setting = (
               {fieldErrors.fbwebbBaseUrl && (
                 <SettingRow flow="wrap" level={1} css={styles.row}>
                   <Alert
+                    fullWidth
                     css={styles.fullWidth}
                     type="error"
                     text={fieldErrors.fbwebbBaseUrl}
@@ -1028,6 +1032,7 @@ const Setting = (
               {isFBWebbConfigured(config) && (
                 <SettingRow flow="wrap" level={1} css={styles.row}>
                   <Alert
+                    fullWidth
                     css={styles.fullWidth}
                     type="info"
                     text={translate("fbwebbConfiguredMessage")}
@@ -1092,6 +1097,7 @@ const Setting = (
                   {fieldErrors.relationshipId && (
                     <SettingRow flow="wrap" level={1} css={styles.row}>
                       <Alert
+                        fullWidth
                         css={styles.fullWidth}
                         type="error"
                         text={fieldErrors.relationshipId}

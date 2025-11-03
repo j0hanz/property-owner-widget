@@ -147,7 +147,8 @@ class PropertyWidgetErrorBoundary extends React.Component<
         <div css={this.props.styles.errorWrap}>
           <Alert
             type="error"
-            withIcon
+            fullWidth
+            css={this.props.styles.alert}
             text={this.props.translate("errorBoundaryMessage")}
           />
           {this.state.error && (
@@ -315,15 +316,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   )
 
   const renderConfiguredContent = () => {
-    if (error) {
-      return (
-        <div css={styles.emptyState} role="alert" aria-live="assertive">
-          <Alert type="error" withIcon text={error.message} />
-          {error.details && <div>{error.details}</div>}
-        </div>
-      )
-    }
-
     if (hasSelectedProperties) {
       const tableData = Array.isArray(selectedProperties)
         ? selectedProperties
@@ -1224,12 +1216,33 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         role="region"
         aria-label={translate("widgetTitle")}
       >
-        <div css={styles.emptyState} role="alert" aria-live="assertive">
-          <Alert
-            type="error"
-            withIcon
-            text={translate("errorLoadingModules")}
-          />
+        <div css={styles.body} role="main">
+          <div css={styles.emptyState} role="status" aria-live="polite">
+            <SVG
+              css={styles.svgState}
+              src={setupIcon}
+              width={100}
+              height={100}
+            />
+            <div css={styles.messageState}>
+              {translate("widgetNotConfigured")}
+            </div>
+          </div>
+        </div>
+
+        <div css={styles.footer}>
+          <div css={styles.col}>{translate("propertySelected")}</div>
+          <div css={styles.col}>0</div>
+
+          <div css={styles.footerAlertOverlay}>
+            <Alert
+              type="error"
+              fullWidth
+              css={styles.alert}
+              text={translate("errorLoadingModules")}
+              role="alert"
+            />
+          </div>
         </div>
       </div>
     )
@@ -1310,34 +1323,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             </Dropdown>
           </div>
         </div>
-        {urlFeedback ? (
-          <div css={styles.feedback}>
-            <Alert
-              type={
-                urlFeedback.type === "success"
-                  ? "success"
-                  : urlFeedback.type === "warning"
-                    ? "warning"
-                    : "error"
-              }
-              withIcon
-              text={urlFeedback.text}
-              role="status"
-            />
-            {urlFeedback.url ? (
-              <TextInput
-                value={urlFeedback.url}
-                readOnly
-                aria-label={translate("urlManualCopyLabel")}
-                css={styles.feedbackInput}
-                spellCheck={false}
-                onFocus={(event: React.FocusEvent<HTMLInputElement>) => {
-                  event.target.select()
-                }}
-              />
-            ) : null}
-          </div>
-        ) : null}
       </div>
       <div css={styles.body} role="main">
         {!isConfigured ? (
@@ -1360,6 +1345,49 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       <div css={styles.footer}>
         <div css={styles.col}>{translate("propertySelected")}</div>
         <div css={styles.col}>{selectedCount}</div>
+
+        {urlFeedback || error ? (
+          <div css={styles.footerAlertOverlay}>
+            {error ? (
+              <Alert
+                type="error"
+                fullWidth
+                css={styles.alert}
+                text={error.message}
+                role="alert"
+              />
+            ) : null}
+            {urlFeedback ? (
+              <>
+                <Alert
+                  type={
+                    urlFeedback.type === "success"
+                      ? "success"
+                      : urlFeedback.type === "warning"
+                        ? "warning"
+                        : "error"
+                  }
+                  fullWidth
+                  css={styles.alert}
+                  text={urlFeedback.text}
+                  role="status"
+                />
+                {urlFeedback.url ? (
+                  <TextInput
+                    value={urlFeedback.url}
+                    readOnly
+                    aria-label={translate("urlManualCopyLabel")}
+                    css={styles.feedbackInput}
+                    spellCheck={false}
+                    onFocus={(event: React.FocusEvent<HTMLInputElement>) => {
+                      event.target.select()
+                    }}
+                  />
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {mapWidgetId ? (
