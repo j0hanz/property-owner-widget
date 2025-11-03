@@ -818,37 +818,43 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             plainResults[key] = value
           })
 
-          // Batch Redux updates to reduce re-renders
+          // Store results but don't update UI yet
           const dispatch = propertyDispatchRef.current
-          dispatch.setSelectedProperties(pipelineResult.updatedRows)
-          dispatch.setRawResults(plainResults as any)
+          const resultsToStore = plainResults
+          const rowsToStore = pipelineResult.updatedRows
+
+          // Clean up removed graphics first
+          cleanupRemovedGraphics({
+            toRemove: pipelineResult.toRemove,
+            removeGraphicsForFnr,
+            normalizeFnrKey,
+          })
+
+          const highlightColor = buildHighlightColor(
+            highlightColorConfig,
+            highlightOpacityConfig
+          )
+          const outlineWidth = getValidatedOutlineWidth(outlineWidthConfig)
+
+          // Add graphics to map first (synchronous)
+          syncSelectionGraphics({
+            graphicsToAdd: pipelineResult.graphicsToAdd,
+            selectedRows: pipelineResult.updatedRows,
+            getCurrentView,
+            helpers: {
+              addGraphicsToMap,
+              extractFnr,
+              normalizeFnrKey,
+            },
+            highlightColor,
+            outlineWidth,
+          })
+
+          // Now update Redux state AFTER graphics are visible
+          dispatch.setSelectedProperties(rowsToStore)
+          dispatch.setRawResults(resultsToStore as any)
           dispatch.setQueryInFlight(false)
         }
-
-        cleanupRemovedGraphics({
-          toRemove: pipelineResult.toRemove,
-          removeGraphicsForFnr,
-          normalizeFnrKey,
-        })
-
-        const highlightColor = buildHighlightColor(
-          highlightColorConfig,
-          highlightOpacityConfig
-        )
-        const outlineWidth = getValidatedOutlineWidth(outlineWidthConfig)
-
-        syncSelectionGraphics({
-          graphicsToAdd: pipelineResult.graphicsToAdd,
-          selectedRows: pipelineResult.updatedRows,
-          getCurrentView,
-          helpers: {
-            addGraphicsToMap,
-            extractFnr,
-            normalizeFnrKey,
-          },
-          highlightColor,
-          outlineWidth,
-        })
 
         tracker.success()
         trackEvent({

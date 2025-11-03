@@ -728,10 +728,14 @@ export const syncGraphicsWithState = (params: {
     selectedRows.map((row) => helpers.normalizeFnrKey(row.FNR))
   )
 
-  graphicsToAdd.forEach(({ graphic, fnr }) => {
+  // Batch process all graphics for better performance
+  const graphicsToProcess = graphicsToAdd.filter(({ fnr }) => {
     const fnrKey = helpers.normalizeFnrKey(fnr)
-    if (!selectedFnrs.has(fnrKey)) return
+    return selectedFnrs.has(fnrKey)
+  })
 
+  // Add all graphics in one batch call
+  graphicsToProcess.forEach(({ graphic, fnr }) => {
     helpers.addGraphicsToMap(
       graphic,
       view,
@@ -741,6 +745,7 @@ export const syncGraphicsWithState = (params: {
       outlineWidth
     )
   })
+
   return true
 }
 
