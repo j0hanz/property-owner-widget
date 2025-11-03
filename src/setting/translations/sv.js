@@ -15,6 +15,7 @@ System.register([], function (e) {
         ownerDataSourceLabel: "Ägarlager",
         ownerDataSourceDescription:
           "Ägarlager eller tabell med NAMN- och BOSTADR-fält.",
+        displayOptionsTitle: "Visningsalternativ",
         panelDisplaySettings: "Visningsbeteende",
         advancedSettingsTitle: "Avancerade inställningar",
         panelHighlightSettings: "Markeringsstil",

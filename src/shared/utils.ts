@@ -8,7 +8,11 @@ import type {
 } from "../config/types"
 import type { DataSourceManager } from "jimu-core"
 import { isValidationFailure as checkValidationFailure } from "../config/types"
-import { validateDataSources as validateDataSourcesCore } from "../shared/api"
+import {
+  validateDataSources as validateDataSourcesCore,
+  queryPropertyByPoint,
+  queryOwnerByFnr,
+} from "../shared/api"
 import {
   MIN_MASK_LENGTH,
   MAX_MASK_ASTERISKS,
@@ -24,7 +28,7 @@ import {
 // ============================================================================
 
 /** Sanitize arbitrary HTML/text content */
-const sanitizeText = (value: string): string => {
+const stripHtmlInternal = (value: string): string => {
   if (!value) return ""
   const doc = new DOMParser().parseFromString(value, "text/html")
   const text = doc.body.textContent || ""
@@ -32,8 +36,8 @@ const sanitizeText = (value: string): string => {
 }
 
 export const textSanitizer = {
-  sanitize: sanitizeText,
-  stripHtml: (value: string) => sanitizeText(value),
+  sanitize: stripHtmlInternal,
+  stripHtml: (value: string) => stripHtmlInternal(value),
 }
 
 export const stripHtml = (value: string): string =>
@@ -61,7 +65,7 @@ export const logger = {
 // ============================================================================
 
 const maskText = (text: string, minLength: number): string => {
-  const normalized = sanitizeText(text)
+  const normalized = stripHtmlInternal(text)
   if (normalized.length < minLength) return "***"
   return normalized
 }
@@ -102,8 +106,8 @@ export const maskAddress = ownerPrivacy.maskAddress
 
 const normalizeOwnerValue = (value: unknown): string => {
   if (value === null || value === undefined) return ""
-  if (typeof value === "number") return sanitizeText(String(value))
-  if (typeof value === "string") return sanitizeText(value)
+  if (typeof value === "number") return stripHtmlInternal(String(value))
+  if (typeof value === "string") return stripHtmlInternal(value)
   return ""
 }
 
@@ -302,7 +306,7 @@ const maskOwnerListEntry = (entry: string): string => {
 }
 
 const formatOwnerList = (agarLista: string, maskPII: boolean): string => {
-  const sanitized = sanitizeText(String(agarLista))
+  const sanitized = stripHtmlInternal(String(agarLista))
   const uniqueEntries = deduplicateEntries(sanitized.split(";"))
 
   if (!maskPII) return uniqueEntries.join("; ")
@@ -318,19 +322,19 @@ const formatIndividualOwner = (
   maskPII: boolean,
   unknownOwnerText: string
 ): string => {
-  const rawName = sanitizeText(owner.NAMN || "") || unknownOwnerText
+  const rawName = stripHtmlInternal(owner.NAMN || "") || unknownOwnerText
   const namePart =
     maskPII && rawName !== unknownOwnerText
       ? ownerPrivacy.maskName(rawName)
       : rawName
 
-  const rawAddress = sanitizeText(owner.BOSTADR || "")
+  const rawAddress = stripHtmlInternal(owner.BOSTADR || "")
   const addressPart =
     maskPII && rawAddress ? ownerPrivacy.maskAddress(rawAddress) : rawAddress
 
-  const postalCode = sanitizeText(owner.POSTNR || "").replace(/\s+/g, "")
-  const city = sanitizeText(owner.POSTADR || "")
-  const orgNr = sanitizeText(owner.ORGNR || "")
+  const postalCode = stripHtmlInternal(owner.POSTNR || "").replace(/\s+/g, "")
+  const city = stripHtmlInternal(owner.POSTADR || "")
+  const orgNr = stripHtmlInternal(owner.ORGNR || "")
 
   const parts = [
     namePart,
@@ -642,42 +646,38 @@ export const calculatePropertyUpdates = <
   toggleEnabled: boolean,
   maxResults: number
 ): { toRemove: Set<string>; toAdd: T[]; updatedRows: T[] } => {
-  // Precompute normalized FNR keys for efficiency
-  const existingFnrKeys = existingProperties.map((r) => normalizeFnrKey(r.FNR))
-  const processFnrKeys = rowsToProcess.map((r) => normalizeFnrKey(r.FNR))
-
+  // Build optimized Map structures for O(1) lookups
   const existingByFnr = new Map<string, T[]>()
-  const remainingIds = new Set<string>()
+  const existingById = new Map<string, T>()
 
-  existingProperties.forEach((row, idx) => {
-    const fnrKey = existingFnrKeys[idx]
+  existingProperties.forEach((row) => {
+    const fnrKey = normalizeFnrKey(row.FNR)
     const existingGroup = existingByFnr.get(fnrKey)
     if (existingGroup) {
       existingGroup.push(row)
     } else {
       existingByFnr.set(fnrKey, [row])
     }
-    remainingIds.add(row.id)
+    existingById.set(row.id, row)
   })
 
   const toRemove = new Set<string>()
   const toAdd: T[] = []
   const addedIds = new Set<string>()
 
-  rowsToProcess.forEach((row, idx) => {
-    const fnrKey = processFnrKeys[idx]
+  // Single-pass processing with Map lookups
+  rowsToProcess.forEach((row) => {
+    const fnrKey = normalizeFnrKey(row.FNR)
+
     if (toggleEnabled && !toRemove.has(fnrKey)) {
       const existingGroup = existingByFnr.get(fnrKey)
       if (existingGroup && existingGroup.length > 0) {
         toRemove.add(fnrKey)
-        existingGroup.forEach((existing) => {
-          remainingIds.delete(existing.id)
-        })
         return
       }
     }
 
-    if (remainingIds.has(row.id) || addedIds.has(row.id)) {
+    if (existingById.has(row.id) || addedIds.has(row.id)) {
       return
     }
 
@@ -685,9 +685,14 @@ export const calculatePropertyUpdates = <
     addedIds.add(row.id)
   })
 
-  const updatedRows = existingProperties.filter(
-    (row) => !toRemove.has(normalizeFnrKey(row.FNR))
-  )
+  // Efficient filtering using Set lookup
+  const updatedRows =
+    toRemove.size > 0
+      ? existingProperties.filter(
+          (row) => !toRemove.has(normalizeFnrKey(row.FNR))
+        )
+      : existingProperties.slice()
+
   updatedRows.push(...toAdd)
 
   if (updatedRows.length > maxResults) {
@@ -885,14 +890,38 @@ export const updateRawPropertyResults = (
 ): Map<string, any> => {
   const updated = new Map(prev)
 
+  const propertyResultsByFnr = new Map<string, any>()
+  propertyResults.forEach((result) => {
+    const feature = result?.features?.[0]
+    const attributes = feature?.attributes as
+      | { FNR?: string | number; fnr?: string | number }
+      | undefined
+    const fnrValue = attributes?.FNR ?? attributes?.fnr
+    if (fnrValue != null) {
+      propertyResultsByFnr.set(normalizeFnrKey(fnrValue), result)
+    }
+  })
+
+  let fallbackIndex = 0
+
   const selectedByFnr = new Map<string, string>()
   selectedProperties.forEach((row) => {
     selectedByFnr.set(normalizeFnrKey(row.FNR), row.id)
   })
 
-  rowsToProcess.forEach((row, index) => {
-    if (index < propertyResults.length) {
-      updated.set(row.id, propertyResults[index])
+  rowsToProcess.forEach((row) => {
+    const fnrKey = normalizeFnrKey(row.FNR)
+    let propertyResult = propertyResultsByFnr.get(fnrKey)
+
+    if (!propertyResult && propertyResults.length > 0) {
+      const fallback =
+        propertyResults[Math.min(fallbackIndex, propertyResults.length - 1)]
+      fallbackIndex += 1
+      propertyResult = fallback
+    }
+
+    if (propertyResult) {
+      updated.set(row.id, propertyResult)
     }
   })
 
@@ -933,6 +962,121 @@ export const computeWidgetsToClose = (
   }
 
   return ids
+}
+
+export const executeHoverQuery = async (params: {
+  mapPoint: __esri.Point
+  config: {
+    propertyDataSourceId: string
+    ownerDataSourceId: string
+    allowedHosts?: readonly string[]
+  }
+  dsManager: any
+  signal: AbortSignal
+  enablePIIMasking: boolean
+  translate: (key: string) => string
+}): Promise<{ fastighet: string; bostadr: string } | null> => {
+  const { mapPoint, config, dsManager, signal, enablePIIMasking, translate } =
+    params
+
+  const dsValidation = validateDataSourcesCore({
+    propertyDsId: config.propertyDataSourceId,
+    ownerDsId: config.ownerDataSourceId,
+    dsManager,
+    allowedHosts: config.allowedHosts,
+    translate,
+  })
+
+  if (checkValidationFailure(dsValidation)) {
+    return null
+  }
+  const { manager } = dsValidation.data
+
+  const propertyResults = await queryPropertyByPoint(
+    mapPoint,
+    config.propertyDataSourceId,
+    manager,
+    { signal }
+  )
+
+  abortHelpers.throwIfAborted(signal)
+
+  if (!propertyResults.length || !propertyResults[0]?.features?.length) {
+    return null
+  }
+
+  const feature = propertyResults[0].features[0]
+  const fnr = extractFnr(feature.attributes)
+  const fastighet = feature.attributes?.FASTIGHET || ""
+
+  if (!fnr || !fastighet) {
+    return null
+  }
+
+  const ownerFeatures = await queryOwnerByFnr(
+    fnr,
+    config.ownerDataSourceId,
+    manager,
+    { signal }
+  )
+
+  abortHelpers.throwIfAborted(signal)
+
+  let bostadr = translate("unknownOwner")
+  if (ownerFeatures.length > 0) {
+    const ownerAttrs = ownerFeatures[0].attributes
+    bostadr = formatOwnerInfo(
+      ownerAttrs,
+      enablePIIMasking,
+      translate("unknownOwner")
+    )
+  }
+
+  return { fastighet, bostadr }
+}
+
+export const shouldSkipHoverQuery = (
+  screenPoint: { x: number; y: number },
+  lastQueryPoint: { x: number; y: number } | null,
+  tolerancePx: number
+): boolean => {
+  if (!lastQueryPoint) return false
+
+  const dx = screenPoint.x - lastQueryPoint.x
+  const dy = screenPoint.y - lastQueryPoint.y
+  const distance = Math.sqrt(dx * dx + dy * dy)
+
+  return distance < tolerancePx
+}
+
+export const updateGraphicSymbol = (
+  graphic: __esri.Graphic,
+  highlightColor: [number, number, number, number],
+  outlineWidth: number,
+  modules: EsriModules
+): void => {
+  if (!graphic || !graphic.geometry) return
+
+  const geometry = graphic.geometry
+  const symbolJSON = buildHighlightSymbolJSON(
+    highlightColor,
+    outlineWidth,
+    geometry.type as "polygon" | "polyline" | "point"
+  )
+
+  if (geometry.type === "polygon" || geometry.type === "extent") {
+    graphic.symbol = new modules.SimpleFillSymbol(
+      symbolJSON as __esri.SimpleFillSymbolProperties
+    )
+  } else if (geometry.type === "polyline") {
+    graphic.symbol = new modules.SimpleLineSymbol(
+      symbolJSON as __esri.SimpleLineSymbolProperties
+    )
+  } else if (geometry.type === "point" || geometry.type === "multipoint") {
+    graphic.symbol = new modules.SimpleMarkerSymbol(
+      symbolJSON as __esri.SimpleMarkerSymbolProperties
+    )
+  }
 }
 
 export const validateNumericRange = (params: {

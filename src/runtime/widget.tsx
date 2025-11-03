@@ -36,7 +36,6 @@ import type {
   GridRowData,
   SelectionGraphicsParams,
   ExportFormat,
-  OwnerAttributes,
 } from "../config/types"
 import { ErrorType } from "../config/enums"
 import { useWidgetStyles } from "../config/style"
@@ -50,13 +49,7 @@ import {
   useThrottle,
   usePropertySelectionState,
 } from "../shared/hooks"
-import {
-  queryPropertyByPoint,
-  queryOwnerByFnr,
-  clearQueryCache,
-  validateDataSources,
-  runPropertySelectionPipeline,
-} from "../shared/api"
+import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api"
 import {
   formatOwnerInfo,
   extractFnr,
@@ -74,9 +67,16 @@ import {
   logger,
   syncCursorGraphics,
   abortHelpers,
+  executeHoverQuery,
+  shouldSkipHoverQuery,
+  updateGraphicSymbol,
 } from "../shared/utils"
 import type { CursorGraphicsState } from "../shared/utils"
-import { EXPORT_FORMATS, CURSOR_TOOLTIP_STYLE } from "../config/constants"
+import {
+  EXPORT_FORMATS,
+  CURSOR_TOOLTIP_STYLE,
+  HOVER_QUERY_TOLERANCE_PX,
+} from "../config/constants"
 import {
   trackEvent,
   trackError,
@@ -215,7 +215,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     clearQueryCache,
     trackEvent,
   })
-  const isMountedRef = React.useRef(true)
 
   // Hover tooltip state
   const [hoverTooltipData, setHoverTooltipData] = React.useState<{
@@ -224,6 +223,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   } | null>(null)
   const [isHoverQueryActive, setIsHoverQueryActive] = React.useState(false)
   const hoverQueryAbortRef = React.useRef<AbortController | null>(null)
+  const lastHoverQueryPointRef = React.useRef<{ x: number; y: number } | null>(
+    null
+  )
+  const HOVER_QUERY_TOLERANCE_PX_VALUE = HOVER_QUERY_TOLERANCE_PX
 
   const hasSelectedProperties = state.selectedProperties.length > 0
   const hasSelectedRows = state.rowSelectionIds.size > 0
@@ -342,74 +345,61 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const tableColumns = tableColumnsRef.current
 
   const closeOtherWidgets = hooks.useEventCallback(() => {
-    const autoCloseSetting = config?.autoCloseOtherWidgets
-    if (autoCloseSetting !== undefined && !autoCloseSetting) {
-      return
-    }
-    try {
-      const store = typeof getAppStore === "function" ? getAppStore() : null
-      const state = store?.getState?.()
-      const runtimeInfo = state?.widgetsRuntimeInfo as
-        | {
-            [id: string]:
-              | { state?: WidgetState | string; isClassLoaded?: boolean }
-              | undefined
-          }
-        | undefined
-      const targets = computeWidgetsToClose(runtimeInfo, id)
-      if (targets.length) {
-        const safeTargets = targets.filter((targetId) => {
-          const targetInfo = runtimeInfo?.[targetId]
-          return Boolean(targetInfo?.isClassLoaded)
-        })
-        if (safeTargets.length) {
-          trackEvent({
-            category: "Widget",
-            action: "close_other_widgets",
-            value: safeTargets.length,
-          })
-          props.dispatch(appActions.closeWidgets(safeTargets))
+    if (!config?.autoCloseOtherWidgets) return
+
+    const store = typeof getAppStore === "function" ? getAppStore() : null
+    if (!store) return
+
+    const state = store.getState?.()
+    if (!state) return
+
+    const runtimeInfo = state.widgetsRuntimeInfo as
+      | {
+          [id: string]:
+            | { state?: WidgetState | string; isClassLoaded?: boolean }
+            | undefined
         }
-      }
-    } catch (err) {
-      // Silent fail - non-critical error
-    }
+      | undefined
+
+    const targets = computeWidgetsToClose(runtimeInfo, id)
+    if (targets.length === 0) return
+
+    const safeTargets = targets.filter((targetId) => {
+      const targetInfo = runtimeInfo?.[targetId]
+      return Boolean(targetInfo?.isClassLoaded)
+    })
+
+    if (safeTargets.length === 0) return
+
+    trackEvent({
+      category: "Widget",
+      action: "close_other_widgets",
+      value: safeTargets.length,
+    })
+    props.dispatch(appActions.closeWidgets(safeTargets))
   })
 
   const handleExport = hooks.useEventCallback((format: ExportFormat) => {
-    if (!hasSelectedRows) {
-      return
-    }
+    if (!hasSelectedRows || !state.rawPropertyResults?.size) return
 
-    if (!state.rawPropertyResults || state.rawPropertyResults.size === 0) {
-      return
-    }
+    const selectedRawData: any[] = []
+    state.rowSelectionIds.forEach((id) => {
+      const rawData = state.rawPropertyResults?.get(id)
+      if (rawData) selectedRawData.push(rawData)
+    })
+
+    if (selectedRawData.length === 0) return
 
     const selectedRowData = state.selectedProperties.filter((row) =>
       state.rowSelectionIds.has(row.id)
     )
 
-    const selectedRawData: any[] = []
-    state.rowSelectionIds.forEach((id) => {
-      const rawData = state.rawPropertyResults?.get(id)
-      if (rawData) {
-        selectedRawData.push(rawData)
-      }
-    })
-
-    if (selectedRawData.length === 0) {
-      return
-    }
-
-    const rowCount = selectedRowData.length
-    const formatDefinition = EXPORT_FORMATS.find((item) => item.id === format)
-
     try {
       exportData(selectedRawData, selectedRowData, {
         format,
         filename: "property-export",
-        rowCount,
-        definition: formatDefinition,
+        rowCount: selectedRowData.length,
+        definition: EXPORT_FORMATS.find((item) => item.id === format),
       })
     } catch (error) {
       console.error("Export failed", error)
@@ -655,87 +645,32 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   // Hover query function - queries property at cursor position
   const queryPropertyAtPoint = hooks.useEventCallback(
     async (mapPoint: __esri.Point) => {
-      // Cancel any existing hover query
       if (hoverQueryAbortRef.current) {
         hoverQueryAbortRef.current.abort()
         hoverQueryAbortRef.current = null
       }
 
-      // Create new abort controller for this hover query
       const controller = new AbortController()
       hoverQueryAbortRef.current = controller
 
       setIsHoverQueryActive(true)
       try {
-        // Validate data sources
-        const dsValidation = validateDataSources({
-          propertyDsId: config.propertyDataSourceId,
-          ownerDsId: config.ownerDataSourceId,
+        const result = await executeHoverQuery({
+          mapPoint,
+          config: {
+            propertyDataSourceId: config.propertyDataSourceId,
+            ownerDataSourceId: config.ownerDataSourceId,
+            allowedHosts: config.allowedHosts,
+          },
           dsManager: dsManagerRef.current,
-          allowedHosts: config.allowedHosts,
+          signal: controller.signal,
+          enablePIIMasking: piiMaskingEnabled,
           translate,
         })
 
-        if (isValidationFailure(dsValidation)) {
-          setIsHoverQueryActive(false)
-          return
-        }
-        const { manager } = dsValidation.data
+        if (controller.signal.aborted) return
 
-        // Query property at point
-        const propertyResults = await queryPropertyByPoint(
-          mapPoint,
-          config.propertyDataSourceId,
-          manager,
-          { signal: controller.signal }
-        )
-
-        if (controller.signal.aborted || !isMountedRef.current) {
-          return
-        }
-
-        // No property found at cursor
-        if (!propertyResults.length || !propertyResults[0]?.features?.length) {
-          setHoverTooltipData(null)
-          setIsHoverQueryActive(false)
-          return
-        }
-
-        const feature = propertyResults[0].features[0]
-        const fnr = extractFnr(feature.attributes)
-        const fastighet = feature.attributes?.FASTIGHET || ""
-
-        if (!fnr || !fastighet) {
-          setHoverTooltipData(null)
-          setIsHoverQueryActive(false)
-          return
-        }
-
-        // Query owner data for this property
-        const ownerFeatures = await queryOwnerByFnr(
-          fnr,
-          config.ownerDataSourceId,
-          manager,
-          { signal: controller.signal }
-        )
-
-        if (controller.signal.aborted || !isMountedRef.current) {
-          return
-        }
-
-        // Format owner info
-        let bostadr = translate("unknownOwner")
-        if (ownerFeatures.length > 0) {
-          const ownerAttrs = ownerFeatures[0].attributes as OwnerAttributes
-          bostadr = formatOwnerInfo(
-            ownerAttrs,
-            piiMaskingEnabled,
-            translate("unknownOwner")
-          )
-        }
-
-        // Update hover tooltip data
-        setHoverTooltipData({ fastighet, bostadr })
+        setHoverTooltipData(result)
         setIsHoverQueryActive(false)
       } catch (error) {
         if (isAbortError(error)) return
@@ -743,12 +678,31 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         logger.debug("Hover query failed", { error })
         setHoverTooltipData(null)
         setIsHoverQueryActive(false)
+      } finally {
+        if (hoverQueryAbortRef.current === controller) {
+          hoverQueryAbortRef.current = null
+        }
       }
     }
   )
 
-  // Throttled version of hover query
-  const throttledHoverQuery = useThrottle(queryPropertyAtPoint, 100)
+  // Throttled version of hover query with spatial tolerance
+  const throttledHoverQuery = useThrottle(
+    (mapPoint: __esri.Point, screenPoint: { x: number; y: number }) => {
+      if (
+        shouldSkipHoverQuery(
+          screenPoint,
+          lastHoverQueryPointRef.current,
+          HOVER_QUERY_TOLERANCE_PX_VALUE
+        )
+      ) {
+        return
+      }
+      lastHoverQueryPointRef.current = screenPoint
+      queryPropertyAtPoint(mapPoint)
+    },
+    100
+  )
 
   const updateCursorPoint = hooks.useEventCallback(
     (mapPoint: __esri.Point | null) => {
@@ -850,8 +804,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             })
           }
 
-          // Trigger throttled hover query (fires periodically during movement)
-          throttledHoverQuery(mapPoint)
+          // Trigger throttled hover query with spatial tolerance
+          throttledHoverQuery(mapPoint, screenPoint)
         } else {
           lastCursorPointRef.current = null
           pendingMapPointRef.current = null
@@ -864,6 +818,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       pointerLeaveHandleRef.current = view.on("pointer-leave", () => {
         lastCursorPointRef.current = null
         pendingMapPointRef.current = null
+        lastHoverQueryPointRef.current = null
         if (rafIdRef.current !== null) {
           cancelAnimationFrame(rafIdRef.current)
           rafIdRef.current = null
@@ -939,24 +894,17 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     updateCursorPoint(lastCursorPointRef.current)
   }, [hoverTooltipData, isHoverQueryActive])
 
-  // Sync selection graphics when highlight config changes
+  // Sync selection graphics when highlight config changes (incremental update)
   const debouncedSyncGraphics = useDebounce(() => {
-    if (state.selectedProperties.length === 0) {
-      return
-    }
+    if (state.selectedProperties.length === 0) return
 
-    const graphicsToAdd = state.selectedProperties
-      .map((row) =>
-        row.graphic ? { graphic: row.graphic, fnr: row.FNR } : null
-      )
-      .filter(Boolean) as Array<{
-      graphic: __esri.Graphic
-      fnr: string | number
-    }>
+    const view = getCurrentView()
+    if (!view || !modules) return
 
-    if (graphicsToAdd.length === 0) {
-      return
-    }
+    const layer = view.map.findLayerById(
+      `${id}-property-highlight-layer`
+    ) as __esri.GraphicsLayer | null
+    if (!layer) return
 
     const currentHighlightColor = buildHighlightColor(
       highlightColorConfig,
@@ -964,17 +912,25 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     )
     const currentOutlineWidth = getValidatedOutlineWidth(outlineWidthConfig)
 
-    syncSelectionGraphics({
-      graphicsToAdd,
-      selectedRows: state.selectedProperties,
-      getCurrentView,
-      helpers: {
-        addGraphicsToMap,
-        extractFnr,
-        normalizeFnrKey,
-      },
-      highlightColor: currentHighlightColor,
-      outlineWidth: currentOutlineWidth,
+    const selectedFnrKeys = new Set(
+      state.selectedProperties.map((row) => normalizeFnrKey(row.FNR))
+    )
+
+    layer.graphics.forEach((graphic: __esri.Graphic) => {
+      if (!graphic?.geometry) return
+
+      const fnr = extractFnr(graphic.attributes)
+      if (!fnr) return
+
+      const fnrKey = normalizeFnrKey(fnr)
+      if (!selectedFnrKeys.has(fnrKey)) return
+
+      updateGraphicSymbol(
+        graphic,
+        currentHighlightColor,
+        currentOutlineWidth,
+        modules
+      )
     })
   }, 100)
 
@@ -1032,7 +988,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   }, [runtimeState, prevRuntimeState, closeOtherWidgets])
 
   hooks.useUnmount(() => {
-    isMountedRef.current = false
     abortAll()
     clearQueryCache()
   })

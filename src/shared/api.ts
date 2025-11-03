@@ -598,9 +598,15 @@ export const queryOwnersByRelationship = async (
       const data = record.getData()
       const objectId = data.OBJECTID as number
       const fnr = String(data.FNR)
-      objectIds.push(objectId)
-      fnrToObjectIdMap.set(objectId, fnr)
+      if (objectId != null && fnr) {
+        objectIds.push(objectId)
+        fnrToObjectIdMap.set(objectId, fnr)
+      }
     })
+
+    if (objectIds.length === 0) {
+      return new Map()
+    }
 
     relationshipQuery.objectIds = objectIds
     relationshipQuery.relationshipId = relationshipId
@@ -850,6 +856,8 @@ const processBatchOfProperties = async (params: {
     "esri/core/promiseUtils",
   ])
 
+  abortHelpers.throwIfAborted(context.signal)
+
   const ownerData = await promiseUtils.eachAlways(
     batch.map((validated) =>
       fetchOwnerDataForProperty(validated.fnr, context, config).then(
@@ -977,66 +985,79 @@ const processBatchQuery = async (
   }
 
   abortHelpers.throwIfAborted(context.signal)
-  for (const { fnr, attrs, graphic } of validatedProperties) {
-    const owners = ownersByFnr.get(String(fnr)) || []
 
-    if (owners.length > 0) {
-      const ownersToProcess = deduplicateOwnerEntries(owners, {
-        fnr,
-        propertyId: attrs.UUID_FASTIGHET,
-      })
+  // Process in chunks to avoid memory spikes with large datasets
+  const CHUNK_SIZE = 100
+  for (let i = 0; i < validatedProperties.length; i += CHUNK_SIZE) {
+    const chunk = validatedProperties.slice(i, i + CHUNK_SIZE)
 
-      for (const owner of ownersToProcess) {
-        const formattedOwner = context.helpers.formatOwnerInfo(
-          owner,
-          config.enablePIIMasking,
-          context.messages.unknownOwner
-        )
-        const propertyWithShare = context.helpers.formatPropertyWithShare(
-          attrs.FASTIGHET,
-          owner.ANDEL
-        )
+    for (const { fnr, attrs, graphic } of chunk) {
+      const owners = ownersByFnr.get(String(fnr)) || []
 
+      if (owners.length > 0) {
+        const ownersToProcess = deduplicateOwnerEntries(owners, {
+          fnr,
+          propertyId: attrs.UUID_FASTIGHET,
+        })
+
+        for (const owner of ownersToProcess) {
+          const formattedOwner = context.helpers.formatOwnerInfo(
+            owner,
+            config.enablePIIMasking,
+            context.messages.unknownOwner
+          )
+          const propertyWithShare = context.helpers.formatPropertyWithShare(
+            attrs.FASTIGHET,
+            owner.ANDEL
+          )
+
+          rowsToProcess.push(
+            createGridRow({
+              fnr,
+              objectId: attrs.OBJECTID,
+              uuidFastighet: attrs.UUID_FASTIGHET,
+              fastighet: propertyWithShare,
+              bostadr: formattedOwner,
+              graphic,
+              createRowId: context.helpers.createRowId,
+              rawOwner: owner,
+            })
+          )
+        }
+      } else {
+        const fallbackMessage = failedFnrs.has(String(fnr))
+          ? context.messages.errorOwnerQueryFailed
+          : context.messages.unknownOwner
+        const fallbackOwner = {
+          NAMN: fallbackMessage,
+          BOSTADR: "",
+          POSTNR: "",
+          POSTADR: "",
+          ORGNR: "",
+          FNR: fnr,
+        } as OwnerAttributes
         rowsToProcess.push(
           createGridRow({
             fnr,
             objectId: attrs.OBJECTID,
             uuidFastighet: attrs.UUID_FASTIGHET,
-            fastighet: propertyWithShare,
-            bostadr: formattedOwner,
+            fastighet: attrs.FASTIGHET,
+            bostadr: fallbackMessage,
             graphic,
             createRowId: context.helpers.createRowId,
-            rawOwner: owner,
+            rawOwner: fallbackOwner,
           })
         )
       }
-    } else {
-      const fallbackMessage = failedFnrs.has(String(fnr))
-        ? context.messages.errorOwnerQueryFailed
-        : context.messages.unknownOwner
-      const fallbackOwner = {
-        NAMN: fallbackMessage,
-        BOSTADR: "",
-        POSTNR: "",
-        POSTADR: "",
-        ORGNR: "",
-        FNR: fnr,
-      } as OwnerAttributes
-      rowsToProcess.push(
-        createGridRow({
-          fnr,
-          objectId: attrs.OBJECTID,
-          uuidFastighet: attrs.UUID_FASTIGHET,
-          fastighet: attrs.FASTIGHET,
-          bostadr: fallbackMessage,
-          graphic,
-          createRowId: context.helpers.createRowId,
-          rawOwner: fallbackOwner,
-        })
-      )
+
+      graphicsToAdd.push({ graphic, fnr })
     }
 
-    graphicsToAdd.push({ graphic, fnr })
+    // Yield to event loop between chunks for large datasets
+    if (i + CHUNK_SIZE < validatedProperties.length) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      abortHelpers.throwIfAborted(context.signal)
+    }
   }
 
   return { rowsToProcess, graphicsToAdd }
@@ -1230,6 +1251,10 @@ export const queryPropertiesInBuffer = async (
 
     if (!bufferGeometry) {
       throw new Error("Failed to create buffer geometry")
+    }
+
+    if (!bufferGeometry.extent || bufferGeometry.extent.width === 0) {
+      throw new Error("Invalid buffer geometry: empty extent")
     }
 
     abortHelpers.throwIfAborted(options?.signal)

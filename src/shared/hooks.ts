@@ -160,25 +160,18 @@ export const usePropertySelectionState = (
 ): PropertySelectionApi => {
   const { abortAll, clearGraphics, clearQueryCache, trackEvent } = params
 
-  const isMountedRef = React.useRef(true)
   const [state, internalSetState] = React.useState<PropertyWidgetState>(
     createInitialSelectionState()
   )
 
   const updateState = hooks.useEventCallback(
     (updater: (prev: PropertyWidgetState) => PropertyWidgetState) => {
-      if (!isMountedRef.current) {
-        return
-      }
       internalSetState((prev) => updater(prev))
     }
   )
 
   const setError = hooks.useEventCallback(
     (type: ErrorType, message: string, details?: string) => {
-      if (!isMountedRef.current) {
-        return
-      }
       internalSetState((prev) => ({
         ...prev,
         error: { type, message, details },
@@ -223,7 +216,7 @@ export const usePropertySelectionState = (
   })
 
   hooks.useUnmount(() => {
-    isMountedRef.current = false
+    // State cleanup handled by abortAll in widget
   })
 
   return {
@@ -275,7 +268,7 @@ export const useGraphicsLayer = (
   const removeGraphicsForFnr = hooks.useEventCallback(
     (fnr: string | number, normalizeFnrKey: (fnr: any) => string) => {
       const layer = graphicsLayerRef.current
-      if (!layer) return
+      if (!layer || fnr == null) return
       const fnrKey = normalizeFnrKey(fnr)
       const graphics = graphicsMapRef.current.get(fnrKey)
       if (graphics && graphics.length > 0) {
