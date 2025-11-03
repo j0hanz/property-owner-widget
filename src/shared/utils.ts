@@ -988,15 +988,46 @@ export const createPropertyDispatcher = (
     dispatch(action)
   }
 
-  const cloneMap = (
+  const convertMapToPlainObject = (
     results:
       | Map<string, SerializedQueryResult>
       | ReadonlyMap<string, SerializedQueryResult>
+      | { [key: string]: SerializedQueryResult }
       | null
-  ) => {
+  ): { [key: string]: SerializedQueryResult } | null => {
     if (!results) return null
-    if (results instanceof Map) return new Map(results)
-    return new Map(results)
+
+    const plainObj: { [key: string]: SerializedQueryResult } = {}
+
+    if (results instanceof Map) {
+      results.forEach((value, key) => {
+        plainObj[key] = value
+      })
+      return plainObj
+    }
+
+    const maybeImmutable =
+      typeof (results as any)?.asMutable === "function"
+        ? (results as any).asMutable({ deep: false })
+        : results
+
+    if (typeof maybeImmutable.forEach === "function") {
+      maybeImmutable.forEach((value: SerializedQueryResult, key: string) => {
+        plainObj[key] = value
+      })
+      return plainObj
+    }
+
+    Object.keys(
+      maybeImmutable as { [key: string]: SerializedQueryResult }
+    ).forEach((key) => {
+      const value = maybeImmutable[key]
+      if (value !== undefined) {
+        plainObj[key] = value
+      }
+    })
+
+    return plainObj
   }
 
   return {
@@ -1023,7 +1054,12 @@ export const createPropertyDispatcher = (
         | ReadonlyMap<string, SerializedQueryResult>
         | null
     ) => {
-      safeDispatch(propertyActions.setRawResults(cloneMap(results), widgetId))
+      safeDispatch(
+        propertyActions.setRawResults(
+          convertMapToPlainObject(results) as any,
+          widgetId
+        )
+      )
     },
     removeWidgetState: () => {
       safeDispatch(propertyActions.removeWidgetState(widgetId))

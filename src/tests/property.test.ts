@@ -273,7 +273,11 @@ describe("createPropertyDispatcher", () => {
       throw new Error("Unexpected action type")
     }
     expect(action.widgetId).toBe(widgetId)
-    expect(action.results).toEqual(rawResults)
+    // Results should be converted to plain object, not Map
+    const expectedPlainObject = {
+      "row-1": serialized,
+    }
+    expect(action.results).toEqual(expectedPlainObject)
     expect(action.results).not.toBe(rawResults)
   })
 })

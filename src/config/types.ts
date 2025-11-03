@@ -145,7 +145,7 @@ export interface PropertyWidgetState {
   error: ErrorState | null
   selectedProperties: GridRowData[]
   isQueryInFlight: boolean
-  rawPropertyResults: Map<string, SerializedQueryResult> | null
+  rawPropertyResults: { [key: string]: SerializedQueryResult } | null
 }
 
 export interface IMPropertyGlobalState {

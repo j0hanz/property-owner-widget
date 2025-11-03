@@ -414,12 +414,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     propertyDispatchRef.current.setSelectedProperties(trimmedProperties)
 
     const existingRaw = rawPropertyResultsRef.current
-    if (existingRaw && existingRaw.size > 0) {
-      const nextRaw = new Map(existingRaw)
-      removedProperties.forEach((prop) => {
-        nextRaw.delete(prop.id)
+    if (existingRaw && Object.keys(existingRaw).length > 0) {
+      const nextRaw: { [key: string]: SerializedQueryResult } = {}
+      Object.keys(existingRaw).forEach((key) => {
+        if (!removedProperties.some((prop) => prop.id === key)) {
+          const rawValue = existingRaw[key]
+          // Convert immutable object to plain object
+          nextRaw[key] = JSON.parse(JSON.stringify(rawValue))
+        }
       })
-      propertyDispatchRef.current.setRawResults(nextRaw)
+      propertyDispatchRef.current.setRawResults(nextRaw as any)
     }
   }, [maxResults, normalizeFnrKey, removeGraphicsForFnr, trackEvent])
 
@@ -477,15 +481,64 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   })
 
   const handleExport = hooks.useEventCallback((format: ExportFormat) => {
-    if (!hasSelectedProperties || !rawPropertyResults?.size) return
+    console.log("[Export] Starting export:", {
+      format,
+      hasSelectedProperties,
+      rawPropertyResults,
+    })
+
+    if (!hasSelectedProperties) {
+      console.log("[Export] No selected properties, aborting")
+      return
+    }
+
+    if (!rawPropertyResults) {
+      console.log("[Export] No raw results available, aborting")
+      return
+    }
+
+    // Convert rawPropertyResults to Map for consistent access
+    let resultsMap: Map<string, any>
+    if (rawPropertyResults instanceof Map) {
+      resultsMap = rawPropertyResults
+    } else if (rawPropertyResults && typeof rawPropertyResults === "object") {
+      // Handle Redux immutable object or plain object
+      resultsMap = new Map()
+      // Use for...in to handle both plain objects and Immutable objects
+      for (const key in rawPropertyResults) {
+        if (Object.prototype.hasOwnProperty.call(rawPropertyResults, key)) {
+          const value = (rawPropertyResults as any)[key]
+          if (value !== null && value !== undefined) {
+            resultsMap.set(key, value)
+          }
+        }
+      }
+    } else {
+      console.log(
+        "[Export] Invalid rawPropertyResults type:",
+        typeof rawPropertyResults
+      )
+      return
+    }
+
+    console.log("[Export] Results map size:", resultsMap.size)
+    if (resultsMap.size === 0) {
+      console.log("[Export] Results map is empty, aborting")
+      return
+    }
 
     const selectedRawData: any[] = []
     selectedProperties.forEach((row) => {
-      const rawData = rawPropertyResults?.get(row.id)
+      const rawData = resultsMap.get(row.id)
+      console.log("[Export] Looking up row:", row.id, "Found:", !!rawData)
       if (rawData) selectedRawData.push(rawData)
     })
 
-    if (selectedRawData.length === 0) return
+    console.log("[Export] Selected raw data count:", selectedRawData.length)
+    if (selectedRawData.length === 0) {
+      console.log("[Export] No raw data found for selected rows, aborting")
+      return
+    }
 
     const selectedRows = Array.isArray(selectedProperties)
       ? selectedProperties
@@ -607,14 +660,23 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         if (!isStaleRequest()) {
           const prevRawResults = rawPropertyResultsRef.current
-          const baseRawResults =
-            prevRawResults instanceof Map
-              ? prevRawResults
-              : prevRawResults
-                ? new Map(
-                    prevRawResults as ReadonlyMap<string, SerializedQueryResult>
-                  )
-                : new Map<string, SerializedQueryResult>()
+
+          // Convert prevRawResults to a proper Map
+          let baseRawResults: Map<string, SerializedQueryResult>
+          if (prevRawResults instanceof Map) {
+            baseRawResults = prevRawResults
+          } else if (prevRawResults && typeof prevRawResults === "object") {
+            // Handle plain objects or immutable objects from Redux
+            baseRawResults = new Map<string, SerializedQueryResult>()
+            Object.keys(prevRawResults).forEach((key) => {
+              const value = (prevRawResults as any)[key]
+              if (value && typeof value === "object") {
+                baseRawResults.set(key, value as SerializedQueryResult)
+              }
+            })
+          } else {
+            baseRawResults = new Map<string, SerializedQueryResult>()
+          }
 
           const updatedRawResults = updateRawPropertyResults(
             baseRawResults,
@@ -625,10 +687,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             normalizeFnrKey
           )
 
+          // Convert Map back to plain object for Redux storage
+          const plainResults: { [key: string]: SerializedQueryResult } = {}
+          updatedRawResults.forEach((value, key) => {
+            plainResults[key] = value
+          })
+
           // Batch Redux updates to reduce re-renders
           const dispatch = propertyDispatchRef.current
           dispatch.setSelectedProperties(pipelineResult.updatedRows)
-          dispatch.setRawResults(updatedRawResults)
+          dispatch.setRawResults(plainResults as any)
           dispatch.setQueryInFlight(false)
         }
 

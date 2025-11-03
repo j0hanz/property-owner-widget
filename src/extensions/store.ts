@@ -47,7 +47,7 @@ export type PropertyAction =
     }
   | {
       type: PropertyActionType.SET_RAW_RESULTS
-      results: Map<string, SerializedQueryResult> | null
+      results: { [key: string]: SerializedQueryResult } | null
       widgetId: string
     }
   | {
@@ -83,7 +83,7 @@ export const propertyActions = {
     widgetId,
   }),
   setRawResults: (
-    results: Map<string, SerializedQueryResult> | null,
+    results: { [key: string]: SerializedQueryResult } | null,
     widgetId: string
   ): PropertyAction => ({
     type: PropertyActionType.SET_RAW_RESULTS,
