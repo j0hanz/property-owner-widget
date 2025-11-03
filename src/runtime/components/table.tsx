@@ -1,12 +1,8 @@
 /** @jsx jsx */
-import { React, jsx, hooks } from "jimu-core"
+import { React, jsx } from "jimu-core"
 import { useReactTable, flexRender } from "@tanstack/react-table"
-import type {
-  SortingState,
-  ColumnFiltersState,
-  ColumnDef,
-} from "@tanstack/react-table"
-import type { PropertyTableProps, GridRowData } from "../../config/types"
+import type { SortingState, ColumnFiltersState } from "@tanstack/react-table"
+import type { PropertyTableProps } from "../../config/types"
 import {
   createTableConfig,
   getDefaultSorting,
