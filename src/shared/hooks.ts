@@ -1,16 +1,15 @@
 import { React, hooks } from "jimu-core"
 import { loadArcGISJSAPIModules } from "jimu-arcgis"
-import type {
-  EsriModules,
-  PropertyWidgetState,
-  TelemetryEvent,
-} from "../config/types"
-import type { ErrorType } from "../config/enums"
+import type { EsriModules } from "../config/types"
 import {
   ESRI_MODULES_TO_LOAD,
   ABORT_CONTROLLER_POOL_SIZE,
 } from "../config/constants"
-import { popupSuppressionManager, buildHighlightSymbolJSON } from "./utils"
+import {
+  popupSuppressionManager,
+  buildHighlightSymbolJSON,
+  isAbortError,
+} from "./utils"
 
 export const useEsriModules = () => {
   const [modules, setModules] = React.useState<EsriModules | null>(null)
@@ -129,99 +128,12 @@ export const useAbortControllerPool = () => {
   return { getController, releaseController, abortAll }
 }
 
-interface PropertySelectionParams {
-  abortAll: () => void
-  clearGraphics: () => void
-  clearQueryCache: () => void
-  trackEvent: (event: TelemetryEvent) => void
-}
-
-interface PropertySelectionApi {
-  state: PropertyWidgetState
-  updateState: (
-    updater: (prev: PropertyWidgetState) => PropertyWidgetState
-  ) => void
-  setError: (type: ErrorType, message: string, details?: string) => void
-  handleClearAll: () => void
-  handleWidgetReset: () => void
-}
-
-const createInitialSelectionState = (): PropertyWidgetState => ({
-  error: null,
-  selectedProperties: [],
-  isQueryInFlight: false,
-  rawPropertyResults: null,
-})
-
-export const usePropertySelectionState = (
-  params: PropertySelectionParams
-): PropertySelectionApi => {
-  const { abortAll, clearGraphics, clearQueryCache, trackEvent } = params
-
-  const [state, internalSetState] = React.useState<PropertyWidgetState>(
-    createInitialSelectionState()
-  )
-
-  const updateState = hooks.useEventCallback(
-    (updater: (prev: PropertyWidgetState) => PropertyWidgetState) => {
-      internalSetState((prev) => updater(prev))
-    }
-  )
-
-  const setError = hooks.useEventCallback(
-    (type: ErrorType, message: string, details?: string) => {
-      internalSetState((prev) => ({
-        ...prev,
-        error: { type, message, details },
-        isQueryInFlight: false,
-      }))
-    }
-  )
-
-  const resetState = hooks.useEventCallback((shouldTrackClear: boolean) => {
-    abortAll()
-    clearQueryCache()
-    clearGraphics()
-
-    updateState((prev) => {
-      if (shouldTrackClear) {
-        trackEvent({
-          category: "Property",
-          action: "clear_all",
-          value: prev.selectedProperties.length,
-        })
-      }
-
-      return createInitialSelectionState()
-    })
-  })
-
-  const handleClearAll = hooks.useEventCallback(() => {
-    resetState(true)
-  })
-
-  const handleWidgetReset = hooks.useEventCallback(() => {
-    resetState(false)
-  })
-
-  hooks.useUnmount(() => {
-    // State cleanup handled by abortAll in widget
-  })
-
-  return {
-    state,
-    updateState,
-    setError,
-    handleClearAll,
-    handleWidgetReset,
-  }
-}
-
 export const useGraphicsLayer = (
   modules: EsriModules | null,
   widgetId: string
 ) => {
   const modulesRef = hooks.useLatest(modules)
+  const widgetIdRef = hooks.useLatest(widgetId)
   const graphicsLayerRef = React.useRef<__esri.GraphicsLayer | null>(null)
   const graphicsMapRef = React.useRef<Map<string | number, __esri.Graphic[]>>(
     new Map()
@@ -230,18 +142,38 @@ export const useGraphicsLayer = (
   const ensureGraphicsLayer = hooks.useEventCallback(
     (view: __esri.MapView | null | undefined): boolean => {
       const currentModules = modulesRef.current
-      if (!currentModules || !view) return false
+      const currentWidgetId = widgetIdRef.current
+      if (!currentModules || !view || !currentWidgetId) return false
+
+      const desiredLayerId = `property-${currentWidgetId}-highlight-layer`
+      const existingLayer = graphicsLayerRef.current
+
+      if (existingLayer && existingLayer.id !== desiredLayerId) {
+        view.map?.remove(existingLayer)
+        existingLayer.destroy()
+        graphicsLayerRef.current = null
+      }
+
       if (!graphicsLayerRef.current) {
-        graphicsLayerRef.current = new currentModules.GraphicsLayer({
-          id: `${widgetId}-property-highlight-layer`,
+        const shortId =
+          currentWidgetId.length > 16
+            ? `${currentWidgetId.substring(0, 16)}...`
+            : currentWidgetId
+        const layer = new currentModules.GraphicsLayer({
+          id: desiredLayerId,
           listMode: "hide",
+          title: `Property Highlights (${shortId})`,
         })
-        view.map.add(graphicsLayerRef.current)
+        view.map.add(layer)
+        graphicsLayerRef.current = layer
         return true
-      } else if (!view.map.findLayerById(graphicsLayerRef.current.id)) {
+      }
+
+      if (!view.map.findLayerById(graphicsLayerRef.current.id)) {
         view.map.add(graphicsLayerRef.current)
         return true
       }
+
       return false
     }
   )
@@ -370,13 +302,14 @@ export const useGraphicsLayer = (
 
   const destroyGraphicsLayer = hooks.useEventCallback(
     (view: __esri.MapView | null | undefined) => {
-      if (view && graphicsLayerRef.current) {
-        const layer = graphicsLayerRef.current
-        graphicsLayerRef.current = null
-        graphicsMapRef.current.clear()
+      if (!graphicsLayerRef.current) return
+      const layer = graphicsLayerRef.current
+      graphicsLayerRef.current = null
+      graphicsMapRef.current.clear()
+      if (view) {
         view.map?.remove(layer)
-        layer.destroy()
       }
+      layer.destroy()
     }
   )
 
@@ -399,25 +332,53 @@ export const useGraphicsLayer = (
   }
 }
 
-export const usePopupManager = () => {
-  const ownerIdRef = React.useRef(Symbol("property-widget-popup-owner"))
+export const usePopupManager = (widgetId: string) => {
+  const [initialOwner] = React.useState(() =>
+    Symbol(`property-popup-${widgetId}`)
+  )
+  const ownerIdRef = React.useRef(initialOwner)
+  const lastViewRef = React.useRef<__esri.MapView | undefined>(undefined)
+  const previousWidgetId = hooks.usePrevious(widgetId)
+
+  hooks.useUpdateEffect(() => {
+    if (previousWidgetId && previousWidgetId !== widgetId) {
+      const lastView = lastViewRef.current
+      if (lastView) {
+        popupSuppressionManager.release(ownerIdRef.current, lastView)
+      }
+      ownerIdRef.current = Symbol(`property-popup-${widgetId}`)
+    }
+  }, [widgetId, previousWidgetId])
 
   const restorePopup = hooks.useEventCallback(
     (view: __esri.MapView | undefined) => {
-      if (!view) return
-      popupSuppressionManager.release(ownerIdRef.current, view)
+      const targetView = view ?? lastViewRef.current
+      if (!targetView) return
+      popupSuppressionManager.release(ownerIdRef.current, targetView)
+      if (targetView === lastViewRef.current) {
+        lastViewRef.current = undefined
+      }
     }
   )
 
   const disablePopup = hooks.useEventCallback(
     (view: __esri.MapView | undefined) => {
       if (!view) return
+      lastViewRef.current = view
       popupSuppressionManager.acquire(ownerIdRef.current, view)
     }
   )
 
   const cleanup = hooks.useEventCallback((view: __esri.MapView | undefined) => {
     restorePopup(view)
+  })
+
+  hooks.useUnmount(() => {
+    const lastView = lastViewRef.current
+    if (lastView) {
+      popupSuppressionManager.release(ownerIdRef.current, lastView)
+      lastViewRef.current = undefined
+    }
   })
 
   return {
@@ -692,7 +653,9 @@ export const useThrottle = <T extends (...args: any[]) => void>(
     try {
       callbackRef.current(...args)
     } catch (error) {
-      console.error("Throttled function error:", error)
+      if (!isAbortError(error)) {
+        console.error("Throttled function error:", error)
+      }
     }
   })
 

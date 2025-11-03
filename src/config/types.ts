@@ -1,4 +1,4 @@
-import type { ImmutableObject, DataSourceManager } from "jimu-core"
+import type { ImmutableObject, DataSourceManager, IMState } from "jimu-core"
 import type { ColumnDef } from "@tanstack/react-table"
 import type { WidgetStyles } from "./style"
 
@@ -148,6 +148,16 @@ export interface PropertyWidgetState {
   rawPropertyResults: Map<string, any> | null
 }
 
+export interface IMPropertyGlobalState {
+  readonly byId: {
+    readonly [widgetId: string]: ImmutableObject<PropertyWidgetState>
+  }
+}
+
+export interface IMStateWithProperty extends IMState {
+  readonly "property-state"?: IMPropertyGlobalState
+}
+
 export interface QueryResult {
   features: __esri.Graphic[]
   propertyId: string | number
@@ -257,7 +267,7 @@ export type ValidationResult<T> = ValidationSuccess<T> | ValidationFailure
 export function isValidationSuccess<T>(
   result: ValidationResult<T>
 ): result is ValidationSuccess<T> {
-  return result.valid
+  return result.valid && "data" in result
 }
 
 /** Type guard for validation failure */

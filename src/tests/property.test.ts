@@ -19,6 +19,8 @@ import {
   buildTooltipSymbol,
   syncCursorGraphics,
   updateRawPropertyResults,
+  createPropertyDispatcher,
+  computeWidgetsToClose,
 } from "../shared/utils"
 import {
   isValidArcGISUrl,
@@ -30,6 +32,9 @@ import {
 import { convertToCSV, convertToGeoJSON, exportData } from "../shared/export"
 import { CURSOR_TOOLTIP_STYLE } from "../config/constants"
 import type { OwnerAttributes, GridRowData } from "../config/types"
+import { PropertyActionType } from "../extensions/store"
+import type { PropertyAction } from "../extensions/store"
+import { WidgetState } from "jimu-core"
 
 const mockFeatureLayerInstances: MockFeatureLayer[] = []
 let featureLayerCtorCount = 0
@@ -200,6 +205,90 @@ describe("Property Widget - SQL Injection Protection", () => {
   it("should handle Unicode injection attempts", () => {
     const clause = buildFnrWhereClause("1234\u0000; DROP TABLE")
     expect(clause).toContain("FNR = ")
+  })
+})
+
+describe("createPropertyDispatcher", () => {
+  it("scopes actions per widget and clones row arrays", () => {
+    const dispatch = jest.fn()
+    const widgetId = "widget_property_test"
+    const dispatcher = createPropertyDispatcher(dispatch, widgetId)
+
+    const sampleRows: GridRowData[] = [
+      {
+        id: "row-1",
+        FNR: "111",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Test 1:1",
+        BOSTADR: "maskAddress",
+      },
+    ]
+
+    dispatcher.setSelectedProperties(sampleRows)
+
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    const action = dispatch.mock.calls[0][0] as PropertyAction
+    expect(action.type).toBe(PropertyActionType.SET_SELECTED_PROPERTIES)
+    if (action.type !== PropertyActionType.SET_SELECTED_PROPERTIES) {
+      throw new Error("Unexpected action type")
+    }
+    expect(action.widgetId).toBe(widgetId)
+    expect(action.properties).toEqual(sampleRows)
+    expect(action.properties).not.toBe(sampleRows)
+  })
+
+  it("clones raw result maps before dispatch", () => {
+    const dispatch = jest.fn()
+    const widgetId = "widget_property_results"
+    const dispatcher = createPropertyDispatcher(dispatch, widgetId)
+
+    const rawResults = new Map<string, any>([
+      ["row-1", { value: 1 }],
+      ["row-2", { value: 2 }],
+    ])
+
+    dispatcher.setRawResults(rawResults)
+
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    const action = dispatch.mock.calls[0][0] as PropertyAction
+    expect(action.type).toBe(PropertyActionType.SET_RAW_RESULTS)
+    if (action.type !== PropertyActionType.SET_RAW_RESULTS) {
+      throw new Error("Unexpected action type")
+    }
+    expect(action.widgetId).toBe(widgetId)
+    expect(action.results).toEqual(rawResults)
+    expect(action.results).not.toBe(rawResults)
+  })
+})
+
+describe("computeWidgetsToClose", () => {
+  it("returns only property widgets that are active", () => {
+    const runtimeInfo = {
+      widget_property_a: { state: WidgetState.Opened, isClassLoaded: true },
+      widget_chart_a: { state: WidgetState.Opened, isClassLoaded: true },
+    }
+    const widgets = {
+      widget_property_a: { manifest: { name: "property" } },
+      widget_chart_a: { manifest: { name: "chart" } },
+    }
+
+    const targets = computeWidgetsToClose(
+      runtimeInfo,
+      "widget_property_b",
+      widgets
+    )
+
+    expect(targets).toEqual(["widget_property_a"])
+  })
+
+  it("ignores widgets without property metadata", () => {
+    const runtimeInfo = {
+      widget_other: { state: WidgetState.Active, isClassLoaded: true },
+    }
+
+    const targets = computeWidgetsToClose(runtimeInfo, "widget_property_b", {})
+
+    expect(targets).toEqual([])
   })
 })
 

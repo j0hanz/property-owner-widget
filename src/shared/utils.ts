@@ -5,6 +5,8 @@ import type {
   EsriModules,
   CursorTooltipStyle,
   IMConfig,
+  GridRowData,
+  ErrorState,
 } from "../config/types"
 import type { DataSourceManager } from "jimu-core"
 import { isValidationFailure as checkValidationFailure } from "../config/types"
@@ -22,6 +24,7 @@ import {
   OUTLINE_WIDTH,
   CURSOR_TOOLTIP_STYLE,
 } from "../config/constants"
+import { propertyActions } from "../extensions/store"
 
 // ============================================================================
 // HTML SANITIZATION & TEXT PROCESSING
@@ -935,20 +938,108 @@ export const updateRawPropertyResults = (
   return updated
 }
 
+export const createPropertyDispatcher = (
+  dispatch: ((action: unknown) => void) | undefined,
+  widgetId: string
+) => {
+  const safeDispatch = (action: unknown) => {
+    if (!widgetId || typeof dispatch !== "function") return
+    dispatch(action)
+  }
+
+  const cloneMap = (
+    results: Map<string, any> | ReadonlyMap<string, any> | null
+  ) => {
+    if (!results) return null
+    if (results instanceof Map) return new Map(results)
+    return new Map(results)
+  }
+
+  return {
+    setError: (error: ErrorState | null) => {
+      safeDispatch(propertyActions.setError(error, widgetId))
+    },
+    clearError: () => {
+      safeDispatch(propertyActions.clearError(widgetId))
+    },
+    setSelectedProperties: (properties: Iterable<GridRowData>) => {
+      safeDispatch(
+        propertyActions.setSelectedProperties(Array.from(properties), widgetId)
+      )
+    },
+    clearAll: () => {
+      safeDispatch(propertyActions.clearAll(widgetId))
+    },
+    setQueryInFlight: (inFlight: boolean) => {
+      safeDispatch(propertyActions.setQueryInFlight(inFlight, widgetId))
+    },
+    setRawResults: (
+      results: Map<string, any> | ReadonlyMap<string, any> | null
+    ) => {
+      safeDispatch(propertyActions.setRawResults(cloneMap(results), widgetId))
+    },
+    removeWidgetState: () => {
+      safeDispatch(propertyActions.removeWidgetState(widgetId))
+    },
+  }
+}
+
 /** Computes list of widget IDs that should be closed when this widget opens */
 export const computeWidgetsToClose = (
   runtimeInfo:
     | { [id: string]: { state?: any; isClassLoaded?: boolean } | undefined }
     | null
     | undefined,
-  widgetId: string
+  currentWidgetId: string,
+  widgets?: unknown
 ): string[] => {
   if (!runtimeInfo) return []
 
   const ids: string[] = []
 
+  const resolveEntry = (collection: unknown, key: string): any => {
+    if (!collection) return null
+    if (typeof (collection as any)?.get === "function") {
+      return (collection as any).get(key)
+    }
+    return (collection as any)?.[key] ?? null
+  }
+
+  const readString = (source: any, key: string): string => {
+    if (!source) return ""
+    if (typeof source.get === "function") {
+      const value = source.get(key)
+      return typeof value === "string" ? value : ""
+    }
+    const value = source?.[key]
+    return typeof value === "string" ? value : ""
+  }
+
+  const isPropertyWidget = (targetId: string): boolean => {
+    const entry = resolveEntry(widgets, targetId)
+    if (!entry) return false
+
+    const manifest = resolveEntry(entry, "manifest")
+    const values: string[] = [
+      readString(entry, "name"),
+      readString(entry, "label"),
+      readString(entry, "manifestLabel"),
+      readString(entry, "uri"),
+      readString(entry, "widgetName"),
+      readString(manifest, "name"),
+      readString(manifest, "label"),
+      readString(manifest, "uri"),
+    ]
+
+    return values.some((value) => {
+      if (!value) return false
+      const normalized = value.toLowerCase()
+      return normalized.includes("property") || normalized.includes("fastighet")
+    })
+  }
+
   for (const [id, info] of Object.entries(runtimeInfo)) {
-    if (id === widgetId || !info) continue
+    if (id === currentWidgetId || !info) continue
     const stateRaw = info.state
     if (!stateRaw) continue
     const normalized = String(stateRaw).toUpperCase()
@@ -958,7 +1049,9 @@ export const computeWidgetsToClose = (
       continue
     }
 
-    ids.push(id)
+    if (info.isClassLoaded && isPropertyWidget(id)) {
+      ids.push(id)
+    }
   }
 
   return ids

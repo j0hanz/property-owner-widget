@@ -47,7 +47,6 @@ import {
   useAbortControllerPool,
   useDebounce,
   useThrottle,
-  usePropertySelectionState,
 } from "../shared/hooks"
 import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api"
 import {
@@ -70,7 +69,9 @@ import {
   executeHoverQuery,
   shouldSkipHoverQuery,
   updateGraphicSymbol,
+  createPropertyDispatcher,
 } from "../shared/utils"
+import { createPropertySelectors } from "../extensions/store"
 import type { CursorGraphicsState } from "../shared/utils"
 import {
   EXPORT_FORMATS,
@@ -158,10 +159,54 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const styles = useWidgetStyles()
   const translate = hooks.useTranslation(jimuUIMessages, defaultMessages)
 
-  const runtimeState = ReactRedux.useSelector(
-    (state: IMState) => state.widgetsRuntimeInfo?.[id]?.state
-  )
+  const widgetIdProp = (props as unknown as { widgetId?: string }).widgetId
+  const widgetId =
+    (typeof widgetIdProp === "string" && widgetIdProp.length > 0
+      ? widgetIdProp
+      : (id as unknown as string)) ?? (id as unknown as string)
+
+  const selectorsRef = React.useRef(createPropertySelectors(widgetId))
+  const previousWidgetId = hooks.usePrevious(widgetId)
+  if (
+    !selectorsRef.current ||
+    (previousWidgetId && previousWidgetId !== widgetId)
+  ) {
+    selectorsRef.current = createPropertySelectors(widgetId)
+  }
+  const selectors = selectorsRef.current
+
+  const runtimeState = ReactRedux.useSelector((state: IMState) => {
+    const widgetInfo = state.widgetsRuntimeInfo?.[widgetId]
+    if (widgetInfo?.state !== undefined) {
+      return widgetInfo.state
+    }
+    return state.widgetsRuntimeInfo?.[id]?.state
+  })
   const prevRuntimeState = hooks.usePrevious(runtimeState)
+
+  const error = ReactRedux.useSelector(selectors.selectError)
+  const selectedProperties = ReactRedux.useSelector(
+    selectors.selectSelectedProperties
+  )
+  const rawPropertyResults = ReactRedux.useSelector(selectors.selectRawResults)
+  const selectedCount =
+    typeof (selectedProperties as any)?.length === "number"
+      ? (selectedProperties as any).length
+      : 0
+  const hasSelectedProperties = selectedCount > 0
+
+  const propertyDispatchRef = React.useRef(
+    createPropertyDispatcher(props.dispatch, widgetId)
+  )
+  hooks.useUpdateEffect(() => {
+    propertyDispatchRef.current = createPropertyDispatcher(
+      props.dispatch,
+      widgetId
+    )
+  }, [props.dispatch, widgetId])
+
+  const selectedPropertiesRef = hooks.useLatest(selectedProperties)
+  const rawPropertyResultsRef = hooks.useLatest(rawPropertyResults)
 
   hooks.useEffectOnce(() => {
     // Widget mounted
@@ -191,8 +236,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     removeGraphicsForFnr,
     addGraphicsToMap,
     destroyGraphicsLayer,
-  } = useGraphicsLayer(modules, id)
-  const { disablePopup, restorePopup } = usePopupManager()
+  } = useGraphicsLayer(modules, widgetId)
+  const { disablePopup, restorePopup } = usePopupManager(widgetId)
   const { getController, releaseController, abortAll } =
     useAbortControllerPool()
 
@@ -202,13 +247,40 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   }
   const requestIdRef = React.useRef(0)
 
-  const { state, updateState, setError, handleClearAll, handleWidgetReset } =
-    usePropertySelectionState({
-      abortAll,
-      clearGraphics,
-      clearQueryCache,
-      trackEvent,
-    })
+  const resetSelectionState = hooks.useEventCallback(
+    (shouldTrackClear: boolean) => {
+      abortAll()
+      clearQueryCache()
+      clearGraphics()
+
+      const previousSelection = selectedPropertiesRef.current ?? []
+      if (shouldTrackClear && previousSelection.length > 0) {
+        trackEvent({
+          category: "Property",
+          action: "clear_all",
+          value: previousSelection.length,
+        })
+      }
+
+      propertyDispatchRef.current.clearAll()
+      propertyDispatchRef.current.setRawResults(null)
+      propertyDispatchRef.current.setQueryInFlight(false)
+    }
+  )
+
+  const handleClearAll = hooks.useEventCallback(() => {
+    resetSelectionState(true)
+  })
+
+  const handleWidgetReset = hooks.useEventCallback(() => {
+    resetSelectionState(false)
+  })
+
+  const setError = hooks.useEventCallback(
+    (type: ErrorType, message: string, details?: string) => {
+      propertyDispatchRef.current.setError({ type, message, details })
+    }
+  )
 
   // Hover tooltip state
   const [hoverTooltipData, setHoverTooltipData] = React.useState<{
@@ -222,22 +294,23 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   )
   const HOVER_QUERY_TOLERANCE_PX_VALUE = HOVER_QUERY_TOLERANCE_PX
 
-  const hasSelectedProperties = state.selectedProperties.length > 0
-
   const renderConfiguredContent = () => {
-    if (state.error) {
+    if (error) {
       return (
         <div css={styles.emptyState} role="alert" aria-live="assertive">
-          <Alert type="error" withIcon text={state.error.message} />
-          {state.error.details && <div>{state.error.details}</div>}
+          <Alert type="error" withIcon text={error.message} />
+          {error.details && <div>{error.details}</div>}
         </div>
       )
     }
 
     if (hasSelectedProperties) {
+      const tableData = Array.isArray(selectedProperties)
+        ? selectedProperties
+        : Array.from(selectedProperties as Iterable<GridRowData>)
       return (
         <PropertyTable
-          data={state.selectedProperties}
+          data={tableData}
           columns={tableColumns}
           translate={translate}
           styles={styles}
@@ -270,55 +343,59 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const outlineWidthConfig = config.outlineWidth
 
   hooks.useUpdateEffect(() => {
-    updateState((prev) => {
-      if (prev.selectedProperties.length === 0) return prev
+    const currentSelection = selectedPropertiesRef.current ?? []
+    if (currentSelection.length === 0) return
 
-      trackFeatureUsage("pii_masking_toggled", piiMaskingEnabled)
+    trackFeatureUsage("pii_masking_toggled", piiMaskingEnabled)
 
-      const reformattedProperties = prev.selectedProperties.map((row) => {
-        if (!row.rawOwner || typeof row.rawOwner !== "object") {
-          return row
-        }
-        return {
-          ...row,
-          BOSTADR: formatOwnerInfo(
-            row.rawOwner,
-            piiMaskingEnabled,
-            translate("unknownOwner")
-          ),
-        }
-      })
-
-      return { ...prev, selectedProperties: reformattedProperties }
+    const reformattedProperties = currentSelection.map((row) => {
+      if (!row.rawOwner || typeof row.rawOwner !== "object") {
+        return row
+      }
+      return {
+        ...row,
+        BOSTADR: formatOwnerInfo(
+          row.rawOwner,
+          piiMaskingEnabled,
+          translate("unknownOwner")
+        ),
+      }
     })
+
+    propertyDispatchRef.current.setSelectedProperties(reformattedProperties)
   }, [piiMaskingEnabled, translate])
 
   hooks.useUpdateEffect(() => {
-    updateState((prev) => {
-      if (prev.selectedProperties.length <= maxResults) return prev
+    const currentSelection = selectedPropertiesRef.current ?? []
+    if (currentSelection.length <= maxResults) return
 
-      trackEvent({
-        category: "Property",
-        action: "max_results_trim",
-        value: prev.selectedProperties.length - maxResults,
-      })
+    trackEvent({
+      category: "Property",
+      action: "max_results_trim",
+      value: currentSelection.length - maxResults,
+    })
 
-      const trimmedProperties = prev.selectedProperties.slice(0, maxResults)
-      const removedProperties = prev.selectedProperties.slice(maxResults)
+    const trimmedProperties = currentSelection.slice(0, maxResults)
+    const removedProperties = currentSelection.slice(maxResults)
 
-      removedProperties.forEach((prop) => {
-        const fnr = prop.FNR
-        if (fnr != null) {
-          removeGraphicsForFnr(fnr, normalizeFnrKey)
-        }
-      })
-
-      return {
-        ...prev,
-        selectedProperties: trimmedProperties,
+    removedProperties.forEach((prop) => {
+      const fnr = prop.FNR
+      if (fnr != null) {
+        removeGraphicsForFnr(fnr, normalizeFnrKey)
       }
     })
-  }, [maxResults])
+
+    propertyDispatchRef.current.setSelectedProperties(trimmedProperties)
+
+    const existingRaw = rawPropertyResultsRef.current
+    if (existingRaw && existingRaw.size > 0) {
+      const nextRaw = new Map(existingRaw)
+      removedProperties.forEach((prop) => {
+        nextRaw.delete(prop.id)
+      })
+      propertyDispatchRef.current.setRawResults(nextRaw)
+    }
+  }, [maxResults, normalizeFnrKey, removeGraphicsForFnr, trackEvent])
 
   hooks.useUpdateEffect(() => {
     trackFeatureUsage("toggle_removal_changed", toggleEnabled)
@@ -338,6 +415,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   const closeOtherWidgets = hooks.useEventCallback(() => {
     if (!config?.autoCloseOtherWidgets) return
+    if (!widgetId) return
 
     const store = typeof getAppStore === "function" ? getAppStore() : null
     if (!store) return
@@ -353,7 +431,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         }
       | undefined
 
-    const targets = computeWidgetsToClose(runtimeInfo, id)
+    const appWidgets = (state as any)?.appConfig?.widgets
+    const targets = computeWidgetsToClose(runtimeInfo, widgetId, appWidgets)
     if (targets.length === 0) return
 
     const safeTargets = targets.filter((targetId) => {
@@ -372,21 +451,25 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   })
 
   const handleExport = hooks.useEventCallback((format: ExportFormat) => {
-    if (!hasSelectedProperties || !state.rawPropertyResults?.size) return
+    if (!hasSelectedProperties || !rawPropertyResults?.size) return
 
     const selectedRawData: any[] = []
-    state.selectedProperties.forEach((row) => {
-      const rawData = state.rawPropertyResults?.get(row.id)
+    selectedProperties.forEach((row) => {
+      const rawData = rawPropertyResults?.get(row.id)
       if (rawData) selectedRawData.push(rawData)
     })
 
     if (selectedRawData.length === 0) return
 
+    const selectedRows = Array.isArray(selectedProperties)
+      ? selectedProperties
+      : Array.from(selectedProperties as Iterable<GridRowData>)
+
     try {
-      exportData(selectedRawData, state.selectedProperties, {
+      exportData(selectedRawData, selectedRows, {
         format,
         filename: "property-export",
-        rowCount: state.selectedProperties.length,
+        rowCount: selectedRows.length,
         definition: EXPORT_FORMATS.find((item) => item.id === format),
       })
     } catch (error) {
@@ -410,8 +493,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const handleOwnerDataSourceFailed = hooks.useEventCallback(() => {
     setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
   })
-
-  const stateRef = hooks.useLatest(state)
 
   const handleMapClick = hooks.useEventCallback(
     async (event: __esri.ViewClickEvent) => {
@@ -440,11 +521,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       requestIdRef.current = requestId
       const isStaleRequest = () => requestId !== requestIdRef.current
 
-      updateState((prev) => ({
-        ...prev,
-        error: null,
-        isQueryInFlight: true,
-      }))
+      propertyDispatchRef.current.clearError()
+      propertyDispatchRef.current.setQueryInFlight(true)
+
+      const currentSelection = selectedPropertiesRef.current ?? []
+      const selectionForPipeline = Array.isArray(currentSelection)
+        ? currentSelection
+        : Array.from(currentSelection as Iterable<GridRowData>)
 
       const controller = getController()
 
@@ -460,7 +543,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           relationshipId: config.relationshipId,
           enablePIIMasking: piiMaskingEnabled,
           signal: controller.signal,
-          selectedProperties: stateRef.current.selectedProperties,
+          selectedProperties: selectionForPipeline,
           translate,
         })
 
@@ -477,16 +560,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         }
 
         if (pipelineResult.status === "empty") {
-          updateState((prev) => {
-            if (isStaleRequest()) return prev
-            return { ...prev, isQueryInFlight: false }
-          })
+          if (!isStaleRequest()) {
+            propertyDispatchRef.current.setQueryInFlight(false)
+          }
           tracker.success()
           return
         }
 
-        const previousSelection = stateRef.current.selectedProperties
-        const removedRows = previousSelection.filter((row) =>
+        const removedRows = selectionForPipeline.filter((row) =>
           pipelineResult.toRemove.has(normalizeFnrKey(row.FNR))
         )
 
@@ -498,27 +579,30 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           })
         }
 
-        updateState((prev) => {
-          if (isStaleRequest()) {
-            return prev
-          }
+        if (!isStaleRequest()) {
+          const prevRawResults = rawPropertyResultsRef.current
+          const baseRawResults =
+            prevRawResults instanceof Map
+              ? prevRawResults
+              : prevRawResults
+                ? new Map(prevRawResults as ReadonlyMap<string, any>)
+                : new Map<string, any>()
 
           const updatedRawResults = updateRawPropertyResults(
-            prev.rawPropertyResults || new Map(),
+            baseRawResults,
             pipelineResult.rowsToProcess,
             pipelineResult.propertyResults,
             pipelineResult.toRemove,
-            prev.selectedProperties,
+            selectionForPipeline,
             normalizeFnrKey
           )
 
-          return {
-            ...prev,
-            selectedProperties: pipelineResult.updatedRows,
-            isQueryInFlight: false,
-            rawPropertyResults: updatedRawResults,
-          }
-        })
+          propertyDispatchRef.current.setSelectedProperties(
+            pipelineResult.updatedRows
+          )
+          propertyDispatchRef.current.setRawResults(updatedRawResults)
+          propertyDispatchRef.current.setQueryInFlight(false)
+        }
 
         cleanupRemovedGraphics({
           toRemove: pipelineResult.toRemove,
@@ -561,6 +645,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         if (isAbortError(error)) {
           tracker.failure("aborted")
+          propertyDispatchRef.current.setQueryInFlight(false)
           return
         }
 
@@ -710,6 +795,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         return
       }
 
+      if (!modules?.Graphic || !modules?.TextSymbol) {
+        clearCursorGraphics()
+        return
+      }
+
       const currentHighlightColor = buildHighlightColor(
         highlightColorConfigRef.current,
         highlightOpacityConfigRef.current
@@ -770,7 +860,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       // Cache layer reference to avoid repeated DOM queries
       ensureGraphicsLayer(view)
       cachedLayerRef.current = view.map.findLayerById(
-        `${id}-property-highlight-layer`
+        `property-${widgetId}-highlight-layer`
       ) as __esri.GraphicsLayer | null
 
       pointerMoveHandleRef.current = view.on("pointer-move", (event) => {
@@ -850,7 +940,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       }
       clearCursorGraphics()
     }
-  }, [runtimeState, modules])
+  }, [runtimeState, modules, widgetId])
 
   // Cleanup cursor point on unmount
   hooks.useUnmount(() => {
@@ -884,13 +974,17 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   // Sync selection graphics when highlight config changes (incremental update)
   const debouncedSyncGraphics = useDebounce(() => {
-    if (state.selectedProperties.length === 0) return
+    const currentSelection = selectedPropertiesRef.current ?? []
+    const selectionArray = Array.isArray(currentSelection)
+      ? currentSelection
+      : Array.from(currentSelection as Iterable<GridRowData>)
+    if (selectionArray.length === 0) return
 
     const view = getCurrentView()
     if (!view || !modules) return
 
     const layer = view.map.findLayerById(
-      `${id}-property-highlight-layer`
+      `property-${widgetId}-highlight-layer`
     ) as __esri.GraphicsLayer | null
     if (!layer) return
 
@@ -901,7 +995,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     const currentOutlineWidth = getValidatedOutlineWidth(outlineWidthConfig)
 
     const selectedFnrKeys = new Set(
-      state.selectedProperties.map((row) => normalizeFnrKey(row.FNR))
+      selectionArray.map((row) => normalizeFnrKey(row.FNR))
     )
 
     layer.graphics.forEach((graphic: __esri.Graphic) => {
@@ -978,6 +1072,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   hooks.useUnmount(() => {
     abortAll()
     clearQueryCache()
+    clearGraphics()
+    propertyDispatchRef.current.removeWidgetState()
   })
 
   const isConfigured = config.propertyDataSourceId && config.ownerDataSourceId
@@ -1053,7 +1149,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             icon
             onClick={handleClearAll}
             title={translate("clearAll")}
-            disabled={state.selectedProperties.length === 0}
+            disabled={!hasSelectedProperties}
           >
             <SVG src={clearIcon} size={20} />
           </Button>
@@ -1107,7 +1203,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       <div css={styles.footer}>
         <div css={styles.col}>{translate("propertySelected")}</div>
-        <div css={styles.col}>{state.selectedProperties.length}</div>
+        <div css={styles.col}>{selectedCount}</div>
       </div>
 
       {mapWidgetId ? (

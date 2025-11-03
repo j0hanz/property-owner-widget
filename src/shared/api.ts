@@ -908,11 +908,13 @@ const processBatchOfProperties = async (params: {
       continue
     }
 
-    const {
-      validated: validatedFromValue,
-      ownerFeatures,
-      queryFailed,
-    } = result.value
+    const validatedFromValue = result.value.validated
+    const ownerFeatures = result.value.ownerFeatures
+    const queryFailed = result.value.queryFailed
+
+    if (!validatedFromValue) {
+      continue
+    }
     if (currentRowCount + rows.length >= maxResults) break
 
     const propertyRows = buildPropertyRows({
@@ -979,7 +981,7 @@ const processBatchQuery = async (
     if (helpers.isAbortError(error)) {
       throw error instanceof Error ? error : new Error(String(error))
     }
-    console.error("Batch owner query failed", error)
+    logger.error("Batch owner query failed", error)
     ownersByFnr = new Map()
     fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)))
   }
