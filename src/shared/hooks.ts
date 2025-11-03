@@ -13,6 +13,7 @@ import {
   popupSuppressionManager,
   buildHighlightSymbolJSON,
   isAbortError,
+  logger,
 } from "./utils"
 
 export const useEsriModules = () => {
@@ -825,7 +826,10 @@ export const useDebounce = <T extends (...args: any[]) => void>(
     if (typeof handler === "function") {
       try {
         handler(next)
-      } catch {}
+      } catch (error) {
+        // Silently ignore callback errors to prevent breaking debounce mechanism
+        logger.debug("onPendingChange callback failed", { error })
+      }
     }
   })
 
