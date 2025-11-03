@@ -119,41 +119,49 @@ const buildOwnerIdentityKey = (
   context: { fnr?: string | number; propertyId?: string },
   sequence?: number
 ): string => {
-  // Priority 1: Use AGARLISTA if available (unique identifier)
-  const agarLista = normalizeOwnerValue(owner.AGARLISTA)
-  if (agarLista) return `A:${agarLista.toLowerCase()}`
+  // Priority-ordered identity strategies
+  const strategies = [
+    // Priority 1: Use AGARLISTA if available (unique identifier)
+    () => {
+      const agarLista = normalizeOwnerValue(owner.AGARLISTA)
+      return agarLista ? `A:${agarLista.toLowerCase()}` : null
+    },
+    // Priority 2: Build identity from owner attributes
+    () => {
+      const parts = [
+        owner.NAMN && `N:${normalizeOwnerValue(owner.NAMN)}`,
+        owner.BOSTADR && `B:${normalizeOwnerValue(owner.BOSTADR)}`,
+        owner.POSTNR && `P:${normalizeOwnerValue(owner.POSTNR)}`,
+        owner.POSTADR && `C:${normalizeOwnerValue(owner.POSTADR)}`,
+        owner.ORGNR && `O:${normalizeOwnerValue(owner.ORGNR)}`,
+        owner.ANDEL && `S:${normalizeOwnerValue(owner.ANDEL)}`,
+      ].filter(Boolean)
+      return parts.length > 0 ? parts.join("|").toLowerCase() : null
+    },
+    // Priority 3: Fallback to context identifiers
+    () => {
+      const fallback = [
+        context.propertyId && `PR:${normalizeOwnerValue(context.propertyId)}`,
+        context.fnr !== undefined &&
+          context.fnr !== null &&
+          `FN:${String(context.fnr)}`,
+        owner.OBJECTID !== undefined &&
+          owner.OBJECTID !== null &&
+          `OB:${String(owner.OBJECTID)}`,
+        owner.UUID_FASTIGHET &&
+          `UU:${normalizeOwnerValue(owner.UUID_FASTIGHET)}`,
+      ].filter(Boolean)
+      return fallback.length > 0 ? fallback.join("|").toLowerCase() : null
+    },
+    // Priority 4: Use sequence as last resort
+    () => `IX:${sequence ?? 0}`,
+  ]
 
-  // Priority 2: Build identity from owner attributes
-  const parts = [
-    owner.NAMN && `N:${normalizeOwnerValue(owner.NAMN)}`,
-    owner.BOSTADR && `B:${normalizeOwnerValue(owner.BOSTADR)}`,
-    owner.POSTNR && `P:${normalizeOwnerValue(owner.POSTNR)}`,
-    owner.POSTADR && `C:${normalizeOwnerValue(owner.POSTADR)}`,
-    owner.ORGNR && `O:${normalizeOwnerValue(owner.ORGNR)}`,
-    owner.ANDEL && `S:${normalizeOwnerValue(owner.ANDEL)}`,
-  ].filter(Boolean)
-
-  if (parts.length > 0) {
-    return parts.join("|").toLowerCase()
+  for (const strategy of strategies) {
+    const key = strategy()
+    if (key) return key
   }
 
-  // Priority 3: Fallback to context identifiers
-  const fallback = [
-    context.propertyId && `PR:${normalizeOwnerValue(context.propertyId)}`,
-    context.fnr !== undefined &&
-      context.fnr !== null &&
-      `FN:${String(context.fnr)}`,
-    owner.OBJECTID !== undefined &&
-      owner.OBJECTID !== null &&
-      `OB:${String(owner.OBJECTID)}`,
-    owner.UUID_FASTIGHET && `UU:${normalizeOwnerValue(owner.UUID_FASTIGHET)}`,
-  ].filter(Boolean)
-
-  if (fallback.length > 0) {
-    return fallback.join("|").toLowerCase()
-  }
-
-  // Priority 4: Use sequence as last resort
   return `IX:${sequence ?? 0}`
 }
 
@@ -1015,6 +1023,12 @@ export const computeWidgetsToClose = (
     return typeof value === "string" ? value : ""
   }
 
+  const hasPropertyKeyword = (value: string): boolean => {
+    if (!value) return false
+    const normalized = value.toLowerCase()
+    return normalized.includes("property") || normalized.includes("fastighet")
+  }
+
   const isPropertyWidget = (targetId: string): boolean => {
     const entry = resolveEntry(widgets, targetId)
     if (!entry) return false
@@ -1031,11 +1045,7 @@ export const computeWidgetsToClose = (
       readString(manifest, "uri"),
     ]
 
-    return values.some((value) => {
-      if (!value) return false
-      const normalized = value.toLowerCase()
-      return normalized.includes("property") || normalized.includes("fastighet")
-    })
+    return values.some(hasPropertyKeyword)
   }
 
   for (const [id, info] of Object.entries(runtimeInfo)) {
@@ -1319,3 +1329,164 @@ class PopupSuppressionManager {
 }
 
 export const popupSuppressionManager = new PopupSuppressionManager()
+
+// ============================================================================
+// CURSOR LIFECYCLE MANAGEMENT
+// RAF-batched cursor tracking with proper cleanup ordering
+// ============================================================================
+
+export const cursorLifecycleHelpers = {
+  cleanupHandles: (refs: {
+    pointerMoveHandle: React.MutableRefObject<__esri.Handle | null>
+    pointerLeaveHandle: React.MutableRefObject<__esri.Handle | null>
+    rafId: React.MutableRefObject<number | null>
+    clearGraphics: () => void
+    cleanupQuery: () => void
+  }) => {
+    // Step 1: Remove pointer-move handle FIRST, clear graphics with it
+    if (refs.pointerMoveHandle.current) {
+      refs.pointerMoveHandle.current.remove()
+      refs.pointerMoveHandle.current = null
+      refs.clearGraphics()
+    }
+
+    // Step 2: Remove pointer-leave handle
+    if (refs.pointerLeaveHandle.current) {
+      refs.pointerLeaveHandle.current.remove()
+      refs.pointerLeaveHandle.current = null
+    }
+
+    // Step 3: Cancel RAF LAST (no pending RAF if handles removed)
+    if (refs.rafId.current !== null) {
+      cancelAnimationFrame(refs.rafId.current)
+      refs.rafId.current = null
+    }
+  },
+
+  setupCursorTracking: (params: {
+    view: __esri.MapView
+    widgetId: string
+    ensureGraphicsLayer: (view: __esri.MapView) => void
+    cachedLayerRef: React.MutableRefObject<__esri.GraphicsLayer | null>
+    pointerMoveHandleRef: React.MutableRefObject<__esri.Handle | null>
+    pointerLeaveHandleRef: React.MutableRefObject<__esri.Handle | null>
+    rafIdRef: React.MutableRefObject<number | null>
+    lastCursorPointRef: React.MutableRefObject<__esri.Point | null>
+    pendingMapPointRef: React.MutableRefObject<__esri.Point | null>
+    lastHoverQueryPointRef: React.MutableRefObject<{
+      x: number
+      y: number
+    } | null>
+    updateCursorPoint: (mapPoint: __esri.Point | null) => void
+    throttledHoverQuery: (
+      mapPoint: __esri.Point,
+      screenPoint: { x: number; y: number }
+    ) => void
+    cleanupHoverQuery: () => void
+  }) => {
+    const {
+      view,
+      widgetId,
+      ensureGraphicsLayer,
+      cachedLayerRef,
+      pointerMoveHandleRef,
+      pointerLeaveHandleRef,
+      rafIdRef,
+      lastCursorPointRef,
+      pendingMapPointRef,
+      lastHoverQueryPointRef,
+      updateCursorPoint,
+      throttledHoverQuery,
+      cleanupHoverQuery,
+    } = params
+
+    ensureGraphicsLayer(view)
+    cachedLayerRef.current = view.map.findLayerById(
+      `property-${widgetId}-highlight-layer`
+    ) as __esri.GraphicsLayer | null
+
+    pointerMoveHandleRef.current = view.on("pointer-move", (event) => {
+      const screenPoint = { x: event.x, y: event.y }
+      const mapPoint = view.toMap(screenPoint)
+
+      if (!mapPoint) {
+        lastCursorPointRef.current = null
+        pendingMapPointRef.current = null
+        updateCursorPoint(null)
+        cleanupHoverQuery()
+        return
+      }
+
+      lastCursorPointRef.current = mapPoint
+      pendingMapPointRef.current = mapPoint
+
+      if (rafIdRef.current === null) {
+        rafIdRef.current = requestAnimationFrame(() => {
+          rafIdRef.current = null
+          const point = pendingMapPointRef.current
+          if (point) updateCursorPoint(point)
+        })
+      }
+
+      throttledHoverQuery(mapPoint, screenPoint)
+    })
+
+    pointerLeaveHandleRef.current = view.on("pointer-leave", () => {
+      lastCursorPointRef.current = null
+      pendingMapPointRef.current = null
+      lastHoverQueryPointRef.current = null
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current)
+        rafIdRef.current = null
+      }
+      updateCursorPoint(null)
+      cleanupHoverQuery()
+    })
+  },
+
+  resetCursorState: (refs: {
+    lastCursorPointRef: React.MutableRefObject<__esri.Point | null>
+    pendingMapPointRef: React.MutableRefObject<__esri.Point | null>
+    cachedLayerRef: React.MutableRefObject<__esri.GraphicsLayer | null>
+    clearGraphics: () => void
+    cleanupQuery: () => void
+  }) => {
+    refs.lastCursorPointRef.current = null
+    refs.pendingMapPointRef.current = null
+    refs.cachedLayerRef.current = null
+    refs.clearGraphics()
+    refs.cleanupQuery()
+  },
+
+  teardownCursorTracking: (params: {
+    rafId: React.MutableRefObject<number | null>
+    pointerMoveHandle: React.MutableRefObject<__esri.Handle | null>
+    pointerLeaveHandle: React.MutableRefObject<__esri.Handle | null>
+    lastCursorPointRef: React.MutableRefObject<__esri.Point | null>
+    pendingMapPointRef: React.MutableRefObject<__esri.Point | null>
+    cachedLayerRef: React.MutableRefObject<__esri.GraphicsLayer | null>
+    canTrackCursor: boolean
+    clearGraphics: () => void
+    cleanupQuery: () => void
+  }) => {
+    if (params.rafId.current !== null) {
+      cancelAnimationFrame(params.rafId.current)
+      params.rafId.current = null
+    }
+    if (params.pointerMoveHandle.current) {
+      params.pointerMoveHandle.current.remove()
+      params.pointerMoveHandle.current = null
+    }
+    if (params.pointerLeaveHandle.current) {
+      params.pointerLeaveHandle.current.remove()
+      params.pointerLeaveHandle.current = null
+    }
+    params.cleanupQuery()
+    params.pendingMapPointRef.current = null
+    params.cachedLayerRef.current = null
+    if (!params.canTrackCursor) {
+      params.lastCursorPointRef.current = null
+    }
+    params.clearGraphics()
+  },
+}

@@ -47,6 +47,7 @@ import {
   useAbortControllerPool,
   useDebounce,
   useThrottle,
+  useHoverQuery,
 } from "../shared/hooks"
 import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api"
 import {
@@ -66,10 +67,10 @@ import {
   logger,
   syncCursorGraphics,
   abortHelpers,
-  executeHoverQuery,
   shouldSkipHoverQuery,
   updateGraphicSymbol,
   createPropertyDispatcher,
+  cursorLifecycleHelpers,
 } from "../shared/utils"
 import { createPropertySelectors } from "../extensions/store"
 import type { CursorGraphicsState } from "../shared/utils"
@@ -282,18 +283,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
   )
 
-  // Hover tooltip state
-  const [hoverTooltipData, setHoverTooltipData] = React.useState<{
-    fastighet: string
-    bostadr: string
-  } | null>(null)
-  const [isHoverQueryActive, setIsHoverQueryActive] = React.useState(false)
-  const hoverQueryAbortRef = React.useRef<AbortController | null>(null)
-  const lastHoverQueryPointRef = React.useRef<{ x: number; y: number } | null>(
-    null
-  )
-  const HOVER_QUERY_TOLERANCE_PX_VALUE = HOVER_QUERY_TOLERANCE_PX
-
   const renderConfiguredContent = () => {
     if (error) {
       return (
@@ -341,6 +330,42 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const highlightColorConfig = config.highlightColor
   const highlightOpacityConfig = config.highlightOpacity
   const outlineWidthConfig = config.outlineWidth
+
+  // Hover query hook
+  const {
+    hoverTooltipData,
+    isHoverQueryActive,
+    queryPropertyAtPoint,
+    lastHoverQueryPointRef,
+    cleanup: cleanupHoverQuery,
+  } = useHoverQuery({
+    config: {
+      propertyDataSourceId: config.propertyDataSourceId,
+      ownerDataSourceId: config.ownerDataSourceId,
+      allowedHosts: config.allowedHosts,
+    },
+    dsManager: dsManagerRef.current,
+    enablePIIMasking: piiMaskingEnabled,
+    translate,
+  })
+
+  // Throttled hover query with spatial tolerance
+  const throttledHoverQuery = useThrottle(
+    (mapPoint: __esri.Point, screenPoint: { x: number; y: number }) => {
+      if (
+        shouldSkipHoverQuery(
+          screenPoint,
+          lastHoverQueryPointRef.current,
+          HOVER_QUERY_TOLERANCE_PX
+        )
+      ) {
+        return
+      }
+      lastHoverQueryPointRef.current = screenPoint
+      queryPropertyAtPoint(mapPoint)
+    },
+    100
+  )
 
   hooks.useUpdateEffect(() => {
     const currentSelection = selectedPropertiesRef.current ?? []
@@ -597,11 +622,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             normalizeFnrKey
           )
 
-          propertyDispatchRef.current.setSelectedProperties(
-            pipelineResult.updatedRows
-          )
-          propertyDispatchRef.current.setRawResults(updatedRawResults)
-          propertyDispatchRef.current.setQueryInFlight(false)
+          // Batch Redux updates to reduce re-renders
+          const dispatch = propertyDispatchRef.current
+          dispatch.setSelectedProperties(pipelineResult.updatedRows)
+          dispatch.setRawResults(updatedRawResults)
+          dispatch.setQueryInFlight(false)
         }
 
         cleanupRemovedGraphics({
@@ -715,68 +740,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     cursorGraphicsStateRef.current = null
   })
 
-  // Hover query function - queries property at cursor position
-  const queryPropertyAtPoint = hooks.useEventCallback(
-    async (mapPoint: __esri.Point) => {
-      if (hoverQueryAbortRef.current) {
-        hoverQueryAbortRef.current.abort()
-        hoverQueryAbortRef.current = null
-      }
-
-      const controller = new AbortController()
-      hoverQueryAbortRef.current = controller
-
-      setIsHoverQueryActive(true)
-      try {
-        const result = await executeHoverQuery({
-          mapPoint,
-          config: {
-            propertyDataSourceId: config.propertyDataSourceId,
-            ownerDataSourceId: config.ownerDataSourceId,
-            allowedHosts: config.allowedHosts,
-          },
-          dsManager: dsManagerRef.current,
-          signal: controller.signal,
-          enablePIIMasking: piiMaskingEnabled,
-          translate,
-        })
-
-        if (controller.signal.aborted) return
-
-        setHoverTooltipData(result)
-        setIsHoverQueryActive(false)
-      } catch (error) {
-        if (isAbortError(error)) return
-
-        logger.debug("Hover query failed", { error })
-        setHoverTooltipData(null)
-        setIsHoverQueryActive(false)
-      } finally {
-        if (hoverQueryAbortRef.current === controller) {
-          hoverQueryAbortRef.current = null
-        }
-      }
-    }
-  )
-
-  // Throttled version of hover query with spatial tolerance
-  const throttledHoverQuery = useThrottle(
-    (mapPoint: __esri.Point, screenPoint: { x: number; y: number }) => {
-      if (
-        shouldSkipHoverQuery(
-          screenPoint,
-          lastHoverQueryPointRef.current,
-          HOVER_QUERY_TOLERANCE_PX_VALUE
-        )
-      ) {
-        return
-      }
-      lastHoverQueryPointRef.current = screenPoint
-      queryPropertyAtPoint(mapPoint)
-    },
-    100
-  )
-
   const updateCursorPoint = hooks.useEventCallback(
     (mapPoint: __esri.Point | null) => {
       if (!mapPoint) {
@@ -840,105 +803,55 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     const isActive =
       runtimeState === WidgetState.Opened || runtimeState === WidgetState.Active
 
-    // Clean up existing handler
-    if (pointerMoveHandleRef.current) {
-      pointerMoveHandleRef.current.remove()
-      pointerMoveHandleRef.current = null
-      clearCursorGraphics()
-    }
-
-    if (pointerLeaveHandleRef.current) {
-      pointerLeaveHandleRef.current.remove()
-      pointerLeaveHandleRef.current = null
-    }
+    cursorLifecycleHelpers.cleanupHandles({
+      pointerMoveHandle: pointerMoveHandleRef,
+      pointerLeaveHandle: pointerLeaveHandleRef,
+      rafId: rafIdRef,
+      clearGraphics: clearCursorGraphics,
+      cleanupQuery: cleanupHoverQuery,
+    })
 
     const canTrackCursor =
       isActive && !!modules?.TextSymbol && !!modules?.Graphic
 
-    // Setup new handler if widget is active
     if (canTrackCursor) {
-      // Cache layer reference to avoid repeated DOM queries
-      ensureGraphicsLayer(view)
-      cachedLayerRef.current = view.map.findLayerById(
-        `property-${widgetId}-highlight-layer`
-      ) as __esri.GraphicsLayer | null
-
-      pointerMoveHandleRef.current = view.on("pointer-move", (event) => {
-        const screenPoint = { x: event.x, y: event.y }
-        const mapPoint = view.toMap(screenPoint)
-
-        if (mapPoint) {
-          lastCursorPointRef.current = mapPoint
-          pendingMapPointRef.current = mapPoint
-
-          // Use RAF to batch graphic updates at 60fps
-          if (rafIdRef.current === null) {
-            rafIdRef.current = requestAnimationFrame(() => {
-              rafIdRef.current = null
-              const point = pendingMapPointRef.current
-              if (point) {
-                updateCursorPoint(point)
-              }
-            })
-          }
-
-          // Trigger throttled hover query with spatial tolerance
-          throttledHoverQuery(mapPoint, screenPoint)
-        } else {
-          lastCursorPointRef.current = null
-          pendingMapPointRef.current = null
-          updateCursorPoint(null)
-          setHoverTooltipData(null)
-          setIsHoverQueryActive(false)
-        }
-      })
-
-      pointerLeaveHandleRef.current = view.on("pointer-leave", () => {
-        lastCursorPointRef.current = null
-        pendingMapPointRef.current = null
-        lastHoverQueryPointRef.current = null
-        if (rafIdRef.current !== null) {
-          cancelAnimationFrame(rafIdRef.current)
-          rafIdRef.current = null
-        }
-        updateCursorPoint(null)
-        setHoverTooltipData(null)
-        setIsHoverQueryActive(false)
+      cursorLifecycleHelpers.setupCursorTracking({
+        view,
+        widgetId,
+        ensureGraphicsLayer,
+        cachedLayerRef,
+        pointerMoveHandleRef,
+        pointerLeaveHandleRef,
+        rafIdRef,
+        lastCursorPointRef,
+        pendingMapPointRef,
+        lastHoverQueryPointRef,
+        updateCursorPoint,
+        throttledHoverQuery,
+        cleanupHoverQuery,
       })
     } else {
-      lastCursorPointRef.current = null
-      pendingMapPointRef.current = null
-      cachedLayerRef.current = null
-      clearCursorGraphics()
-      setHoverTooltipData(null)
-      setIsHoverQueryActive(false)
+      cursorLifecycleHelpers.resetCursorState({
+        lastCursorPointRef,
+        pendingMapPointRef,
+        cachedLayerRef,
+        clearGraphics: clearCursorGraphics,
+        cleanupQuery: cleanupHoverQuery,
+      })
     }
 
     return () => {
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current)
-        rafIdRef.current = null
-      }
-      if (pointerMoveHandleRef.current) {
-        pointerMoveHandleRef.current.remove()
-        pointerMoveHandleRef.current = null
-      }
-      if (pointerLeaveHandleRef.current) {
-        pointerLeaveHandleRef.current.remove()
-        pointerLeaveHandleRef.current = null
-      }
-      if (hoverQueryAbortRef.current) {
-        hoverQueryAbortRef.current.abort()
-        hoverQueryAbortRef.current = null
-      }
-      setHoverTooltipData(null)
-      setIsHoverQueryActive(false)
-      pendingMapPointRef.current = null
-      cachedLayerRef.current = null
-      if (!canTrackCursor) {
-        lastCursorPointRef.current = null
-      }
-      clearCursorGraphics()
+      cursorLifecycleHelpers.teardownCursorTracking({
+        rafId: rafIdRef,
+        pointerMoveHandle: pointerMoveHandleRef,
+        pointerLeaveHandle: pointerLeaveHandleRef,
+        lastCursorPointRef,
+        pendingMapPointRef,
+        cachedLayerRef,
+        canTrackCursor,
+        clearGraphics: clearCursorGraphics,
+        cleanupQuery: cleanupHoverQuery,
+      })
     }
   }, [runtimeState, modules, widgetId])
 
@@ -956,10 +869,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       pointerLeaveHandleRef.current.remove()
       pointerLeaveHandleRef.current = null
     }
-    if (hoverQueryAbortRef.current) {
-      hoverQueryAbortRef.current.abort()
-      hoverQueryAbortRef.current = null
-    }
+    cleanupHoverQuery()
     pendingMapPointRef.current = null
     cachedLayerRef.current = null
     lastCursorPointRef.current = null

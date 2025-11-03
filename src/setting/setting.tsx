@@ -35,10 +35,10 @@ import { useSettingStyles } from "../config/style"
 import {
   useBooleanConfigValue,
   useUpdateConfig,
-  useDebounce,
   useSwitchConfigHandler,
   useSliderConfigHandler,
   useNumericValidator,
+  useValidatedNumericHandler,
 } from "../shared/hooks"
 import {
   opacityHelpers,
@@ -184,20 +184,28 @@ const Setting = (
     setFieldErrors
   )
 
-  const debouncedMaxResultsValidation = useDebounce(validateMaxResults, 500)
-
-  const handleMaxResultsChange = hooks.useEventCallback((value: number) => {
-    setLocalMaxResults(String(value))
-    debouncedMaxResultsValidation(String(value))
+  const {
+    handleChange: handleMaxResultsChange,
+    handleBlur: handleMaxResultsBlur,
+  } = useValidatedNumericHandler({
+    localValue: localMaxResults,
+    setLocalValue: setLocalMaxResults,
+    validate: validateMaxResults,
+    updateConfig,
+    configField: "maxResults",
+    debounce: 500,
   })
 
-  const handleMaxResultsBlur = hooks.useEventCallback(() => {
-    debouncedMaxResultsValidation.cancel()
-    const isValid = validateMaxResults(localMaxResults)
-    if (isValid) {
-      const num = parseInt(localMaxResults, 10)
-      updateConfig("maxResults", num)
-    }
+  const {
+    handleChange: handleRelationshipIdChange,
+    handleBlur: handleRelationshipIdBlur,
+  } = useValidatedNumericHandler({
+    localValue: localRelationshipId,
+    setLocalValue: setLocalRelationshipId,
+    validate: validateRelationshipId,
+    updateConfig,
+    configField: "relationshipId",
+    clamp: { min: 0, max: 99 },
   })
 
   const handleToggleRemovalChange = useSwitchConfigHandler(
@@ -220,19 +228,6 @@ const Setting = (
     updateConfig,
     "enableBatchOwnerQuery"
   )
-
-  const handleRelationshipIdChange = hooks.useEventCallback((value: number) => {
-    const clamped = Math.max(0, Math.min(99, Math.round(value)))
-    setLocalRelationshipId(String(clamped))
-  })
-
-  const handleRelationshipIdBlur = hooks.useEventCallback(() => {
-    const isValid = validateRelationshipId(localRelationshipId)
-    if (isValid) {
-      const num = parseInt(localRelationshipId, 10)
-      updateConfig("relationshipId", num)
-    }
-  })
 
   const handleAllowedHostInputChange = hooks.useEventCallback(
     (evt: React.ChangeEvent<HTMLInputElement>) => {
@@ -347,12 +342,14 @@ const Setting = (
       const selectedOwner = useDataSources?.[0] ?? null
       const ownerId = selectedOwner?.dataSourceId ?? ""
 
+      // Find existing property data source
       const propertySource =
         ((props.useDataSources as any)?.find?.(
           (ds: UseDataSource) =>
             ds?.dataSourceId === config.propertyDataSourceId
         ) as ImmutableObject<UseDataSource> | UseDataSource | undefined) ?? null
 
+      // Ensure property source is mutable
       let propertyMutable = toMutableUseDataSource(propertySource)
       if (!propertyMutable && config.propertyDataSourceId) {
         propertyMutable = {
@@ -362,15 +359,17 @@ const Setting = (
         } as UseDataSource
       }
 
+      // Build updated data sources list
       const updatedUseDataSources: UseDataSource[] = []
       if (propertyMutable) {
         updatedUseDataSources.push(propertyMutable)
       }
-      if (
-        selectedOwner &&
-        (!propertyMutable ||
-          propertyMutable.dataSourceId !== selectedOwner.dataSourceId)
-      ) {
+
+      // Add owner source if different from property
+      const ownerIsDifferent =
+        !propertyMutable ||
+        propertyMutable.dataSourceId !== selectedOwner?.dataSourceId
+      if (selectedOwner && ownerIsDifferent) {
         updatedUseDataSources.push(selectedOwner)
       }
 

@@ -607,6 +607,52 @@ export const useSliderConfigHandler = <T extends number>(
   })
 }
 
+export const useValidatedNumericHandler = (params: {
+  localValue: string
+  setLocalValue: (value: string) => void
+  validate: (value: string) => boolean
+  updateConfig: (field: string, value: number) => void
+  configField: string
+  clamp?: { min: number; max: number }
+  debounce?: number
+}) => {
+  const {
+    localValue,
+    setLocalValue,
+    validate,
+    updateConfig,
+    configField,
+    clamp,
+    debounce: debounceMs,
+  } = params
+
+  const debouncedValidation = useDebounce(validate, debounceMs ?? 0)
+  const updateConfigLatest = hooks.useLatest(updateConfig)
+
+  const handleChange = hooks.useEventCallback((value: number) => {
+    const normalized = clamp
+      ? Math.max(clamp.min, Math.min(clamp.max, Math.round(value)))
+      : Math.round(value)
+    setLocalValue(String(normalized))
+    if (debounceMs) {
+      debouncedValidation(String(normalized))
+    }
+  })
+
+  const handleBlur = hooks.useEventCallback(() => {
+    if (debounceMs) {
+      debouncedValidation.cancel()
+    }
+    const isValid = validate(localValue)
+    if (isValid) {
+      const num = parseInt(localValue, 10)
+      updateConfigLatest.current(configField, num)
+    }
+  })
+
+  return { handleChange, handleBlur }
+}
+
 type DebouncedFn<T extends (...args: any[]) => void> = ((
   ...args: Parameters<T>
 ) => void) & {
@@ -763,4 +809,92 @@ export const useDebounce = <T extends (...args: any[]) => void>(
   })
 
   return debouncedRef.current
+}
+
+export interface HoverQueryParams {
+  config: {
+    propertyDataSourceId: string
+    ownerDataSourceId: string
+    allowedHosts?: readonly string[]
+  }
+  dsManager: any
+  enablePIIMasking: boolean
+  translate: (key: string) => string
+}
+
+export const useHoverQuery = (params: HoverQueryParams) => {
+  const { config, dsManager, enablePIIMasking, translate } = params
+  const [hoverTooltipData, setHoverTooltipData] = React.useState<{
+    fastighet: string
+    bostadr: string
+  } | null>(null)
+  const [isHoverQueryActive, setIsHoverQueryActive] = React.useState(false)
+  const hoverQueryAbortRef = React.useRef<AbortController | null>(null)
+  const lastHoverQueryPointRef = React.useRef<{ x: number; y: number } | null>(
+    null
+  )
+
+  const queryPropertyAtPoint = hooks.useEventCallback(
+    async (mapPoint: __esri.Point) => {
+      if (hoverQueryAbortRef.current) {
+        hoverQueryAbortRef.current.abort()
+        hoverQueryAbortRef.current = null
+      }
+
+      const controller = new AbortController()
+      hoverQueryAbortRef.current = controller
+
+      setIsHoverQueryActive(true)
+      try {
+        const { executeHoverQuery } = require("./utils")
+        const result = await executeHoverQuery({
+          mapPoint,
+          config: {
+            propertyDataSourceId: config.propertyDataSourceId,
+            ownerDataSourceId: config.ownerDataSourceId,
+            allowedHosts: config.allowedHosts,
+          },
+          dsManager,
+          signal: controller.signal,
+          enablePIIMasking,
+          translate,
+        })
+
+        if (controller.signal.aborted) return
+
+        setHoverTooltipData(result)
+        setIsHoverQueryActive(false)
+      } catch (error) {
+        if (isAbortError(error)) return
+        setHoverTooltipData(null)
+        setIsHoverQueryActive(false)
+      } finally {
+        if (hoverQueryAbortRef.current === controller) {
+          hoverQueryAbortRef.current = null
+        }
+      }
+    }
+  )
+
+  const cleanup = hooks.useEventCallback(() => {
+    if (hoverQueryAbortRef.current) {
+      hoverQueryAbortRef.current.abort()
+      hoverQueryAbortRef.current = null
+    }
+    setHoverTooltipData(null)
+    setIsHoverQueryActive(false)
+    lastHoverQueryPointRef.current = null
+  })
+
+  hooks.useUnmount(() => {
+    cleanup()
+  })
+
+  return {
+    hoverTooltipData,
+    isHoverQueryActive,
+    queryPropertyAtPoint,
+    lastHoverQueryPointRef,
+    cleanup,
+  }
 }
