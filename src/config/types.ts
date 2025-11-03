@@ -1,4 +1,4 @@
-import type { ImmutableObject, DataSourceManager } from "jimu-core"
+import type { ImmutableObject, DataSourceManager, IMState } from "jimu-core"
 import type { ColumnDef } from "@tanstack/react-table"
 import type { WidgetStyles } from "./style"
 
@@ -68,7 +68,7 @@ export interface GridRowData {
   UUID_FASTIGHET: string
   FASTIGHET: string
   BOSTADR: string
-  graphic?: __esri.Graphic
+  geometryType?: string | null
   rawOwner?: OwnerAttributes
 }
 
@@ -145,13 +145,35 @@ export interface PropertyWidgetState {
   error: ErrorState | null
   selectedProperties: GridRowData[]
   isQueryInFlight: boolean
-  rawPropertyResults: Map<string, any> | null
-  rowSelectionIds: Set<string>
+  rawPropertyResults: { [key: string]: SerializedQueryResult } | null
+}
+
+export interface IMPropertyGlobalState {
+  readonly byId: {
+    readonly [widgetId: string]: ImmutableObject<PropertyWidgetState>
+  }
+}
+
+export interface IMStateWithProperty extends IMState {
+  readonly "property-state"?: IMPropertyGlobalState
 }
 
 export interface QueryResult {
   features: __esri.Graphic[]
   propertyId: string | number
+}
+
+export interface SerializedQueryFeature {
+  attributes: { [key: string]: any } | null
+  geometry: { [key: string]: any } | null
+  aggregateGeometries?: { [key: string]: any } | null
+  symbol?: { [key: string]: any } | null
+  popupTemplate?: { [key: string]: any } | null
+}
+
+export interface SerializedQueryResult {
+  propertyId: string | number
+  features: SerializedQueryFeature[]
 }
 
 // =============================================================================
@@ -258,7 +280,7 @@ export type ValidationResult<T> = ValidationSuccess<T> | ValidationFailure
 export function isValidationSuccess<T>(
   result: ValidationResult<T>
 ): result is ValidationSuccess<T> {
-  return result.valid
+  return result.valid && "data" in result
 }
 
 /** Type guard for validation failure */
@@ -347,11 +369,83 @@ export interface PropertyTableProps {
   columns: Array<ColumnDef<GridRowData, any>>
   translate: (key: string) => string
   styles: WidgetStyles
-  onSelectionChange?: (selectedIds: Set<string>) => void
 }
 
 export interface LoadingBlockProps {
   styles: WidgetStyles
   translate: (key: string) => string
   size?: number
+}
+
+// =============================================================================
+// UTILITY INTERFACES FROM SHARED MODULES
+// Interfaces extracted from utils.ts, api.ts, hooks.ts, and export.ts
+// =============================================================================
+
+export interface CursorGraphicsState {
+  pointGraphic: __esri.Graphic | null
+  tooltipGraphic: __esri.Graphic | null
+  lastTooltipText: string | null
+}
+
+export interface ProcessPropertyQueryParams {
+  propertyResults: any[]
+  config: {
+    propertyDataSourceId: string
+    ownerDataSourceId: string
+    enablePIIMasking: boolean
+    relationshipId?: number
+    enableBatchOwnerQuery?: boolean
+  }
+  processingContext: any
+  services: {
+    processBatch: (params: any) => Promise<any>
+    processIndividual: (params: any) => Promise<any>
+  }
+}
+
+export interface PropertySelectionPipelineParams {
+  mapPoint: __esri.Point
+  propertyDataSourceId: string
+  ownerDataSourceId: string
+  dsManager: DataSourceManager
+  maxResults: number
+  toggleEnabled: boolean
+  enableBatchOwnerQuery?: boolean
+  relationshipId?: number
+  enablePIIMasking: boolean
+  signal: AbortSignal
+  selectedProperties: GridRowData[]
+  translate: (key: string) => string
+}
+
+export type PropertySelectionPipelineResult =
+  | { status: "empty" }
+  | {
+      status: "success"
+      rowsToProcess: GridRowData[]
+      graphicsToAdd: Array<{
+        graphic: __esri.Graphic
+        fnr: string | number
+      }>
+      updatedRows: GridRowData[]
+      toRemove: Set<string>
+      propertyResults: QueryResult[]
+    }
+
+export interface HoverQueryParams {
+  config: {
+    propertyDataSourceId: string
+    ownerDataSourceId: string
+    allowedHosts?: readonly string[]
+  }
+  dsManager: any
+  enablePIIMasking: boolean
+  translate: (key: string) => string
+}
+
+export type DebouncedFn<T extends (...args: any[]) => void> = ((
+  ...args: Parameters<T>
+) => void) & {
+  cancel: () => void
 }

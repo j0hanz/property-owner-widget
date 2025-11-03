@@ -5,8 +5,7 @@ import type {
   CsvHeaderValues,
   ExportOptions,
 } from "../config/types"
-
-const CSV_HEADERS = ["FNR", "UUID_FASTIGHET", "FASTIGHET", "BOSTADR"] as const
+import { CSV_HEADERS } from "../config/constants"
 
 const sanitizeValue = (value: any): string => {
   if (value == null) {
@@ -80,33 +79,21 @@ const stripRingsFromGeometry = (data: any[]): any[] => {
   })
 }
 
-const isPolygonGeometry = (
-  geometry: __esri.Geometry
-): geometry is __esri.Polygon => geometry.type === "polygon"
-
-const isPolylineGeometry = (
-  geometry: __esri.Geometry
-): geometry is __esri.Polyline => geometry.type === "polyline"
-
-const isPointGeometry = (geometry: __esri.Geometry): geometry is __esri.Point =>
-  geometry.type === "point"
-
 export const convertToGeoJSON = (rows: GridRowData[]): object => {
   const features = (rows || [])
-    .filter((row) => row.graphic?.geometry)
+    .filter((row) => Boolean(row.geometryType))
     .map((row) => {
-      const geometry = row.graphic?.geometry
-
       let geojsonGeometry: any = null
-      if (geometry && isPolygonGeometry(geometry)) {
+      const geometryType = (row.geometryType || "").toLowerCase()
+      if (geometryType === "polygon" || geometryType === "extent") {
         geojsonGeometry = {
           type: "Polygon",
         }
-      } else if (geometry && isPolylineGeometry(geometry)) {
+      } else if (geometryType === "polyline") {
         geojsonGeometry = {
           type: "MultiLineString",
         }
-      } else if (geometry && isPointGeometry(geometry)) {
+      } else if (geometryType === "point" || geometryType === "multipoint") {
         geojsonGeometry = {
           type: "Point",
         }
@@ -143,7 +130,7 @@ const buildFilename = (
 
 export const exportData = (
   rawData: any[] | null | undefined,
-  selectedRows: GridRowData[],
+  selectedProperties: GridRowData[],
   options: ExportOptions
 ): void => {
   const { format, filename, rowCount, definition } = options
@@ -158,11 +145,11 @@ export const exportData = (
       content = JSON.stringify(cleanedData, null, 2)
       mimeType = definition?.mimeType || "application/json;charset=utf-8"
     } else if (format === "csv") {
-      content = convertToCSV(selectedRows)
+      content = convertToCSV(selectedProperties)
       mimeType = definition?.mimeType || "text/csv;charset=utf-8"
       extension = definition?.extension || "csv"
     } else if (format === "geojson") {
-      content = JSON.stringify(convertToGeoJSON(selectedRows), null, 2)
+      content = JSON.stringify(convertToGeoJSON(selectedProperties), null, 2)
       mimeType = definition?.mimeType || "application/geo+json;charset=utf-8"
       extension = definition?.extension || "geojson"
     } else {

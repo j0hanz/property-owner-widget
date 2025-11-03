@@ -4,6 +4,7 @@ import {
   React,
   hooks,
   jsx,
+  ReactRedux,
   type UseDataSource,
   type ImmutableObject,
   DataSourceTypes,
@@ -35,10 +36,10 @@ import { useSettingStyles } from "../config/style"
 import {
   useBooleanConfigValue,
   useUpdateConfig,
-  useDebounce,
   useSwitchConfigHandler,
   useSliderConfigHandler,
   useNumericValidator,
+  useValidatedNumericHandler,
 } from "../shared/hooks"
 import {
   opacityHelpers,
@@ -46,14 +47,10 @@ import {
   normalizeHostValue,
   normalizeHostList,
 } from "../shared/utils"
-import {
-  DEFAULT_HIGHLIGHT_COLOR,
-  HIGHLIGHT_SYMBOL_ALPHA,
-  OUTLINE_WIDTH,
-} from "../config/constants"
 import addIcon from "../assets/plus.svg"
 import removeIcon from "../assets/close.svg"
 import infoIcon from "../assets/info.svg"
+import { createPropertySelectors } from "../extensions/store"
 
 interface FieldErrors {
   [key: string]: string | undefined
@@ -65,6 +62,20 @@ const Setting = (
   const { config, id, onSettingChange, useMapWidgetIds } = props
   const translate = hooks.useTranslation(jimuUIMessages, defaultMessages)
   const styles = useSettingStyles()
+
+  // Redux integration for runtime state visibility
+  const selectorsRef = React.useRef(createPropertySelectors(id))
+  const selectors = selectorsRef.current
+  const selectedProperties = ReactRedux.useSelector(
+    selectors.selectSelectedProperties
+  )
+  const isQueryInFlight = ReactRedux.useSelector(
+    selectors.selectIsQueryInFlight
+  )
+  const hasError = ReactRedux.useSelector(selectors.selectError) !== null
+  const selectedCount = Array.isArray(selectedProperties)
+    ? selectedProperties.length
+    : 0
 
   const renderLabelWithTooltip = (
     labelKey: string,
@@ -147,23 +158,20 @@ const Setting = (
     normalizeHostList(config.allowedHosts)
   )
   const [localHighlightColor, setLocalHighlightColor] = React.useState(
-    config.highlightColor || DEFAULT_HIGHLIGHT_COLOR
+    config.highlightColor
   )
   const [localHighlightOpacity, setLocalHighlightOpacity] = React.useState(
     () => {
       const baseValue =
         typeof config.highlightOpacity === "number"
           ? config.highlightOpacity
-          : HIGHLIGHT_SYMBOL_ALPHA
+          : 0.4
       return opacityHelpers.fromPercent(opacityHelpers.toPercent(baseValue))
     }
   )
   const [localOutlineWidth, setLocalOutlineWidth] = React.useState(() => {
-    const baseValue =
-      typeof config.outlineWidth === "number"
-        ? config.outlineWidth
-        : OUTLINE_WIDTH
-    return outlineWidthHelpers.normalize(baseValue)
+    const value = config.outlineWidth
+    return typeof value === "number" && Number.isFinite(value) ? value : 1
   })
 
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
@@ -184,20 +192,28 @@ const Setting = (
     setFieldErrors
   )
 
-  const debouncedMaxResultsValidation = useDebounce(validateMaxResults, 500)
-
-  const handleMaxResultsChange = hooks.useEventCallback((value: number) => {
-    setLocalMaxResults(String(value))
-    debouncedMaxResultsValidation(String(value))
+  const {
+    handleChange: handleMaxResultsChange,
+    handleBlur: handleMaxResultsBlur,
+  } = useValidatedNumericHandler({
+    localValue: localMaxResults,
+    setLocalValue: setLocalMaxResults,
+    validate: validateMaxResults,
+    updateConfig,
+    configField: "maxResults",
+    debounce: 500,
   })
 
-  const handleMaxResultsBlur = hooks.useEventCallback(() => {
-    debouncedMaxResultsValidation.cancel()
-    const isValid = validateMaxResults(localMaxResults)
-    if (isValid) {
-      const num = parseInt(localMaxResults, 10)
-      updateConfig("maxResults", num)
-    }
+  const {
+    handleChange: handleRelationshipIdChange,
+    handleBlur: handleRelationshipIdBlur,
+  } = useValidatedNumericHandler({
+    localValue: localRelationshipId,
+    setLocalValue: setLocalRelationshipId,
+    validate: validateRelationshipId,
+    updateConfig,
+    configField: "relationshipId",
+    clamp: { min: 0, max: 99 },
   })
 
   const handleToggleRemovalChange = useSwitchConfigHandler(
@@ -220,19 +236,6 @@ const Setting = (
     updateConfig,
     "enableBatchOwnerQuery"
   )
-
-  const handleRelationshipIdChange = hooks.useEventCallback((value: number) => {
-    const clamped = Math.max(0, Math.min(99, Math.round(value)))
-    setLocalRelationshipId(String(clamped))
-  })
-
-  const handleRelationshipIdBlur = hooks.useEventCallback(() => {
-    const isValid = validateRelationshipId(localRelationshipId)
-    if (isValid) {
-      const num = parseInt(localRelationshipId, 10)
-      updateConfig("relationshipId", num)
-    }
-  })
 
   const handleAllowedHostInputChange = hooks.useEventCallback(
     (evt: React.ChangeEvent<HTMLInputElement>) => {
@@ -279,7 +282,7 @@ const Setting = (
   )
 
   const handleHighlightColorChange = hooks.useEventCallback((color: string) => {
-    const nextColor = color || DEFAULT_HIGHLIGHT_COLOR
+    const nextColor = color || config.highlightColor
     setLocalHighlightColor(nextColor)
     updateConfig("highlightColor", nextColor)
   })
@@ -347,12 +350,14 @@ const Setting = (
       const selectedOwner = useDataSources?.[0] ?? null
       const ownerId = selectedOwner?.dataSourceId ?? ""
 
+      // Find existing property data source
       const propertySource =
         ((props.useDataSources as any)?.find?.(
           (ds: UseDataSource) =>
             ds?.dataSourceId === config.propertyDataSourceId
         ) as ImmutableObject<UseDataSource> | UseDataSource | undefined) ?? null
 
+      // Ensure property source is mutable
       let propertyMutable = toMutableUseDataSource(propertySource)
       if (!propertyMutable && config.propertyDataSourceId) {
         propertyMutable = {
@@ -362,15 +367,17 @@ const Setting = (
         } as UseDataSource
       }
 
+      // Build updated data sources list
       const updatedUseDataSources: UseDataSource[] = []
       if (propertyMutable) {
         updatedUseDataSources.push(propertyMutable)
       }
-      if (
-        selectedOwner &&
-        (!propertyMutable ||
-          propertyMutable.dataSourceId !== selectedOwner.dataSourceId)
-      ) {
+
+      // Add owner source if different from property
+      const ownerIsDifferent =
+        !propertyMutable ||
+        propertyMutable.dataSourceId !== selectedOwner?.dataSourceId
+      if (selectedOwner && ownerIsDifferent) {
         updatedUseDataSources.push(selectedOwner)
       }
 
@@ -419,14 +426,14 @@ const Setting = (
   }, [config.allowedHosts])
 
   hooks.useUpdateEffect(() => {
-    setLocalHighlightColor(config.highlightColor || DEFAULT_HIGHLIGHT_COLOR)
+    setLocalHighlightColor(config.highlightColor)
   }, [config.highlightColor])
 
   hooks.useUpdateEffect(() => {
     const baseValue =
       typeof config.highlightOpacity === "number"
         ? config.highlightOpacity
-        : HIGHLIGHT_SYMBOL_ALPHA
+        : 0.4
     setLocalHighlightOpacity(
       opacityHelpers.fromPercent(opacityHelpers.toPercent(baseValue))
     )
@@ -434,9 +441,7 @@ const Setting = (
 
   hooks.useUpdateEffect(() => {
     const baseValue =
-      typeof config.outlineWidth === "number"
-        ? config.outlineWidth
-        : OUTLINE_WIDTH
+      typeof config.outlineWidth === "number" ? config.outlineWidth : 1
     setLocalOutlineWidth(outlineWidthHelpers.normalize(baseValue))
   }, [config.outlineWidth])
 
@@ -502,6 +507,27 @@ const Setting = (
 
   return (
     <>
+      {(selectedCount > 0 || isQueryInFlight || hasError) && (
+        <SettingSection>
+          <SettingRow flow="wrap" level={1} css={styles.row}>
+            <Alert
+              css={styles.fullWidth}
+              type={isQueryInFlight ? "info" : hasError ? "warning" : "success"}
+              text={
+                isQueryInFlight
+                  ? translate("runtimeStateQuerying")
+                  : hasError
+                    ? translate("runtimeStateError")
+                    : translate("runtimeStateSelected").replace(
+                        "{count}",
+                        String(selectedCount)
+                      )
+              }
+              closable={false}
+            />
+          </SettingRow>
+        </SettingSection>
+      )}
       <SettingSection>
         <SettingRow
           flow="wrap"

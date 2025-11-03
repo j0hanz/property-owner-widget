@@ -8,6 +8,13 @@
   "description": "Displays property information.",
   "icon": "icon.svg",
   "dependency": "jimu-arcgis",
+  "extensions": [
+    {
+      "name": "Property Store",
+      "point": "REDUX_STORE",
+      "uri": "extensions/store"
+    }
+  ],
   "defaultSize": {
     "width": 300,
     "height": 600

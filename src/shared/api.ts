@@ -14,6 +14,8 @@ import type {
   PropertyBatchQueryParams,
   PropertyIndividualQueryParams,
   ValidationResult,
+  PropertySelectionPipelineParams,
+  PropertySelectionPipelineResult,
 } from "../config/types"
 import { isValidationFailure } from "../config/types"
 import {
@@ -32,7 +34,11 @@ import {
   calculatePropertyUpdates,
   processPropertyQueryResults,
 } from "./utils"
-import { OWNER_QUERY_CONCURRENCY } from "../config/constants"
+import {
+  OWNER_QUERY_CONCURRENCY,
+  QUERY_CACHE_MAX_SIZE,
+  QUERY_CACHE_EVICTION_PERCENTAGE,
+} from "../config/constants"
 
 // ============================================================================
 // QUERY CACHE SERVICE
@@ -41,7 +47,7 @@ import { OWNER_QUERY_CONCURRENCY } from "../config/constants"
 
 const queryCacheService = {
   cache: new Map<string, { value: any; timestamp: number }>(),
-  maxSize: 100,
+  maxSize: QUERY_CACHE_MAX_SIZE,
   hits: 0,
   misses: 0,
 
@@ -65,7 +71,9 @@ const queryCacheService = {
   },
 
   evictOldest(): void {
-    const entriesToRemove = Math.floor(this.maxSize * 0.2)
+    const entriesToRemove = Math.floor(
+      this.maxSize * QUERY_CACHE_EVICTION_PERCENTAGE
+    )
     const sorted = Array.from(this.cache.entries()).sort(
       (a, b) => a[1].timestamp - b[1].timestamp
     )
@@ -138,6 +146,25 @@ let cachedRelationshipQueryCtor: (new (props?: any) => any) | null = null
 // ============================================================================
 
 // Check if hostname is private/local
+// Data source validation predicates
+const dataSourcePredicates = {
+  hasDataSource: (ds: FeatureLayerDataSource | null): boolean => ds !== null,
+
+  isQueryableDataSource: (ds: FeatureLayerDataSource | null): boolean => {
+    return ds !== null && typeof ds.query === "function"
+  },
+
+  hasValidatedUrl: (
+    ds: FeatureLayerDataSource,
+    allowedHosts: readonly string[] | undefined
+  ): boolean => {
+    const url = getDataSourceUrl(ds)
+    if (!url) return false
+    const normalizedHosts = normalizeHostList(allowedHosts)
+    return isValidArcGISUrl(url, normalizedHosts)
+  },
+}
+
 const isPrivateHost = (hostname: string): boolean => {
   const lower = hostname.toLowerCase()
   return (
@@ -218,20 +245,13 @@ const createValidationError = (
   failureReason: reason,
 })
 
-const isQueryableDataSource = (ds: FeatureLayerDataSource | null): boolean => {
-  return ds !== null && typeof ds.query === "function"
-}
-
 const validateDataSourceUrl = (
   ds: FeatureLayerDataSource,
   dsType: "property" | "owner",
   allowedHosts: readonly string[] | undefined,
   translate: (key: string) => string
 ): ValidationResult<null> => {
-  const normalizedHosts = normalizeHostList(allowedHosts)
-
-  const url = getDataSourceUrl(ds)
-  if (!url || !isValidArcGISUrl(url, normalizedHosts)) {
+  if (!dataSourcePredicates.hasValidatedUrl(ds, allowedHosts)) {
     return createValidationError(
       "VALIDATION_ERROR",
       translate("errorHostNotAllowed"),
@@ -247,7 +267,7 @@ const validateSingleDataSource = (
   dsType: "property" | "owner",
   translate: (key: string) => string
 ): ValidationResult<null> => {
-  if (!ds) {
+  if (!dataSourcePredicates.hasDataSource(ds)) {
     return createValidationError(
       "VALIDATION_ERROR",
       translate("errorNoDataAvailable"),
@@ -255,7 +275,7 @@ const validateSingleDataSource = (
     )
   }
 
-  if (!isQueryableDataSource(ds)) {
+  if (!dataSourcePredicates.isQueryableDataSource(ds)) {
     return createValidationError(
       "VALIDATION_ERROR",
       translate("errorNoDataAvailable"),
@@ -677,6 +697,138 @@ const deduplicateOwnerEntries = (
   return uniqueOwners
 }
 
+// ============================================================================
+// OWNER QUERY PROCESSING HELPERS
+// Decomposed batch processing logic for improved maintainability
+// ============================================================================
+
+const shouldSkipOwnerResult = (
+  result: any,
+  helpers: any
+): { skip: boolean; reason?: string } => {
+  if (result.error) {
+    if (helpers.isAbortError(result.error)) {
+      return { skip: true, reason: "aborted" }
+    }
+    return { skip: false }
+  }
+
+  if (!result.value || !result.value.validated) {
+    return { skip: true, reason: "invalid_value" }
+  }
+
+  return { skip: false }
+}
+
+const accumulatePropertyRows = (params: {
+  propertyRows: GridRowData[]
+  currentTotal: number
+  maxResults: number
+  accumulator: {
+    rows: GridRowData[]
+    graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>
+  }
+  graphic: __esri.Graphic
+  fnr: string | number
+}): boolean => {
+  const { propertyRows, currentTotal, maxResults, accumulator, graphic, fnr } =
+    params
+  const remaining = maxResults - currentTotal
+  const rowsToAdd = propertyRows.slice(0, remaining)
+
+  accumulator.rows.push(...rowsToAdd)
+
+  if (rowsToAdd.length > 0) {
+    accumulator.graphics.push({ graphic, fnr })
+  }
+
+  return currentTotal + rowsToAdd.length >= maxResults
+}
+
+const processOwnerQueryError = (params: {
+  validated: { fnr: string | number; attrs: any; graphic: __esri.Graphic }
+  context: PropertyProcessingContext
+  config: { enablePIIMasking: boolean }
+  accumulator: {
+    rows: GridRowData[]
+    graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>
+  }
+  currentRowCount: number
+  maxResults: number
+}): boolean => {
+  const {
+    validated,
+    context,
+    config,
+    accumulator,
+    currentRowCount,
+    maxResults,
+  } = params
+
+  if (currentRowCount + accumulator.rows.length >= maxResults) {
+    return true
+  }
+
+  const propertyRows = buildPropertyRows({
+    fnr: validated.fnr,
+    propertyAttrs: validated.attrs,
+    ownerFeatures: [],
+    queryFailed: true,
+    propertyGraphic: validated.graphic,
+    config: { enablePIIMasking: config.enablePIIMasking },
+    context,
+  })
+
+  return accumulatePropertyRows({
+    propertyRows,
+    currentTotal: currentRowCount + accumulator.rows.length,
+    maxResults,
+    accumulator,
+    graphic: validated.graphic,
+    fnr: validated.fnr,
+  })
+}
+
+const processOwnerQuerySuccess = (params: {
+  result: any
+  context: PropertyProcessingContext
+  config: { enablePIIMasking: boolean }
+  accumulator: {
+    rows: GridRowData[]
+    graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>
+  }
+  currentRowCount: number
+  maxResults: number
+}): boolean => {
+  const { result, context, config, accumulator, currentRowCount, maxResults } =
+    params
+
+  if (currentRowCount + accumulator.rows.length >= maxResults) {
+    return true
+  }
+
+  const { validated, ownerFeatures, queryFailed } = result.value
+
+  const propertyRows = buildPropertyRows({
+    fnr: validated.fnr,
+    propertyAttrs: validated.attrs,
+    ownerFeatures,
+    queryFailed,
+    propertyGraphic: validated.graphic,
+    config: { enablePIIMasking: config.enablePIIMasking },
+    context,
+  })
+
+  return accumulatePropertyRows({
+    propertyRows,
+    currentTotal: currentRowCount + accumulator.rows.length,
+    maxResults,
+    accumulator,
+    graphic: validated.graphic,
+    fnr: validated.fnr,
+  })
+}
+
 const validatePropertyFeature = (
   propertyResult: any,
   extractFnr: (attrs: any) => string | number | null
@@ -754,7 +906,7 @@ const createGridRow = (params: {
   uuidFastighet: string
   fastighet: string
   bostadr: string
-  graphic: __esri.Graphic
+  geometryType: string | null
   createRowId: (fnr: string | number, objectId: number) => string
   rawOwner?: OwnerAttributes
 }): GridRowData => ({
@@ -763,7 +915,7 @@ const createGridRow = (params: {
   UUID_FASTIGHET: params.uuidFastighet,
   FASTIGHET: params.fastighet,
   BOSTADR: params.bostadr,
-  graphic: params.graphic,
+  geometryType: params.geometryType,
   rawOwner: params.rawOwner,
 })
 
@@ -786,6 +938,8 @@ const buildPropertyRows = (options: {
     context,
   } = options
 
+  const geometryType = propertyGraphic?.geometry?.type ?? null
+
   if (ownerFeatures.length > 0) {
     const uniqueOwners = deduplicateOwnerEntries(ownerFeatures, {
       fnr,
@@ -806,7 +960,7 @@ const buildPropertyRows = (options: {
           config.enablePIIMasking,
           context.messages.unknownOwner
         ),
-        graphic: propertyGraphic,
+        geometryType,
         createRowId: context.helpers.createRowId,
         rawOwner: attrs,
       })
@@ -833,7 +987,7 @@ const buildPropertyRows = (options: {
       uuidFastighet: propertyAttrs.UUID_FASTIGHET,
       fastighet: propertyAttrs.FASTIGHET,
       bostadr: fallbackMessage,
-      graphic: propertyGraphic,
+      geometryType,
       createRowId: context.helpers.createRowId,
       rawOwner: fallbackOwner,
     }),
@@ -855,89 +1009,56 @@ const processBatchOfProperties = async (params: {
   const [promiseUtils] = await loadArcGISJSAPIModules([
     "esri/core/promiseUtils",
   ])
-
   abortHelpers.throwIfAborted(context.signal)
 
   const ownerData = await promiseUtils.eachAlways(
     batch.map((validated) =>
       fetchOwnerDataForProperty(validated.fnr, context, config).then(
-        (result) => ({
-          ...result,
-          validated,
-        })
+        (result) => ({ ...result, validated })
       )
     )
   )
 
-  const rows: GridRowData[] = []
-  const graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }> = []
+  const accumulator = {
+    rows: [] as GridRowData[],
+    graphics: [] as Array<{ graphic: __esri.Graphic; fnr: string | number }>,
+  }
 
   for (let i = 0; i < ownerData.length; i++) {
     const result = ownerData[i]
+    const validated = batch[i]
+    const skipCheck = shouldSkipOwnerResult(result, helpers)
+
+    if (skipCheck.skip) {
+      if (skipCheck.reason === "aborted") continue
+      if (skipCheck.reason === "invalid_value") continue
+    }
 
     if (result.error) {
-      if (helpers.isAbortError(result.error)) {
-        continue
-      }
-
-      if (currentRowCount + rows.length >= maxResults) break
-
-      // Use batch[i] for error case (no validated in error result)
-      const validated = batch[i]
-      const propertyRows = buildPropertyRows({
-        fnr: validated.fnr,
-        propertyAttrs: validated.attrs,
-        ownerFeatures: [],
-        queryFailed: true,
-        propertyGraphic: validated.graphic,
-        config: { enablePIIMasking: config.enablePIIMasking },
+      const shouldBreak = processOwnerQueryError({
+        validated,
         context,
+        config: { enablePIIMasking: config.enablePIIMasking },
+        accumulator,
+        currentRowCount,
+        maxResults,
       })
-
-      const remaining = maxResults - (currentRowCount + rows.length)
-      const rowsToAdd = propertyRows.slice(0, remaining)
-      rows.push(...rowsToAdd)
-
-      if (rowsToAdd.length > 0) {
-        graphics.push({ graphic: validated.graphic, fnr: validated.fnr })
-      }
+      if (shouldBreak) break
       continue
     }
 
-    if (!result.value) {
-      continue
-    }
-
-    const {
-      validated: validatedFromValue,
-      ownerFeatures,
-      queryFailed,
-    } = result.value
-    if (currentRowCount + rows.length >= maxResults) break
-
-    const propertyRows = buildPropertyRows({
-      fnr: validatedFromValue.fnr,
-      propertyAttrs: validatedFromValue.attrs,
-      ownerFeatures,
-      queryFailed,
-      propertyGraphic: validatedFromValue.graphic,
-      config: { enablePIIMasking: config.enablePIIMasking },
+    const shouldBreak = processOwnerQuerySuccess({
+      result,
       context,
+      config: { enablePIIMasking: config.enablePIIMasking },
+      accumulator,
+      currentRowCount,
+      maxResults,
     })
-
-    const remaining = maxResults - (currentRowCount + rows.length)
-    const rowsToAdd = propertyRows.slice(0, remaining)
-    rows.push(...rowsToAdd)
-
-    if (rowsToAdd.length > 0) {
-      graphics.push({
-        graphic: validatedFromValue.graphic,
-        fnr: validatedFromValue.fnr,
-      })
-    }
+    if (shouldBreak) break
   }
 
-  return { rows, graphics }
+  return accumulator
 }
 
 const processBatchQuery = async (
@@ -979,7 +1100,7 @@ const processBatchQuery = async (
     if (helpers.isAbortError(error)) {
       throw error instanceof Error ? error : new Error(String(error))
     }
-    console.error("Batch owner query failed", error)
+    logger.error("Batch owner query failed", error)
     ownersByFnr = new Map()
     fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)))
   }
@@ -1018,7 +1139,7 @@ const processBatchQuery = async (
               uuidFastighet: attrs.UUID_FASTIGHET,
               fastighet: propertyWithShare,
               bostadr: formattedOwner,
-              graphic,
+              geometryType: graphic?.geometry?.type || null,
               createRowId: context.helpers.createRowId,
               rawOwner: owner,
             })
@@ -1043,7 +1164,7 @@ const processBatchQuery = async (
             uuidFastighet: attrs.UUID_FASTIGHET,
             fastighet: attrs.FASTIGHET,
             bostadr: fallbackMessage,
-            graphic,
+            geometryType: graphic?.geometry?.type || null,
             createRowId: context.helpers.createRowId,
             rawOwner: fallbackOwner,
           })
@@ -1115,35 +1236,6 @@ export const propertyQueryService = {
   processBatch: processBatchQuery,
   processIndividual: processIndividualQuery,
 }
-
-export interface PropertySelectionPipelineParams {
-  mapPoint: __esri.Point
-  propertyDataSourceId: string
-  ownerDataSourceId: string
-  dsManager: DataSourceManager
-  maxResults: number
-  toggleEnabled: boolean
-  enableBatchOwnerQuery?: boolean
-  relationshipId?: number
-  enablePIIMasking: boolean
-  signal: AbortSignal
-  selectedProperties: GridRowData[]
-  translate: (key: string) => string
-}
-
-export type PropertySelectionPipelineResult =
-  | { status: "empty" }
-  | {
-      status: "success"
-      rowsToProcess: GridRowData[]
-      graphicsToAdd: Array<{
-        graphic: __esri.Graphic
-        fnr: string | number
-      }>
-      updatedRows: GridRowData[]
-      toRemove: Set<string>
-      propertyResults: QueryResult[]
-    }
 
 export const runPropertySelectionPipeline = async (
   params: PropertySelectionPipelineParams

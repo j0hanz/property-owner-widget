@@ -5,6 +5,13 @@ import type {
   EsriModules,
   CursorTooltipStyle,
   IMConfig,
+  GridRowData,
+  ErrorState,
+  SerializedQueryResult,
+  SerializedQueryFeature,
+  QueryResult,
+  CursorGraphicsState,
+  ProcessPropertyQueryParams,
 } from "../config/types"
 import type { DataSourceManager } from "jimu-core"
 import { isValidationFailure as checkValidationFailure } from "../config/types"
@@ -16,12 +23,11 @@ import {
 import {
   MIN_MASK_LENGTH,
   MAX_MASK_ASTERISKS,
-  DEFAULT_HIGHLIGHT_COLOR,
-  HIGHLIGHT_SYMBOL_ALPHA,
   HIGHLIGHT_MARKER_SIZE,
-  OUTLINE_WIDTH,
   CURSOR_TOOLTIP_STYLE,
+  HEX_COLOR_PATTERN,
 } from "../config/constants"
+import { propertyActions } from "../extensions/store"
 
 // ============================================================================
 // HTML SANITIZATION & TEXT PROCESSING
@@ -116,53 +122,55 @@ const buildOwnerIdentityKey = (
   context: { fnr?: string | number; propertyId?: string },
   sequence?: number
 ): string => {
-  // Priority 1: Use AGARLISTA if available (unique identifier)
-  const agarLista = normalizeOwnerValue(owner.AGARLISTA)
-  if (agarLista) return `A:${agarLista.toLowerCase()}`
+  // Priority-ordered identity strategies
+  const strategies = [
+    // Priority 1: Use AGARLISTA if available (unique identifier)
+    () => {
+      const agarLista = normalizeOwnerValue(owner.AGARLISTA)
+      return agarLista ? `A:${agarLista.toLowerCase()}` : null
+    },
+    // Priority 2: Build identity from owner attributes
+    () => {
+      const parts = [
+        owner.NAMN && `N:${normalizeOwnerValue(owner.NAMN)}`,
+        owner.BOSTADR && `B:${normalizeOwnerValue(owner.BOSTADR)}`,
+        owner.POSTNR && `P:${normalizeOwnerValue(owner.POSTNR)}`,
+        owner.POSTADR && `C:${normalizeOwnerValue(owner.POSTADR)}`,
+        owner.ORGNR && `O:${normalizeOwnerValue(owner.ORGNR)}`,
+        owner.ANDEL && `S:${normalizeOwnerValue(owner.ANDEL)}`,
+      ].filter(Boolean)
+      return parts.length > 0 ? parts.join("|").toLowerCase() : null
+    },
+    // Priority 3: Fallback to context identifiers
+    () => {
+      const fallback = [
+        context.propertyId && `PR:${normalizeOwnerValue(context.propertyId)}`,
+        context.fnr !== undefined &&
+          context.fnr !== null &&
+          `FN:${String(context.fnr)}`,
+        owner.OBJECTID !== undefined &&
+          owner.OBJECTID !== null &&
+          `OB:${String(owner.OBJECTID)}`,
+        owner.UUID_FASTIGHET &&
+          `UU:${normalizeOwnerValue(owner.UUID_FASTIGHET)}`,
+      ].filter(Boolean)
+      return fallback.length > 0 ? fallback.join("|").toLowerCase() : null
+    },
+    // Priority 4: Use sequence as last resort
+    () => `IX:${sequence ?? 0}`,
+  ]
 
-  // Priority 2: Build identity from owner attributes
-  const parts = [
-    owner.NAMN && `N:${normalizeOwnerValue(owner.NAMN)}`,
-    owner.BOSTADR && `B:${normalizeOwnerValue(owner.BOSTADR)}`,
-    owner.POSTNR && `P:${normalizeOwnerValue(owner.POSTNR)}`,
-    owner.POSTADR && `C:${normalizeOwnerValue(owner.POSTADR)}`,
-    owner.ORGNR && `O:${normalizeOwnerValue(owner.ORGNR)}`,
-    owner.ANDEL && `S:${normalizeOwnerValue(owner.ANDEL)}`,
-  ].filter(Boolean)
-
-  if (parts.length > 0) {
-    return parts.join("|").toLowerCase()
+  for (const strategy of strategies) {
+    const key = strategy()
+    if (key) return key
   }
 
-  // Priority 3: Fallback to context identifiers
-  const fallback = [
-    context.propertyId && `PR:${normalizeOwnerValue(context.propertyId)}`,
-    context.fnr !== undefined &&
-      context.fnr !== null &&
-      `FN:${String(context.fnr)}`,
-    owner.OBJECTID !== undefined &&
-      owner.OBJECTID !== null &&
-      `OB:${String(owner.OBJECTID)}`,
-    owner.UUID_FASTIGHET && `UU:${normalizeOwnerValue(owner.UUID_FASTIGHET)}`,
-  ].filter(Boolean)
-
-  if (fallback.length > 0) {
-    return fallback.join("|").toLowerCase()
-  }
-
-  // Priority 4: Use sequence as last resort
   return `IX:${sequence ?? 0}`
 }
 
 export const ownerIdentity = {
   buildKey: buildOwnerIdentityKey,
   normalizeValue: normalizeOwnerValue,
-}
-
-export interface CursorGraphicsState {
-  pointGraphic: __esri.Graphic | null
-  tooltipGraphic: __esri.Graphic | null
-  lastTooltipText: string | null
 }
 
 export const buildTooltipSymbol = (
@@ -365,45 +373,26 @@ export const formatPropertyWithShare = (
   return trimmedShare ? `${property} (${trimmedShare})` : property
 }
 
-/**
- * Owner Processing Pipeline
- * Consolidated API for owner data formatting and masking
- */
-export const ownerProcessing = {
-  format: formatOwnerInfo,
-  mask: { name: maskName, address: maskAddress },
-  buildIdentity: ownerIdentity.buildKey,
-  processBatch: (
-    owners: OwnerAttributes[],
-    maskPII: boolean,
-    unknownText: string
-  ) => owners.map((o) => formatOwnerInfo(o, maskPII, unknownText)),
-}
-
 // ============================================================================
 // GRAPHICS & HIGHLIGHTING
 // ============================================================================
 
-const HEX_COLOR_PATTERN = /^#?([0-9a-fA-F]{6})$/
-
 export const buildHighlightColor = (
-  color?: string,
-  opacity?: number
+  color: string,
+  opacity: number
 ): [number, number, number, number] => {
-  const fallbackOpacity = HIGHLIGHT_SYMBOL_ALPHA
-  const fallbackColor = DEFAULT_HIGHLIGHT_COLOR
-
   const sanitized = typeof color === "string" ? color.trim() : ""
   const match = sanitized ? HEX_COLOR_PATTERN.exec(sanitized) : null
-  const hex = match ? match[1] : fallbackColor.replace("#", "")
+
+  // If no valid color match, use the input color as-is (it's from config.json)
+  const hex = match ? match[1] : color.replace("#", "")
 
   const r = parseInt(hex.substring(0, 2), 16)
   const g = parseInt(hex.substring(2, 4), 16)
   const b = parseInt(hex.substring(4, 6), 16)
 
   const clampedOpacity = (() => {
-    if (typeof opacity !== "number" || !Number.isFinite(opacity))
-      return fallbackOpacity
+    if (typeof opacity !== "number" || !Number.isFinite(opacity)) return 0.4
     if (opacity < 0) return 0
     if (opacity > 1) return 1
     return opacity
@@ -561,30 +550,13 @@ export const parseArcGISError = (
   return defaultMessage
 }
 
-export const getValidatedOutlineWidth = (
-  width: unknown,
-  defaultWidth: number = OUTLINE_WIDTH
-): number => {
+export const getValidatedOutlineWidth = (width: unknown): number => {
   if (typeof width !== "number" || !Number.isFinite(width)) {
-    return defaultWidth
+    return 1
   }
   if (width < 0.5) return 0.5
   if (width > 10) return 10
   return width
-}
-
-export const typeGuards = {
-  isString: (value: unknown): value is string => {
-    return typeof value === "string"
-  },
-
-  isFiniteNumber: (value: unknown): value is number => {
-    return typeof value === "number" && Number.isFinite(value)
-  },
-
-  isNonEmptyString: (value: unknown): value is string => {
-    return typeof value === "string" && value.length > 0
-  },
 }
 
 export const buildFnrWhereClause = (
@@ -773,6 +745,11 @@ export const syncGraphicsWithState = (params: {
 
 export { isValidationSuccess, isValidationFailure } from "../config/types"
 
+export type {
+  CursorGraphicsState,
+  ProcessPropertyQueryParams,
+} from "../config/types"
+
 export const validateMapClickPipeline = (params: {
   event: any
   modules: EsriModules | null
@@ -831,22 +808,6 @@ export const validateMapClickPipeline = (params: {
   }
 }
 
-interface ProcessPropertyQueryParams {
-  propertyResults: any[]
-  config: {
-    propertyDataSourceId: string
-    ownerDataSourceId: string
-    enablePIIMasking: boolean
-    relationshipId?: number
-    enableBatchOwnerQuery?: boolean
-  }
-  processingContext: any
-  services: {
-    processBatch: (params: any) => Promise<any>
-    processIndividual: (params: any) => Promise<any>
-  }
-}
-
 export const processPropertyQueryResults = async (
   params: ProcessPropertyQueryParams
 ): Promise<{ rowsToProcess: any[]; graphicsToAdd: any[] }> => {
@@ -881,16 +842,71 @@ export const processPropertyQueryResults = async (
 }
 
 export const updateRawPropertyResults = (
-  prev: Map<string, any>,
-  rowsToProcess: any[],
-  propertyResults: any[],
+  prev: Map<string, SerializedQueryResult>,
+  rowsToProcess: Array<{ FNR: string | number; id: string }>,
+  propertyResults: QueryResult[],
   toRemove: Set<string>,
-  selectedProperties: any[],
+  selectedProperties: Array<{ FNR: string | number; id: string }>,
   normalizeFnrKey: (fnr: any) => string
-): Map<string, any> => {
+): Map<string, SerializedQueryResult> => {
+  const clonePlainValue = (value: any) => {
+    if (value == null) return null
+    try {
+      return JSON.parse(JSON.stringify(value))
+    } catch (_error) {
+      if (Array.isArray(value)) {
+        return value.map((item) => clonePlainValue(item))
+      }
+      return { ...value }
+    }
+  }
+
+  const serializeFeature = (
+    feature: __esri.Graphic | undefined | null
+  ): SerializedQueryFeature => {
+    if (!feature) {
+      return {
+        attributes: null,
+        geometry: null,
+        aggregateGeometries: null,
+        symbol: null,
+        popupTemplate: null,
+      }
+    }
+
+    const geometry = (feature as any)?.geometry as __esri.Geometry | undefined
+    const geometryJson = geometry
+      ? typeof geometry.toJSON === "function"
+        ? geometry.toJSON()
+        : clonePlainValue(geometry)
+      : null
+
+    return {
+      attributes:
+        feature.attributes && typeof feature.attributes === "object"
+          ? { ...feature.attributes }
+          : null,
+      geometry: geometryJson ?? null,
+      aggregateGeometries: clonePlainValue(
+        (feature as any)?.aggregateGeometries ?? null
+      ),
+      symbol: clonePlainValue((feature as any)?.symbol ?? null),
+      popupTemplate: clonePlainValue((feature as any)?.popupTemplate ?? null),
+    }
+  }
+
+  const serializePropertyResult = (
+    result: QueryResult
+  ): SerializedQueryResult => ({
+    propertyId: result?.propertyId ?? "",
+    features: Array.isArray(result?.features)
+      ? result.features.map((feature) => serializeFeature(feature))
+      : [],
+  })
+
   const updated = new Map(prev)
 
-  const propertyResultsByFnr = new Map<string, any>()
+  const propertyResultsByFnr = new Map<string, SerializedQueryResult>()
   propertyResults.forEach((result) => {
     const feature = result?.features?.[0]
     const attributes = feature?.attributes as
@@ -898,7 +914,10 @@ export const updateRawPropertyResults = (
       | undefined
     const fnrValue = attributes?.FNR ?? attributes?.fnr
     if (fnrValue != null) {
-      propertyResultsByFnr.set(normalizeFnrKey(fnrValue), result)
+      propertyResultsByFnr.set(
+        normalizeFnrKey(fnrValue),
+        serializePropertyResult(result)
+      )
     }
   })
 
@@ -914,8 +933,9 @@ export const updateRawPropertyResults = (
     let propertyResult = propertyResultsByFnr.get(fnrKey)
 
     if (!propertyResult && propertyResults.length > 0) {
-      const fallback =
+      const fallback = serializePropertyResult(
         propertyResults[Math.min(fallbackIndex, propertyResults.length - 1)]
+      )
       fallbackIndex += 1
       propertyResult = fallback
     }
@@ -935,20 +955,152 @@ export const updateRawPropertyResults = (
   return updated
 }
 
+export const createPropertyDispatcher = (
+  dispatch: ((action: unknown) => void) | undefined,
+  widgetId: string
+) => {
+  const safeDispatch = (action: unknown) => {
+    if (!widgetId || typeof dispatch !== "function") return
+    dispatch(action)
+  }
+
+  const convertMapToPlainObject = (
+    results:
+      | Map<string, SerializedQueryResult>
+      | ReadonlyMap<string, SerializedQueryResult>
+      | { [key: string]: SerializedQueryResult }
+      | null
+  ): { [key: string]: SerializedQueryResult } | null => {
+    if (!results) return null
+
+    const plainObj: { [key: string]: SerializedQueryResult } = {}
+
+    if (results instanceof Map) {
+      results.forEach((value, key) => {
+        plainObj[key] = value
+      })
+      return plainObj
+    }
+
+    const maybeImmutable =
+      typeof (results as any)?.asMutable === "function"
+        ? (results as any).asMutable({ deep: false })
+        : results
+
+    if (typeof maybeImmutable.forEach === "function") {
+      maybeImmutable.forEach((value: SerializedQueryResult, key: string) => {
+        plainObj[key] = value
+      })
+      return plainObj
+    }
+
+    Object.keys(
+      maybeImmutable as { [key: string]: SerializedQueryResult }
+    ).forEach((key) => {
+      const value = maybeImmutable[key]
+      if (value !== undefined) {
+        plainObj[key] = value
+      }
+    })
+
+    return plainObj
+  }
+
+  return {
+    setError: (error: ErrorState | null) => {
+      safeDispatch(propertyActions.setError(error, widgetId))
+    },
+    clearError: () => {
+      safeDispatch(propertyActions.clearError(widgetId))
+    },
+    setSelectedProperties: (properties: Iterable<GridRowData>) => {
+      safeDispatch(
+        propertyActions.setSelectedProperties(Array.from(properties), widgetId)
+      )
+    },
+    clearAll: () => {
+      safeDispatch(propertyActions.clearAll(widgetId))
+    },
+    setQueryInFlight: (inFlight: boolean) => {
+      safeDispatch(propertyActions.setQueryInFlight(inFlight, widgetId))
+    },
+    setRawResults: (
+      results:
+        | Map<string, SerializedQueryResult>
+        | ReadonlyMap<string, SerializedQueryResult>
+        | null
+    ) => {
+      safeDispatch(
+        propertyActions.setRawResults(
+          convertMapToPlainObject(results) as any,
+          widgetId
+        )
+      )
+    },
+    removeWidgetState: () => {
+      safeDispatch(propertyActions.removeWidgetState(widgetId))
+    },
+  }
+}
+
 /** Computes list of widget IDs that should be closed when this widget opens */
 export const computeWidgetsToClose = (
   runtimeInfo:
     | { [id: string]: { state?: any; isClassLoaded?: boolean } | undefined }
     | null
     | undefined,
-  widgetId: string
+  currentWidgetId: string,
+  widgets?: unknown
 ): string[] => {
   if (!runtimeInfo) return []
 
   const ids: string[] = []
 
+  const resolveEntry = (collection: unknown, key: string): any => {
+    if (!collection) return null
+    if (typeof (collection as any)?.get === "function") {
+      return (collection as any).get(key)
+    }
+    return (collection as any)?.[key] ?? null
+  }
+
+  const readString = (source: any, key: string): string => {
+    if (!source) return ""
+    if (typeof source.get === "function") {
+      const value = source.get(key)
+      return typeof value === "string" ? value : ""
+    }
+    const value = source?.[key]
+    return typeof value === "string" ? value : ""
+  }
+
+  const hasPropertyKeyword = (value: string): boolean => {
+    if (!value) return false
+    const normalized = value.toLowerCase()
+    return normalized.includes("property") || normalized.includes("fastighet")
+  }
+
+  const isPropertyWidget = (targetId: string): boolean => {
+    const entry = resolveEntry(widgets, targetId)
+    if (!entry) return false
+
+    const manifest = resolveEntry(entry, "manifest")
+    const values: string[] = [
+      readString(entry, "name"),
+      readString(entry, "label"),
+      readString(entry, "manifestLabel"),
+      readString(entry, "uri"),
+      readString(entry, "widgetName"),
+      readString(manifest, "name"),
+      readString(manifest, "label"),
+      readString(manifest, "uri"),
+    ]
+
+    return values.some(hasPropertyKeyword)
+  }
+
   for (const [id, info] of Object.entries(runtimeInfo)) {
-    if (id === widgetId || !info) continue
+    if (id === currentWidgetId || !info) continue
     const stateRaw = info.state
     if (!stateRaw) continue
     const normalized = String(stateRaw).toUpperCase()
@@ -958,7 +1110,9 @@ export const computeWidgetsToClose = (
       continue
     }
 
-    ids.push(id)
+    if (info.isClassLoaded && isPropertyWidget(id)) {
+      ids.push(id)
+    }
   }
 
   return ids
@@ -1226,3 +1380,164 @@ class PopupSuppressionManager {
 }
 
 export const popupSuppressionManager = new PopupSuppressionManager()
+
+// ============================================================================
+// CURSOR LIFECYCLE MANAGEMENT
+// RAF-batched cursor tracking with proper cleanup ordering
+// ============================================================================
+
+export const cursorLifecycleHelpers = {
+  cleanupHandles: (refs: {
+    pointerMoveHandle: React.MutableRefObject<__esri.Handle | null>
+    pointerLeaveHandle: React.MutableRefObject<__esri.Handle | null>
+    rafId: React.MutableRefObject<number | null>
+    clearGraphics: () => void
+    cleanupQuery: () => void
+  }) => {
+    // Step 1: Remove pointer-move handle FIRST, clear graphics with it
+    if (refs.pointerMoveHandle.current) {
+      refs.pointerMoveHandle.current.remove()
+      refs.pointerMoveHandle.current = null
+      refs.clearGraphics()
+    }
+
+    // Step 2: Remove pointer-leave handle
+    if (refs.pointerLeaveHandle.current) {
+      refs.pointerLeaveHandle.current.remove()
+      refs.pointerLeaveHandle.current = null
+    }
+
+    // Step 3: Cancel RAF LAST (no pending RAF if handles removed)
+    if (refs.rafId.current !== null) {
+      cancelAnimationFrame(refs.rafId.current)
+      refs.rafId.current = null
+    }
+  },
+
+  setupCursorTracking: (params: {
+    view: __esri.MapView
+    widgetId: string
+    ensureGraphicsLayer: (view: __esri.MapView) => void
+    cachedLayerRef: React.MutableRefObject<__esri.GraphicsLayer | null>
+    pointerMoveHandleRef: React.MutableRefObject<__esri.Handle | null>
+    pointerLeaveHandleRef: React.MutableRefObject<__esri.Handle | null>
+    rafIdRef: React.MutableRefObject<number | null>
+    lastCursorPointRef: React.MutableRefObject<__esri.Point | null>
+    pendingMapPointRef: React.MutableRefObject<__esri.Point | null>
+    lastHoverQueryPointRef: React.MutableRefObject<{
+      x: number
+      y: number
+    } | null>
+    updateCursorPoint: (mapPoint: __esri.Point | null) => void
+    throttledHoverQuery: (
+      mapPoint: __esri.Point,
+      screenPoint: { x: number; y: number }
+    ) => void
+    cleanupHoverQuery: () => void
+  }) => {
+    const {
+      view,
+      widgetId,
+      ensureGraphicsLayer,
+      cachedLayerRef,
+      pointerMoveHandleRef,
+      pointerLeaveHandleRef,
+      rafIdRef,
+      lastCursorPointRef,
+      pendingMapPointRef,
+      lastHoverQueryPointRef,
+      updateCursorPoint,
+      throttledHoverQuery,
+      cleanupHoverQuery,
+    } = params
+
+    ensureGraphicsLayer(view)
+    cachedLayerRef.current = view.map.findLayerById(
+      `property-${widgetId}-highlight-layer`
+    ) as __esri.GraphicsLayer | null
+
+    pointerMoveHandleRef.current = view.on("pointer-move", (event) => {
+      const screenPoint = { x: event.x, y: event.y }
+      const mapPoint = view.toMap(screenPoint)
+
+      if (!mapPoint) {
+        lastCursorPointRef.current = null
+        pendingMapPointRef.current = null
+        updateCursorPoint(null)
+        cleanupHoverQuery()
+        return
+      }
+
+      lastCursorPointRef.current = mapPoint
+      pendingMapPointRef.current = mapPoint
+
+      if (rafIdRef.current === null) {
+        rafIdRef.current = requestAnimationFrame(() => {
+          rafIdRef.current = null
+          const point = pendingMapPointRef.current
+          if (point) updateCursorPoint(point)
+        })
+      }
+
+      throttledHoverQuery(mapPoint, screenPoint)
+    })
+
+    pointerLeaveHandleRef.current = view.on("pointer-leave", () => {
+      lastCursorPointRef.current = null
+      pendingMapPointRef.current = null
+      lastHoverQueryPointRef.current = null
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current)
+        rafIdRef.current = null
+      }
+      updateCursorPoint(null)
+      cleanupHoverQuery()
+    })
+  },
+
+  resetCursorState: (refs: {
+    lastCursorPointRef: React.MutableRefObject<__esri.Point | null>
+    pendingMapPointRef: React.MutableRefObject<__esri.Point | null>
+    cachedLayerRef: React.MutableRefObject<__esri.GraphicsLayer | null>
+    clearGraphics: () => void
+    cleanupQuery: () => void
+  }) => {
+    refs.lastCursorPointRef.current = null
+    refs.pendingMapPointRef.current = null
+    refs.cachedLayerRef.current = null
+    refs.clearGraphics()
+    refs.cleanupQuery()
+  },
+
+  teardownCursorTracking: (params: {
+    rafId: React.MutableRefObject<number | null>
+    pointerMoveHandle: React.MutableRefObject<__esri.Handle | null>
+    pointerLeaveHandle: React.MutableRefObject<__esri.Handle | null>
+    lastCursorPointRef: React.MutableRefObject<__esri.Point | null>
+    pendingMapPointRef: React.MutableRefObject<__esri.Point | null>
+    cachedLayerRef: React.MutableRefObject<__esri.GraphicsLayer | null>
+    canTrackCursor: boolean
+    clearGraphics: () => void
+    cleanupQuery: () => void
+  }) => {
+    if (params.rafId.current !== null) {
+      cancelAnimationFrame(params.rafId.current)
+      params.rafId.current = null
+    }
+    if (params.pointerMoveHandle.current) {
+      params.pointerMoveHandle.current.remove()
+      params.pointerMoveHandle.current = null
+    }
+    if (params.pointerLeaveHandle.current) {
+      params.pointerLeaveHandle.current.remove()
+      params.pointerLeaveHandle.current = null
+    }
+    params.cleanupQuery()
+    params.pendingMapPointRef.current = null
+    params.cachedLayerRef.current = null
+    if (!params.canTrackCursor) {
+      params.lastCursorPointRef.current = null
+    }
+    params.clearGraphics()
+  },
+}

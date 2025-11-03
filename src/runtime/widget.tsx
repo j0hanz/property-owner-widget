@@ -36,6 +36,7 @@ import type {
   GridRowData,
   SelectionGraphicsParams,
   ExportFormat,
+  SerializedQueryResult,
 } from "../config/types"
 import { ErrorType } from "../config/enums"
 import { useWidgetStyles } from "../config/style"
@@ -47,7 +48,7 @@ import {
   useAbortControllerPool,
   useDebounce,
   useThrottle,
-  usePropertySelectionState,
+  useHoverQuery,
 } from "../shared/hooks"
 import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api"
 import {
@@ -67,10 +68,12 @@ import {
   logger,
   syncCursorGraphics,
   abortHelpers,
-  executeHoverQuery,
   shouldSkipHoverQuery,
   updateGraphicSymbol,
+  createPropertyDispatcher,
+  cursorLifecycleHelpers,
 } from "../shared/utils"
+import { createPropertySelectors } from "../extensions/store"
 import type { CursorGraphicsState } from "../shared/utils"
 import {
   EXPORT_FORMATS,
@@ -158,10 +161,54 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const styles = useWidgetStyles()
   const translate = hooks.useTranslation(jimuUIMessages, defaultMessages)
 
-  const runtimeState = ReactRedux.useSelector(
-    (state: IMState) => state.widgetsRuntimeInfo?.[id]?.state
-  )
+  const widgetIdProp = (props as unknown as { widgetId?: string }).widgetId
+  const widgetId =
+    (typeof widgetIdProp === "string" && widgetIdProp.length > 0
+      ? widgetIdProp
+      : (id as unknown as string)) ?? (id as unknown as string)
+
+  const selectorsRef = React.useRef(createPropertySelectors(widgetId))
+  const previousWidgetId = hooks.usePrevious(widgetId)
+  if (
+    !selectorsRef.current ||
+    (previousWidgetId && previousWidgetId !== widgetId)
+  ) {
+    selectorsRef.current = createPropertySelectors(widgetId)
+  }
+  const selectors = selectorsRef.current
+
+  const runtimeState = ReactRedux.useSelector((state: IMState) => {
+    const widgetInfo = state.widgetsRuntimeInfo?.[widgetId]
+    if (widgetInfo?.state !== undefined) {
+      return widgetInfo.state
+    }
+    return state.widgetsRuntimeInfo?.[id]?.state
+  })
   const prevRuntimeState = hooks.usePrevious(runtimeState)
+
+  const error = ReactRedux.useSelector(selectors.selectError)
+  const selectedProperties = ReactRedux.useSelector(
+    selectors.selectSelectedProperties
+  )
+  const rawPropertyResults = ReactRedux.useSelector(selectors.selectRawResults)
+  const selectedCount =
+    typeof (selectedProperties as any)?.length === "number"
+      ? (selectedProperties as any).length
+      : 0
+  const hasSelectedProperties = selectedCount > 0
+
+  const propertyDispatchRef = React.useRef(
+    createPropertyDispatcher(props.dispatch, widgetId)
+  )
+  hooks.useUpdateEffect(() => {
+    propertyDispatchRef.current = createPropertyDispatcher(
+      props.dispatch,
+      widgetId
+    )
+  }, [props.dispatch, widgetId])
+
+  const selectedPropertiesRef = hooks.useLatest(selectedProperties)
+  const rawPropertyResultsRef = hooks.useLatest(rawPropertyResults)
 
   hooks.useEffectOnce(() => {
     // Widget mounted
@@ -191,8 +238,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     removeGraphicsForFnr,
     addGraphicsToMap,
     destroyGraphicsLayer,
-  } = useGraphicsLayer(modules, id)
-  const { disablePopup, restorePopup } = usePopupManager()
+  } = useGraphicsLayer(modules, widgetId)
+  const { disablePopup, restorePopup } = usePopupManager(widgetId)
   const { getController, releaseController, abortAll } =
     useAbortControllerPool()
 
@@ -202,53 +249,61 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   }
   const requestIdRef = React.useRef(0)
 
-  const {
-    state,
-    updateState,
-    setError,
-    handleSelectionChange,
-    handleClearAll,
-    handleWidgetReset,
-  } = usePropertySelectionState({
-    abortAll,
-    clearGraphics,
-    clearQueryCache,
-    trackEvent,
+  const resetSelectionState = hooks.useEventCallback(
+    (shouldTrackClear: boolean) => {
+      abortAll()
+      clearQueryCache()
+      clearGraphics()
+
+      const previousSelection = selectedPropertiesRef.current ?? []
+      if (shouldTrackClear && previousSelection.length > 0) {
+        trackEvent({
+          category: "Property",
+          action: "clear_all",
+          value: previousSelection.length,
+        })
+      }
+
+      propertyDispatchRef.current.clearAll()
+      propertyDispatchRef.current.setRawResults(null)
+      propertyDispatchRef.current.setQueryInFlight(false)
+    }
+  )
+
+  const handleClearAll = hooks.useEventCallback(() => {
+    resetSelectionState(true)
   })
 
-  // Hover tooltip state
-  const [hoverTooltipData, setHoverTooltipData] = React.useState<{
-    fastighet: string
-    bostadr: string
-  } | null>(null)
-  const [isHoverQueryActive, setIsHoverQueryActive] = React.useState(false)
-  const hoverQueryAbortRef = React.useRef<AbortController | null>(null)
-  const lastHoverQueryPointRef = React.useRef<{ x: number; y: number } | null>(
-    null
-  )
-  const HOVER_QUERY_TOLERANCE_PX_VALUE = HOVER_QUERY_TOLERANCE_PX
+  const handleWidgetReset = hooks.useEventCallback(() => {
+    resetSelectionState(false)
+  })
 
-  const hasSelectedProperties = state.selectedProperties.length > 0
-  const hasSelectedRows = state.rowSelectionIds.size > 0
+  const setError = hooks.useEventCallback(
+    (type: ErrorType, message: string, details?: string) => {
+      propertyDispatchRef.current.setError({ type, message, details })
+    }
+  )
 
   const renderConfiguredContent = () => {
-    if (state.error) {
+    if (error) {
       return (
         <div css={styles.emptyState} role="alert" aria-live="assertive">
-          <Alert type="error" withIcon text={state.error.message} />
-          {state.error.details && <div>{state.error.details}</div>}
+          <Alert type="error" withIcon text={error.message} />
+          {error.details && <div>{error.details}</div>}
         </div>
       )
     }
 
     if (hasSelectedProperties) {
+      const tableData = Array.isArray(selectedProperties)
+        ? selectedProperties
+        : Array.from(selectedProperties as Iterable<GridRowData>)
       return (
         <PropertyTable
-          data={state.selectedProperties}
+          data={tableData}
           columns={tableColumns}
           translate={translate}
           styles={styles}
-          onSelectionChange={handleSelectionChange}
         />
       )
     }
@@ -277,56 +332,100 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const highlightOpacityConfig = config.highlightOpacity
   const outlineWidthConfig = config.outlineWidth
 
+  // Hover query hook
+  const {
+    hoverTooltipData,
+    isHoverQueryActive,
+    queryPropertyAtPoint,
+    lastHoverQueryPointRef,
+    cleanup: cleanupHoverQuery,
+  } = useHoverQuery({
+    config: {
+      propertyDataSourceId: config.propertyDataSourceId,
+      ownerDataSourceId: config.ownerDataSourceId,
+      allowedHosts: config.allowedHosts,
+    },
+    dsManager: dsManagerRef.current,
+    enablePIIMasking: piiMaskingEnabled,
+    translate,
+  })
+
+  // Throttled hover query with spatial tolerance
+  const throttledHoverQuery = useThrottle(
+    (mapPoint: __esri.Point, screenPoint: { x: number; y: number }) => {
+      if (
+        shouldSkipHoverQuery(
+          screenPoint,
+          lastHoverQueryPointRef.current,
+          HOVER_QUERY_TOLERANCE_PX
+        )
+      ) {
+        return
+      }
+      lastHoverQueryPointRef.current = screenPoint
+      queryPropertyAtPoint(mapPoint)
+    },
+    100
+  )
+
   hooks.useUpdateEffect(() => {
-    updateState((prev) => {
-      if (prev.selectedProperties.length === 0) return prev
+    const currentSelection = selectedPropertiesRef.current ?? []
+    if (currentSelection.length === 0) return
 
-      trackFeatureUsage("pii_masking_toggled", piiMaskingEnabled)
+    trackFeatureUsage("pii_masking_toggled", piiMaskingEnabled)
 
-      const reformattedProperties = prev.selectedProperties.map((row) => {
-        if (!row.rawOwner || typeof row.rawOwner !== "object") {
-          return row
-        }
-        return {
-          ...row,
-          BOSTADR: formatOwnerInfo(
-            row.rawOwner,
-            piiMaskingEnabled,
-            translate("unknownOwner")
-          ),
-        }
-      })
-
-      return { ...prev, selectedProperties: reformattedProperties }
+    const reformattedProperties = currentSelection.map((row) => {
+      if (!row.rawOwner || typeof row.rawOwner !== "object") {
+        return row
+      }
+      return {
+        ...row,
+        BOSTADR: formatOwnerInfo(
+          row.rawOwner,
+          piiMaskingEnabled,
+          translate("unknownOwner")
+        ),
+      }
     })
+
+    propertyDispatchRef.current.setSelectedProperties(reformattedProperties)
   }, [piiMaskingEnabled, translate])
 
   hooks.useUpdateEffect(() => {
-    updateState((prev) => {
-      if (prev.selectedProperties.length <= maxResults) return prev
+    const currentSelection = selectedPropertiesRef.current ?? []
+    if (currentSelection.length <= maxResults) return
 
-      trackEvent({
-        category: "Property",
-        action: "max_results_trim",
-        value: prev.selectedProperties.length - maxResults,
-      })
+    trackEvent({
+      category: "Property",
+      action: "max_results_trim",
+      value: currentSelection.length - maxResults,
+    })
 
-      const trimmedProperties = prev.selectedProperties.slice(0, maxResults)
-      const removedProperties = prev.selectedProperties.slice(maxResults)
+    const trimmedProperties = currentSelection.slice(0, maxResults)
+    const removedProperties = currentSelection.slice(maxResults)
 
-      removedProperties.forEach((prop) => {
-        const fnr = prop.FNR
-        if (fnr != null) {
-          removeGraphicsForFnr(fnr, normalizeFnrKey)
-        }
-      })
-
-      return {
-        ...prev,
-        selectedProperties: trimmedProperties,
+    removedProperties.forEach((prop) => {
+      const fnr = prop.FNR
+      if (fnr != null) {
+        removeGraphicsForFnr(fnr, normalizeFnrKey)
       }
     })
-  }, [maxResults])
+
+    propertyDispatchRef.current.setSelectedProperties(trimmedProperties)
+
+    const existingRaw = rawPropertyResultsRef.current
+    if (existingRaw && Object.keys(existingRaw).length > 0) {
+      const nextRaw: { [key: string]: SerializedQueryResult } = {}
+      Object.keys(existingRaw).forEach((key) => {
+        if (!removedProperties.some((prop) => prop.id === key)) {
+          const rawValue = existingRaw[key]
+          // Convert immutable object to plain object
+          nextRaw[key] = JSON.parse(JSON.stringify(rawValue))
+        }
+      })
+      propertyDispatchRef.current.setRawResults(nextRaw as any)
+    }
+  }, [maxResults, normalizeFnrKey, removeGraphicsForFnr, trackEvent])
 
   hooks.useUpdateEffect(() => {
     trackFeatureUsage("toggle_removal_changed", toggleEnabled)
@@ -346,6 +445,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   const closeOtherWidgets = hooks.useEventCallback(() => {
     if (!config?.autoCloseOtherWidgets) return
+    if (!widgetId) return
 
     const store = typeof getAppStore === "function" ? getAppStore() : null
     if (!store) return
@@ -361,7 +461,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         }
       | undefined
 
-    const targets = computeWidgetsToClose(runtimeInfo, id)
+    const appWidgets = (state as any)?.appConfig?.widgets
+    const targets = computeWidgetsToClose(runtimeInfo, widgetId, appWidgets)
     if (targets.length === 0) return
 
     const safeTargets = targets.filter((targetId) => {
@@ -380,25 +481,74 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   })
 
   const handleExport = hooks.useEventCallback((format: ExportFormat) => {
-    if (!hasSelectedRows || !state.rawPropertyResults?.size) return
+    console.log("[Export] Starting export:", {
+      format,
+      hasSelectedProperties,
+      rawPropertyResults,
+    })
+
+    if (!hasSelectedProperties) {
+      console.log("[Export] No selected properties, aborting")
+      return
+    }
+
+    if (!rawPropertyResults) {
+      console.log("[Export] No raw results available, aborting")
+      return
+    }
+
+    // Convert rawPropertyResults to Map for consistent access
+    let resultsMap: Map<string, any>
+    if (rawPropertyResults instanceof Map) {
+      resultsMap = rawPropertyResults
+    } else if (rawPropertyResults && typeof rawPropertyResults === "object") {
+      // Handle Redux immutable object or plain object
+      resultsMap = new Map()
+      // Use for...in to handle both plain objects and Immutable objects
+      for (const key in rawPropertyResults) {
+        if (Object.prototype.hasOwnProperty.call(rawPropertyResults, key)) {
+          const value = (rawPropertyResults as any)[key]
+          if (value !== null && value !== undefined) {
+            resultsMap.set(key, value)
+          }
+        }
+      }
+    } else {
+      console.log(
+        "[Export] Invalid rawPropertyResults type:",
+        typeof rawPropertyResults
+      )
+      return
+    }
+
+    console.log("[Export] Results map size:", resultsMap.size)
+    if (resultsMap.size === 0) {
+      console.log("[Export] Results map is empty, aborting")
+      return
+    }
 
     const selectedRawData: any[] = []
-    state.rowSelectionIds.forEach((id) => {
-      const rawData = state.rawPropertyResults?.get(id)
+    selectedProperties.forEach((row) => {
+      const rawData = resultsMap.get(row.id)
+      console.log("[Export] Looking up row:", row.id, "Found:", !!rawData)
       if (rawData) selectedRawData.push(rawData)
     })
 
-    if (selectedRawData.length === 0) return
+    console.log("[Export] Selected raw data count:", selectedRawData.length)
+    if (selectedRawData.length === 0) {
+      console.log("[Export] No raw data found for selected rows, aborting")
+      return
+    }
 
-    const selectedRowData = state.selectedProperties.filter((row) =>
-      state.rowSelectionIds.has(row.id)
-    )
+    const selectedRows = Array.isArray(selectedProperties)
+      ? selectedProperties
+      : Array.from(selectedProperties as Iterable<GridRowData>)
 
     try {
-      exportData(selectedRawData, selectedRowData, {
+      exportData(selectedRawData, selectedRows, {
         format,
         filename: "property-export",
-        rowCount: selectedRowData.length,
+        rowCount: selectedRows.length,
         definition: EXPORT_FORMATS.find((item) => item.id === format),
       })
     } catch (error) {
@@ -422,8 +572,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const handleOwnerDataSourceFailed = hooks.useEventCallback(() => {
     setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
   })
-
-  const stateRef = hooks.useLatest(state)
 
   const handleMapClick = hooks.useEventCallback(
     async (event: __esri.ViewClickEvent) => {
@@ -452,11 +600,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       requestIdRef.current = requestId
       const isStaleRequest = () => requestId !== requestIdRef.current
 
-      updateState((prev) => ({
-        ...prev,
-        error: null,
-        isQueryInFlight: true,
-      }))
+      propertyDispatchRef.current.clearError()
+      propertyDispatchRef.current.setQueryInFlight(true)
+
+      const currentSelection = selectedPropertiesRef.current ?? []
+      const selectionForPipeline = Array.isArray(currentSelection)
+        ? currentSelection
+        : Array.from(currentSelection as Iterable<GridRowData>)
 
       const controller = getController()
 
@@ -472,7 +622,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           relationshipId: config.relationshipId,
           enablePIIMasking: piiMaskingEnabled,
           signal: controller.signal,
-          selectedProperties: stateRef.current.selectedProperties,
+          selectedProperties: selectionForPipeline,
           translate,
         })
 
@@ -489,16 +639,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         }
 
         if (pipelineResult.status === "empty") {
-          updateState((prev) => {
-            if (isStaleRequest()) return prev
-            return { ...prev, isQueryInFlight: false }
-          })
+          if (!isStaleRequest()) {
+            propertyDispatchRef.current.setQueryInFlight(false)
+          }
           tracker.success()
           return
         }
 
-        const previousSelection = stateRef.current.selectedProperties
-        const removedRows = previousSelection.filter((row) =>
+        const removedRows = selectionForPipeline.filter((row) =>
           pipelineResult.toRemove.has(normalizeFnrKey(row.FNR))
         )
 
@@ -510,27 +658,47 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           })
         }
 
-        updateState((prev) => {
-          if (isStaleRequest()) {
-            return prev
+        if (!isStaleRequest()) {
+          const prevRawResults = rawPropertyResultsRef.current
+
+          // Convert prevRawResults to a proper Map
+          let baseRawResults: Map<string, SerializedQueryResult>
+          if (prevRawResults instanceof Map) {
+            baseRawResults = prevRawResults
+          } else if (prevRawResults && typeof prevRawResults === "object") {
+            // Handle plain objects or immutable objects from Redux
+            baseRawResults = new Map<string, SerializedQueryResult>()
+            Object.keys(prevRawResults).forEach((key) => {
+              const value = (prevRawResults as any)[key]
+              if (value && typeof value === "object") {
+                baseRawResults.set(key, value as SerializedQueryResult)
+              }
+            })
+          } else {
+            baseRawResults = new Map<string, SerializedQueryResult>()
           }
 
           const updatedRawResults = updateRawPropertyResults(
-            prev.rawPropertyResults || new Map(),
+            baseRawResults,
             pipelineResult.rowsToProcess,
             pipelineResult.propertyResults,
             pipelineResult.toRemove,
-            prev.selectedProperties,
+            selectionForPipeline,
             normalizeFnrKey
           )
 
-          return {
-            ...prev,
-            selectedProperties: pipelineResult.updatedRows,
-            isQueryInFlight: false,
-            rawPropertyResults: updatedRawResults,
-          }
-        })
+          // Convert Map back to plain object for Redux storage
+          const plainResults: { [key: string]: SerializedQueryResult } = {}
+          updatedRawResults.forEach((value, key) => {
+            plainResults[key] = value
+          })
+
+          // Batch Redux updates to reduce re-renders
+          const dispatch = propertyDispatchRef.current
+          dispatch.setSelectedProperties(pipelineResult.updatedRows)
+          dispatch.setRawResults(plainResults as any)
+          dispatch.setQueryInFlight(false)
+        }
 
         cleanupRemovedGraphics({
           toRemove: pipelineResult.toRemove,
@@ -573,6 +741,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         if (isAbortError(error)) {
           tracker.failure("aborted")
+          propertyDispatchRef.current.setQueryInFlight(false)
           return
         }
 
@@ -642,68 +811,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     cursorGraphicsStateRef.current = null
   })
 
-  // Hover query function - queries property at cursor position
-  const queryPropertyAtPoint = hooks.useEventCallback(
-    async (mapPoint: __esri.Point) => {
-      if (hoverQueryAbortRef.current) {
-        hoverQueryAbortRef.current.abort()
-        hoverQueryAbortRef.current = null
-      }
-
-      const controller = new AbortController()
-      hoverQueryAbortRef.current = controller
-
-      setIsHoverQueryActive(true)
-      try {
-        const result = await executeHoverQuery({
-          mapPoint,
-          config: {
-            propertyDataSourceId: config.propertyDataSourceId,
-            ownerDataSourceId: config.ownerDataSourceId,
-            allowedHosts: config.allowedHosts,
-          },
-          dsManager: dsManagerRef.current,
-          signal: controller.signal,
-          enablePIIMasking: piiMaskingEnabled,
-          translate,
-        })
-
-        if (controller.signal.aborted) return
-
-        setHoverTooltipData(result)
-        setIsHoverQueryActive(false)
-      } catch (error) {
-        if (isAbortError(error)) return
-
-        logger.debug("Hover query failed", { error })
-        setHoverTooltipData(null)
-        setIsHoverQueryActive(false)
-      } finally {
-        if (hoverQueryAbortRef.current === controller) {
-          hoverQueryAbortRef.current = null
-        }
-      }
-    }
-  )
-
-  // Throttled version of hover query with spatial tolerance
-  const throttledHoverQuery = useThrottle(
-    (mapPoint: __esri.Point, screenPoint: { x: number; y: number }) => {
-      if (
-        shouldSkipHoverQuery(
-          screenPoint,
-          lastHoverQueryPointRef.current,
-          HOVER_QUERY_TOLERANCE_PX_VALUE
-        )
-      ) {
-        return
-      }
-      lastHoverQueryPointRef.current = screenPoint
-      queryPropertyAtPoint(mapPoint)
-    },
-    100
-  )
-
   const updateCursorPoint = hooks.useEventCallback(
     (mapPoint: __esri.Point | null) => {
       if (!mapPoint) {
@@ -718,6 +825,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       const layer = cachedLayerRef.current
       if (!layer) {
+        clearCursorGraphics()
+        return
+      }
+
+      if (!modules?.Graphic || !modules?.TextSymbol) {
         clearCursorGraphics()
         return
       }
@@ -762,107 +874,57 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     const isActive =
       runtimeState === WidgetState.Opened || runtimeState === WidgetState.Active
 
-    // Clean up existing handler
-    if (pointerMoveHandleRef.current) {
-      pointerMoveHandleRef.current.remove()
-      pointerMoveHandleRef.current = null
-      clearCursorGraphics()
-    }
-
-    if (pointerLeaveHandleRef.current) {
-      pointerLeaveHandleRef.current.remove()
-      pointerLeaveHandleRef.current = null
-    }
+    cursorLifecycleHelpers.cleanupHandles({
+      pointerMoveHandle: pointerMoveHandleRef,
+      pointerLeaveHandle: pointerLeaveHandleRef,
+      rafId: rafIdRef,
+      clearGraphics: clearCursorGraphics,
+      cleanupQuery: cleanupHoverQuery,
+    })
 
     const canTrackCursor =
       isActive && !!modules?.TextSymbol && !!modules?.Graphic
 
-    // Setup new handler if widget is active
     if (canTrackCursor) {
-      // Cache layer reference to avoid repeated DOM queries
-      ensureGraphicsLayer(view)
-      cachedLayerRef.current = view.map.findLayerById(
-        `${id}-property-highlight-layer`
-      ) as __esri.GraphicsLayer | null
-
-      pointerMoveHandleRef.current = view.on("pointer-move", (event) => {
-        const screenPoint = { x: event.x, y: event.y }
-        const mapPoint = view.toMap(screenPoint)
-
-        if (mapPoint) {
-          lastCursorPointRef.current = mapPoint
-          pendingMapPointRef.current = mapPoint
-
-          // Use RAF to batch graphic updates at 60fps
-          if (rafIdRef.current === null) {
-            rafIdRef.current = requestAnimationFrame(() => {
-              rafIdRef.current = null
-              const point = pendingMapPointRef.current
-              if (point) {
-                updateCursorPoint(point)
-              }
-            })
-          }
-
-          // Trigger throttled hover query with spatial tolerance
-          throttledHoverQuery(mapPoint, screenPoint)
-        } else {
-          lastCursorPointRef.current = null
-          pendingMapPointRef.current = null
-          updateCursorPoint(null)
-          setHoverTooltipData(null)
-          setIsHoverQueryActive(false)
-        }
-      })
-
-      pointerLeaveHandleRef.current = view.on("pointer-leave", () => {
-        lastCursorPointRef.current = null
-        pendingMapPointRef.current = null
-        lastHoverQueryPointRef.current = null
-        if (rafIdRef.current !== null) {
-          cancelAnimationFrame(rafIdRef.current)
-          rafIdRef.current = null
-        }
-        updateCursorPoint(null)
-        setHoverTooltipData(null)
-        setIsHoverQueryActive(false)
+      cursorLifecycleHelpers.setupCursorTracking({
+        view,
+        widgetId,
+        ensureGraphicsLayer,
+        cachedLayerRef,
+        pointerMoveHandleRef,
+        pointerLeaveHandleRef,
+        rafIdRef,
+        lastCursorPointRef,
+        pendingMapPointRef,
+        lastHoverQueryPointRef,
+        updateCursorPoint,
+        throttledHoverQuery,
+        cleanupHoverQuery,
       })
     } else {
-      lastCursorPointRef.current = null
-      pendingMapPointRef.current = null
-      cachedLayerRef.current = null
-      clearCursorGraphics()
-      setHoverTooltipData(null)
-      setIsHoverQueryActive(false)
+      cursorLifecycleHelpers.resetCursorState({
+        lastCursorPointRef,
+        pendingMapPointRef,
+        cachedLayerRef,
+        clearGraphics: clearCursorGraphics,
+        cleanupQuery: cleanupHoverQuery,
+      })
     }
 
     return () => {
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current)
-        rafIdRef.current = null
-      }
-      if (pointerMoveHandleRef.current) {
-        pointerMoveHandleRef.current.remove()
-        pointerMoveHandleRef.current = null
-      }
-      if (pointerLeaveHandleRef.current) {
-        pointerLeaveHandleRef.current.remove()
-        pointerLeaveHandleRef.current = null
-      }
-      if (hoverQueryAbortRef.current) {
-        hoverQueryAbortRef.current.abort()
-        hoverQueryAbortRef.current = null
-      }
-      setHoverTooltipData(null)
-      setIsHoverQueryActive(false)
-      pendingMapPointRef.current = null
-      cachedLayerRef.current = null
-      if (!canTrackCursor) {
-        lastCursorPointRef.current = null
-      }
-      clearCursorGraphics()
+      cursorLifecycleHelpers.teardownCursorTracking({
+        rafId: rafIdRef,
+        pointerMoveHandle: pointerMoveHandleRef,
+        pointerLeaveHandle: pointerLeaveHandleRef,
+        lastCursorPointRef,
+        pendingMapPointRef,
+        cachedLayerRef,
+        canTrackCursor,
+        clearGraphics: clearCursorGraphics,
+        cleanupQuery: cleanupHoverQuery,
+      })
     }
-  }, [runtimeState, modules])
+  }, [runtimeState, modules, widgetId])
 
   // Cleanup cursor point on unmount
   hooks.useUnmount(() => {
@@ -878,10 +940,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       pointerLeaveHandleRef.current.remove()
       pointerLeaveHandleRef.current = null
     }
-    if (hoverQueryAbortRef.current) {
-      hoverQueryAbortRef.current.abort()
-      hoverQueryAbortRef.current = null
-    }
+    cleanupHoverQuery()
     pendingMapPointRef.current = null
     cachedLayerRef.current = null
     lastCursorPointRef.current = null
@@ -896,13 +955,17 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   // Sync selection graphics when highlight config changes (incremental update)
   const debouncedSyncGraphics = useDebounce(() => {
-    if (state.selectedProperties.length === 0) return
+    const currentSelection = selectedPropertiesRef.current ?? []
+    const selectionArray = Array.isArray(currentSelection)
+      ? currentSelection
+      : Array.from(currentSelection as Iterable<GridRowData>)
+    if (selectionArray.length === 0) return
 
     const view = getCurrentView()
     if (!view || !modules) return
 
     const layer = view.map.findLayerById(
-      `${id}-property-highlight-layer`
+      `property-${widgetId}-highlight-layer`
     ) as __esri.GraphicsLayer | null
     if (!layer) return
 
@@ -913,7 +976,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     const currentOutlineWidth = getValidatedOutlineWidth(outlineWidthConfig)
 
     const selectedFnrKeys = new Set(
-      state.selectedProperties.map((row) => normalizeFnrKey(row.FNR))
+      selectionArray.map((row) => normalizeFnrKey(row.FNR))
     )
 
     layer.graphics.forEach((graphic: __esri.Graphic) => {
@@ -990,6 +1053,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   hooks.useUnmount(() => {
     abortAll()
     clearQueryCache()
+    clearGraphics()
+    propertyDispatchRef.current.removeWidgetState()
   })
 
   const isConfigured = config.propertyDataSourceId && config.ownerDataSourceId
@@ -1065,7 +1130,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             icon
             onClick={handleClearAll}
             title={translate("clearAll")}
-            disabled={state.selectedProperties.length === 0}
+            disabled={!hasSelectedProperties}
           >
             <SVG src={clearIcon} size={20} />
           </Button>
@@ -1078,7 +1143,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
               arrow={false}
               icon
               type="tertiary"
-              disabled={!hasSelectedRows}
+              disabled={!hasSelectedProperties}
               title={translate("exportData")}
               role="combobox"
             >
@@ -1119,7 +1184,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       <div css={styles.footer}>
         <div css={styles.col}>{translate("propertySelected")}</div>
-        <div css={styles.col}>{state.selectedProperties.length}</div>
+        <div css={styles.col}>{selectedCount}</div>
       </div>
 
       {mapWidgetId ? (

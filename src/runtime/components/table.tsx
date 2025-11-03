@@ -1,79 +1,35 @@
 /** @jsx jsx */
-import { React, jsx, hooks } from "jimu-core"
-import { Checkbox } from "jimu-ui"
+import { React, jsx } from "jimu-core"
 import { useReactTable, flexRender } from "@tanstack/react-table"
-import type {
-  SortingState,
-  ColumnFiltersState,
-  RowSelectionState,
-  ColumnDef,
-} from "@tanstack/react-table"
-import type { PropertyTableProps, GridRowData } from "../../config/types"
+import type { SortingState, ColumnFiltersState } from "@tanstack/react-table"
+import type { PropertyTableProps } from "../../config/types"
 import {
   createTableConfig,
-  createSelectColumn,
   getDefaultSorting,
   getDefaultColumnFilters,
-  getDefaultRowSelection,
   getRowId,
   getVisibleRows,
 } from "../../shared/config"
 
-const IndeterminateCheckbox = (props: {
-  checked?: boolean
-  indeterminate?: boolean
-  disabled?: boolean
-  onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void
-}) => {
-  return <Checkbox {...props} />
-}
-
 export const PropertyTable = (props: PropertyTableProps) => {
-  const { data, columns, translate, styles, onSelectionChange } = props
+  const { data, columns, translate, styles } = props
 
   const [sorting, setSorting] =
     React.useState<SortingState>(getDefaultSorting())
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
     getDefaultColumnFilters()
   )
-  const [rowSelection, setRowSelection] = React.useState<RowSelectionState>(
-    getDefaultRowSelection()
-  )
-
-  hooks.useUpdateEffect(() => {
-    if (onSelectionChange) {
-      const selectedIds = new Set(
-        Object.keys(rowSelection).filter((id) => rowSelection[id])
-      )
-      onSelectionChange(selectedIds)
-    }
-  }, [rowSelection, onSelectionChange])
-
-  const columnsWithSelectRef = React.useRef<Array<ColumnDef<GridRowData, any>>>(
-    [createSelectColumn(IndeterminateCheckbox), ...columns]
-  )
-
-  hooks.useUpdateEffect(() => {
-    columnsWithSelectRef.current = [
-      createSelectColumn(IndeterminateCheckbox),
-      ...columns,
-    ]
-  }, [columns])
-
-  const columnsWithSelect = columnsWithSelectRef.current
 
   const table = useReactTable({
     data,
-    columns: columnsWithSelect,
+    columns,
     getRowId,
     state: {
       sorting,
       columnFilters,
-      rowSelection,
     },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
-    onRowSelectionChange: setRowSelection,
     ...createTableConfig(),
   })
 
