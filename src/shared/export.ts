@@ -143,7 +143,7 @@ const buildFilename = (
 
 export const exportData = (
   rawData: any[] | null | undefined,
-  selectedRows: GridRowData[],
+  selectedProperties: GridRowData[],
   options: ExportOptions
 ): void => {
   const { format, filename, rowCount, definition } = options
@@ -158,11 +158,11 @@ export const exportData = (
       content = JSON.stringify(cleanedData, null, 2)
       mimeType = definition?.mimeType || "application/json;charset=utf-8"
     } else if (format === "csv") {
-      content = convertToCSV(selectedRows)
+      content = convertToCSV(selectedProperties)
       mimeType = definition?.mimeType || "text/csv;charset=utf-8"
       extension = definition?.extension || "csv"
     } else if (format === "geojson") {
-      content = JSON.stringify(convertToGeoJSON(selectedRows), null, 2)
+      content = JSON.stringify(convertToGeoJSON(selectedProperties), null, 2)
       mimeType = definition?.mimeType || "application/geo+json;charset=utf-8"
       extension = definition?.extension || "geojson"
     } else {

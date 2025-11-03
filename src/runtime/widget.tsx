@@ -202,19 +202,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   }
   const requestIdRef = React.useRef(0)
 
-  const {
-    state,
-    updateState,
-    setError,
-    handleSelectionChange,
-    handleClearAll,
-    handleWidgetReset,
-  } = usePropertySelectionState({
-    abortAll,
-    clearGraphics,
-    clearQueryCache,
-    trackEvent,
-  })
+  const { state, updateState, setError, handleClearAll, handleWidgetReset } =
+    usePropertySelectionState({
+      abortAll,
+      clearGraphics,
+      clearQueryCache,
+      trackEvent,
+    })
 
   // Hover tooltip state
   const [hoverTooltipData, setHoverTooltipData] = React.useState<{
@@ -229,7 +223,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const HOVER_QUERY_TOLERANCE_PX_VALUE = HOVER_QUERY_TOLERANCE_PX
 
   const hasSelectedProperties = state.selectedProperties.length > 0
-  const hasSelectedRows = state.rowSelectionIds.size > 0
 
   const renderConfiguredContent = () => {
     if (state.error) {
@@ -248,7 +241,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           columns={tableColumns}
           translate={translate}
           styles={styles}
-          onSelectionChange={handleSelectionChange}
         />
       )
     }
@@ -380,25 +372,21 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   })
 
   const handleExport = hooks.useEventCallback((format: ExportFormat) => {
-    if (!hasSelectedRows || !state.rawPropertyResults?.size) return
+    if (!hasSelectedProperties || !state.rawPropertyResults?.size) return
 
     const selectedRawData: any[] = []
-    state.rowSelectionIds.forEach((id) => {
-      const rawData = state.rawPropertyResults?.get(id)
+    state.selectedProperties.forEach((row) => {
+      const rawData = state.rawPropertyResults?.get(row.id)
       if (rawData) selectedRawData.push(rawData)
     })
 
     if (selectedRawData.length === 0) return
 
-    const selectedRowData = state.selectedProperties.filter((row) =>
-      state.rowSelectionIds.has(row.id)
-    )
-
     try {
-      exportData(selectedRawData, selectedRowData, {
+      exportData(selectedRawData, state.selectedProperties, {
         format,
         filename: "property-export",
-        rowCount: selectedRowData.length,
+        rowCount: state.selectedProperties.length,
         definition: EXPORT_FORMATS.find((item) => item.id === format),
       })
     } catch (error) {
@@ -1078,7 +1066,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
               arrow={false}
               icon
               type="tertiary"
-              disabled={!hasSelectedRows}
+              disabled={!hasSelectedProperties}
               title={translate("exportData")}
               role="combobox"
             >

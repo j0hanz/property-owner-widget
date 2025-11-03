@@ -142,7 +142,6 @@ interface PropertySelectionApi {
     updater: (prev: PropertyWidgetState) => PropertyWidgetState
   ) => void
   setError: (type: ErrorType, message: string, details?: string) => void
-  handleSelectionChange: (selectedIds: Set<string>) => void
   handleClearAll: () => void
   handleWidgetReset: () => void
 }
@@ -152,7 +151,6 @@ const createInitialSelectionState = (): PropertyWidgetState => ({
   selectedProperties: [],
   isQueryInFlight: false,
   rawPropertyResults: null,
-  rowSelectionIds: new Set(),
 })
 
 export const usePropertySelectionState = (
@@ -176,15 +174,6 @@ export const usePropertySelectionState = (
         ...prev,
         error: { type, message, details },
         isQueryInFlight: false,
-      }))
-    }
-  )
-
-  const handleSelectionChange = hooks.useEventCallback(
-    (selectedIds: Set<string>) => {
-      updateState((prev) => ({
-        ...prev,
-        rowSelectionIds: new Set(selectedIds),
       }))
     }
   )
@@ -223,7 +212,6 @@ export const usePropertySelectionState = (
     state,
     updateState,
     setError,
-    handleSelectionChange,
     handleClearAll,
     handleWidgetReset,
   }

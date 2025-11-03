@@ -146,7 +146,6 @@ export interface PropertyWidgetState {
   selectedProperties: GridRowData[]
   isQueryInFlight: boolean
   rawPropertyResults: Map<string, any> | null
-  rowSelectionIds: Set<string>
 }
 
 export interface QueryResult {
@@ -347,7 +346,6 @@ export interface PropertyTableProps {
   columns: Array<ColumnDef<GridRowData, any>>
   translate: (key: string) => string
   styles: WidgetStyles
-  onSelectionChange?: (selectedIds: Set<string>) => void
 }
 
 export interface LoadingBlockProps {
