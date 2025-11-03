@@ -36,7 +36,6 @@ import type {
   GridRowData,
   SelectionGraphicsParams,
   ExportFormat,
-  OwnerAttributes,
 } from "../config/types"
 import { ErrorType } from "../config/enums"
 import { useWidgetStyles } from "../config/style"
@@ -50,13 +49,7 @@ import {
   useThrottle,
   usePropertySelectionState,
 } from "../shared/hooks"
-import {
-  queryPropertyByPoint,
-  queryOwnerByFnr,
-  clearQueryCache,
-  validateDataSources,
-  runPropertySelectionPipeline,
-} from "../shared/api"
+import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api"
 import {
   formatOwnerInfo,
   extractFnr,
@@ -67,7 +60,6 @@ import {
   cleanupRemovedGraphics,
   isValidationFailure,
   buildHighlightColor,
-  buildHighlightSymbolJSON,
   computeWidgetsToClose,
   dataSourceHelpers,
   getValidatedOutlineWidth,
@@ -75,6 +67,9 @@ import {
   logger,
   syncCursorGraphics,
   abortHelpers,
+  executeHoverQuery,
+  shouldSkipHoverQuery,
+  updateGraphicSymbol,
 } from "../shared/utils"
 import type { CursorGraphicsState } from "../shared/utils"
 import {
@@ -350,74 +345,61 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const tableColumns = tableColumnsRef.current
 
   const closeOtherWidgets = hooks.useEventCallback(() => {
-    const autoCloseSetting = config?.autoCloseOtherWidgets
-    if (autoCloseSetting !== undefined && !autoCloseSetting) {
-      return
-    }
-    try {
-      const store = typeof getAppStore === "function" ? getAppStore() : null
-      const state = store?.getState?.()
-      const runtimeInfo = state?.widgetsRuntimeInfo as
-        | {
-            [id: string]:
-              | { state?: WidgetState | string; isClassLoaded?: boolean }
-              | undefined
-          }
-        | undefined
-      const targets = computeWidgetsToClose(runtimeInfo, id)
-      if (targets.length) {
-        const safeTargets = targets.filter((targetId) => {
-          const targetInfo = runtimeInfo?.[targetId]
-          return Boolean(targetInfo?.isClassLoaded)
-        })
-        if (safeTargets.length) {
-          trackEvent({
-            category: "Widget",
-            action: "close_other_widgets",
-            value: safeTargets.length,
-          })
-          props.dispatch(appActions.closeWidgets(safeTargets))
+    if (!config?.autoCloseOtherWidgets) return
+
+    const store = typeof getAppStore === "function" ? getAppStore() : null
+    if (!store) return
+
+    const state = store.getState?.()
+    if (!state) return
+
+    const runtimeInfo = state.widgetsRuntimeInfo as
+      | {
+          [id: string]:
+            | { state?: WidgetState | string; isClassLoaded?: boolean }
+            | undefined
         }
-      }
-    } catch (err) {
-      // Silent fail - non-critical error
-    }
+      | undefined
+
+    const targets = computeWidgetsToClose(runtimeInfo, id)
+    if (targets.length === 0) return
+
+    const safeTargets = targets.filter((targetId) => {
+      const targetInfo = runtimeInfo?.[targetId]
+      return Boolean(targetInfo?.isClassLoaded)
+    })
+
+    if (safeTargets.length === 0) return
+
+    trackEvent({
+      category: "Widget",
+      action: "close_other_widgets",
+      value: safeTargets.length,
+    })
+    props.dispatch(appActions.closeWidgets(safeTargets))
   })
 
   const handleExport = hooks.useEventCallback((format: ExportFormat) => {
-    if (!hasSelectedRows) {
-      return
-    }
+    if (!hasSelectedRows || !state.rawPropertyResults?.size) return
 
-    if (!state.rawPropertyResults || state.rawPropertyResults.size === 0) {
-      return
-    }
+    const selectedRawData: any[] = []
+    state.rowSelectionIds.forEach((id) => {
+      const rawData = state.rawPropertyResults?.get(id)
+      if (rawData) selectedRawData.push(rawData)
+    })
+
+    if (selectedRawData.length === 0) return
 
     const selectedRowData = state.selectedProperties.filter((row) =>
       state.rowSelectionIds.has(row.id)
     )
 
-    const selectedRawData: any[] = []
-    state.rowSelectionIds.forEach((id) => {
-      const rawData = state.rawPropertyResults?.get(id)
-      if (rawData) {
-        selectedRawData.push(rawData)
-      }
-    })
-
-    if (selectedRawData.length === 0) {
-      return
-    }
-
-    const rowCount = selectedRowData.length
-    const formatDefinition = EXPORT_FORMATS.find((item) => item.id === format)
-
     try {
       exportData(selectedRawData, selectedRowData, {
         format,
         filename: "property-export",
-        rowCount,
-        definition: formatDefinition,
+        rowCount: selectedRowData.length,
+        definition: EXPORT_FORMATS.find((item) => item.id === format),
       })
     } catch (error) {
       console.error("Export failed", error)
@@ -663,96 +645,35 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   // Hover query function - queries property at cursor position
   const queryPropertyAtPoint = hooks.useEventCallback(
     async (mapPoint: __esri.Point) => {
-      // Cancel any existing hover query
       if (hoverQueryAbortRef.current) {
         hoverQueryAbortRef.current.abort()
         hoverQueryAbortRef.current = null
       }
 
-      // Create new abort controller for this hover query
       const controller = new AbortController()
       hoverQueryAbortRef.current = controller
 
       setIsHoverQueryActive(true)
       try {
-        // Validate data sources
-        const dsValidation = validateDataSources({
-          propertyDsId: config.propertyDataSourceId,
-          ownerDsId: config.ownerDataSourceId,
+        const result = await executeHoverQuery({
+          mapPoint,
+          config: {
+            propertyDataSourceId: config.propertyDataSourceId,
+            ownerDataSourceId: config.ownerDataSourceId,
+            allowedHosts: config.allowedHosts,
+          },
           dsManager: dsManagerRef.current,
-          allowedHosts: config.allowedHosts,
+          signal: controller.signal,
+          enablePIIMasking: piiMaskingEnabled,
           translate,
         })
 
-        if (isValidationFailure(dsValidation)) {
-          setIsHoverQueryActive(false)
-          if (hoverQueryAbortRef.current) {
-            hoverQueryAbortRef.current = null
-          }
-          return
-        }
-        const { manager } = dsValidation.data
+        if (controller.signal.aborted) return
 
-        // Query property at point
-        const propertyResults = await queryPropertyByPoint(
-          mapPoint,
-          config.propertyDataSourceId,
-          manager,
-          { signal: controller.signal }
-        )
-
-        if (controller.signal.aborted) {
-          return
-        }
-
-        // No property found at cursor
-        if (!propertyResults.length || !propertyResults[0]?.features?.length) {
-          setHoverTooltipData(null)
-          setIsHoverQueryActive(false)
-          return
-        }
-
-        const feature = propertyResults[0].features[0]
-        const fnr = extractFnr(feature.attributes)
-        const fastighet = feature.attributes?.FASTIGHET || ""
-
-        if (!fnr || !fastighet) {
-          setHoverTooltipData(null)
-          setIsHoverQueryActive(false)
-          return
-        }
-
-        // Query owner data for this property
-        const ownerFeatures = await queryOwnerByFnr(
-          fnr,
-          config.ownerDataSourceId,
-          manager,
-          { signal: controller.signal }
-        )
-
-        if (controller.signal.aborted) {
-          return
-        }
-
-        // Format owner info
-        let bostadr = translate("unknownOwner")
-        if (ownerFeatures.length > 0) {
-          const ownerAttrs = ownerFeatures[0].attributes as OwnerAttributes
-          bostadr = formatOwnerInfo(
-            ownerAttrs,
-            piiMaskingEnabled,
-            translate("unknownOwner")
-          )
-        }
-
-        // Update hover tooltip data
-        setHoverTooltipData({ fastighet, bostadr })
+        setHoverTooltipData(result)
         setIsHoverQueryActive(false)
       } catch (error) {
-        if (isAbortError(error)) {
-          hoverQueryAbortRef.current = null
-          return
-        }
+        if (isAbortError(error)) return
 
         logger.debug("Hover query failed", { error })
         setHoverTooltipData(null)
@@ -768,14 +689,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   // Throttled version of hover query with spatial tolerance
   const throttledHoverQuery = useThrottle(
     (mapPoint: __esri.Point, screenPoint: { x: number; y: number }) => {
-      // Skip query if within tolerance of last query point
-      if (lastHoverQueryPointRef.current) {
-        const dx = screenPoint.x - lastHoverQueryPointRef.current.x
-        const dy = screenPoint.y - lastHoverQueryPointRef.current.y
-        const distance = Math.sqrt(dx * dx + dy * dy)
-        if (distance < HOVER_QUERY_TOLERANCE_PX_VALUE) {
-          return
-        }
+      if (
+        shouldSkipHoverQuery(
+          screenPoint,
+          lastHoverQueryPointRef.current,
+          HOVER_QUERY_TOLERANCE_PX_VALUE
+        )
+      ) {
+        return
       }
       lastHoverQueryPointRef.current = screenPoint
       queryPropertyAtPoint(mapPoint)
@@ -975,22 +896,15 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   // Sync selection graphics when highlight config changes (incremental update)
   const debouncedSyncGraphics = useDebounce(() => {
-    if (state.selectedProperties.length === 0) {
-      return
-    }
+    if (state.selectedProperties.length === 0) return
 
     const view = getCurrentView()
-    if (!view || !modules) {
-      return
-    }
+    if (!view || !modules) return
 
     const layer = view.map.findLayerById(
       `${id}-property-highlight-layer`
     ) as __esri.GraphicsLayer | null
-
-    if (!layer) {
-      return
-    }
+    if (!layer) return
 
     const currentHighlightColor = buildHighlightColor(
       highlightColorConfig,
@@ -998,42 +912,25 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     )
     const currentOutlineWidth = getValidatedOutlineWidth(outlineWidthConfig)
 
-    // Incremental symbol update: modify existing graphics instead of rebuilding
     const selectedFnrKeys = new Set(
       state.selectedProperties.map((row) => normalizeFnrKey(row.FNR))
     )
 
     layer.graphics.forEach((graphic: __esri.Graphic) => {
-      if (!graphic || !graphic.geometry) return
+      if (!graphic?.geometry) return
+
       const fnr = extractFnr(graphic.attributes)
       if (!fnr) return
 
       const fnrKey = normalizeFnrKey(fnr)
       if (!selectedFnrKeys.has(fnrKey)) return
 
-      // Update symbol properties in place
-      const geometry = graphic.geometry
-      if (!geometry) return
-
-      const symbolJSON = buildHighlightSymbolJSON(
+      updateGraphicSymbol(
+        graphic,
         currentHighlightColor,
         currentOutlineWidth,
-        geometry.type as "polygon" | "polyline" | "point"
+        modules
       )
-
-      if (geometry.type === "polygon" || geometry.type === "extent") {
-        graphic.symbol = new modules.SimpleFillSymbol(
-          symbolJSON as __esri.SimpleFillSymbolProperties
-        )
-      } else if (geometry.type === "polyline") {
-        graphic.symbol = new modules.SimpleLineSymbol(
-          symbolJSON as __esri.SimpleLineSymbolProperties
-        )
-      } else if (geometry.type === "point" || geometry.type === "multipoint") {
-        graphic.symbol = new modules.SimpleMarkerSymbol(
-          symbolJSON as __esri.SimpleMarkerSymbolProperties
-        )
-      }
     })
   }, 100)
 

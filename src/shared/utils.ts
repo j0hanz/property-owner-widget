@@ -8,7 +8,11 @@ import type {
 } from "../config/types"
 import type { DataSourceManager } from "jimu-core"
 import { isValidationFailure as checkValidationFailure } from "../config/types"
-import { validateDataSources as validateDataSourcesCore } from "../shared/api"
+import {
+  validateDataSources as validateDataSourcesCore,
+  queryPropertyByPoint,
+  queryOwnerByFnr,
+} from "../shared/api"
 import {
   MIN_MASK_LENGTH,
   MAX_MASK_ASTERISKS,
@@ -958,6 +962,121 @@ export const computeWidgetsToClose = (
   }
 
   return ids
+}
+
+export const executeHoverQuery = async (params: {
+  mapPoint: __esri.Point
+  config: {
+    propertyDataSourceId: string
+    ownerDataSourceId: string
+    allowedHosts?: readonly string[]
+  }
+  dsManager: any
+  signal: AbortSignal
+  enablePIIMasking: boolean
+  translate: (key: string) => string
+}): Promise<{ fastighet: string; bostadr: string } | null> => {
+  const { mapPoint, config, dsManager, signal, enablePIIMasking, translate } =
+    params
+
+  const dsValidation = validateDataSourcesCore({
+    propertyDsId: config.propertyDataSourceId,
+    ownerDsId: config.ownerDataSourceId,
+    dsManager,
+    allowedHosts: config.allowedHosts,
+    translate,
+  })
+
+  if (checkValidationFailure(dsValidation)) {
+    return null
+  }
+  const { manager } = dsValidation.data
+
+  const propertyResults = await queryPropertyByPoint(
+    mapPoint,
+    config.propertyDataSourceId,
+    manager,
+    { signal }
+  )
+
+  abortHelpers.throwIfAborted(signal)
+
+  if (!propertyResults.length || !propertyResults[0]?.features?.length) {
+    return null
+  }
+
+  const feature = propertyResults[0].features[0]
+  const fnr = extractFnr(feature.attributes)
+  const fastighet = feature.attributes?.FASTIGHET || ""
+
+  if (!fnr || !fastighet) {
+    return null
+  }
+
+  const ownerFeatures = await queryOwnerByFnr(
+    fnr,
+    config.ownerDataSourceId,
+    manager,
+    { signal }
+  )
+
+  abortHelpers.throwIfAborted(signal)
+
+  let bostadr = translate("unknownOwner")
+  if (ownerFeatures.length > 0) {
+    const ownerAttrs = ownerFeatures[0].attributes
+    bostadr = formatOwnerInfo(
+      ownerAttrs,
+      enablePIIMasking,
+      translate("unknownOwner")
+    )
+  }
+
+  return { fastighet, bostadr }
+}
+
+export const shouldSkipHoverQuery = (
+  screenPoint: { x: number; y: number },
+  lastQueryPoint: { x: number; y: number } | null,
+  tolerancePx: number
+): boolean => {
+  if (!lastQueryPoint) return false
+
+  const dx = screenPoint.x - lastQueryPoint.x
+  const dy = screenPoint.y - lastQueryPoint.y
+  const distance = Math.sqrt(dx * dx + dy * dy)
+
+  return distance < tolerancePx
+}
+
+export const updateGraphicSymbol = (
+  graphic: __esri.Graphic,
+  highlightColor: [number, number, number, number],
+  outlineWidth: number,
+  modules: EsriModules
+): void => {
+  if (!graphic || !graphic.geometry) return
+
+  const geometry = graphic.geometry
+  const symbolJSON = buildHighlightSymbolJSON(
+    highlightColor,
+    outlineWidth,
+    geometry.type as "polygon" | "polyline" | "point"
+  )
+
+  if (geometry.type === "polygon" || geometry.type === "extent") {
+    graphic.symbol = new modules.SimpleFillSymbol(
+      symbolJSON as __esri.SimpleFillSymbolProperties
+    )
+  } else if (geometry.type === "polyline") {
+    graphic.symbol = new modules.SimpleLineSymbol(
+      symbolJSON as __esri.SimpleLineSymbolProperties
+    )
+  } else if (geometry.type === "point" || geometry.type === "multipoint") {
+    graphic.symbol = new modules.SimpleMarkerSymbol(
+      symbolJSON as __esri.SimpleMarkerSymbolProperties
+    )
+  }
 }
 
 export const validateNumericRange = (params: {
