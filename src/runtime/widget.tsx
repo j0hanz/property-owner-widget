@@ -1272,15 +1272,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       <div css={styles.header}>
         <div css={styles.headerActions}>
           <div css={styles.buttons}>
-            <Button
-              type="tertiary"
-              icon
-              onClick={handleClearAll}
-              title={translate("clearAll")}
-              disabled={!hasSelectedProperties}
-            >
-              <SVG src={clearIcon} size={20} />
-            </Button>
             {isFBWebbConfigured(config) ? (
               <Button
                 type="tertiary"
@@ -1321,6 +1312,15 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
                 ))}
               </DropdownMenu>
             </Dropdown>
+            <Button
+              type="tertiary"
+              icon
+              onClick={handleClearAll}
+              title={translate("clearAll")}
+              disabled={!hasSelectedProperties}
+            >
+              <SVG src={clearIcon} size={20} />
+            </Button>
           </div>
         </div>
       </div>

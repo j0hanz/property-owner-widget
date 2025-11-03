@@ -50,7 +50,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     }),
     header: createFlex("column", {
       alignItems: "stretch",
-      gap: spacing?.(1),
+      gap: spacing?.(2),
       paddingInline: spacing?.(1),
     }),
     headerActions: createFlexAuto("row", {
