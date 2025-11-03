@@ -53,4 +53,16 @@ export default {
   runtimeStateQuerying: "Query in progress...",
   runtimeStateError: "Query error occurred. Check widget for details.",
   runtimeStateSelected: "{count} properties currently selected",
+  fbwebbSettings: "FBWebb report URL settings",
+  fbwebbBaseUrlLabel: "FBWebb base URL",
+  fbwebbBaseUrlDescription: "HTTPS endpoint for FBWebb property reports.",
+  fbwebbUserLabel: "User",
+  fbwebbUserDescription: "FBWebb username for report access.",
+  fbwebbPasswordLabel: "Password",
+  fbwebbPasswordDescription:
+    "FBWebb password stored within the widget configuration.",
+  fbwebbDatabaseLabel: "Database",
+  fbwebbDatabaseDescription: "FBWebb database name (for example, Lund).",
+  fbwebbConfiguredMessage: "FBWebb URL generation is enabled.",
+  errorUrlMustBeHttps: "Enter a valid HTTPS URL.",
 }

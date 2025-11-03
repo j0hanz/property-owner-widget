@@ -18,5 +18,9 @@
 	"autoZoomOnSelection": false,
 	"highlightColor": "#b54900",
 	"highlightOpacity": 0.4,
-	"outlineWidth": 1
+	"outlineWidth": 1,
+	"fbwebbBaseUrl": "",
+	"fbwebbUser": "",
+	"fbwebbPassword": "",
+	"fbwebbDatabase": ""
 }

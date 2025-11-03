@@ -63,6 +63,16 @@ System.register([], function (e) {
         exportCSVDesc: "Kalkylbladsformat (endast attribut)",
         exportGeoJSON: "GeoJSON",
         exportGeoJSONDesc: "Geografiskt dataformat",
+        generateUrl: "Generera URL",
+        urlCopiedSuccess: "Rapport-URL kopierades till urklipp.",
+        urlCopyManualFallback:
+          "Kopiering misslyckades. Använd Ctrl+C för att kopiera den markerade URL:en manuellt.",
+        errorUrlGenerationFailed: "Det gick inte att generera rapport-URL.",
+        errorFBWebbNotConfigured:
+          "Konfigurera FBWebb-inställningar i widgetens inställningspanel.",
+        errorNoPropertiesSelected: "Inga fastigheter valda.",
+        urlGeneratedFor: "URL genererad för {count} fastigheter.",
+        urlManualCopyLabel: "FBWebb rapport-URL",
       })
     },
   }

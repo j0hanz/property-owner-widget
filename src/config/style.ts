@@ -40,10 +40,23 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       gap: spacing?.(2),
       backgroundColor: color?.surface?.paper,
     }),
-    header: createFlexAuto("row", {
+    alert: css({
+      width: "100% !important",
+      inlineSize: "100% !important",
+      minInlineSize: "0 !important",
+      maxInlineSize: "100% !important",
+      flex: "0 0 auto",
+      boxSizing: "border-box",
+    }),
+    header: createFlex("column", {
+      alignItems: "stretch",
+      gap: spacing?.(1),
+      paddingInline: spacing?.(1),
+    }),
+    headerActions: createFlexAuto("row", {
       alignItems: "center",
       justifyContent: "end",
-      paddingInline: spacing?.(1),
+      gap: spacing?.(2),
     }),
     cols: createFlexAuto("row", {
       borderBlockStart: border,
@@ -146,12 +159,38 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       padding: spacing?.(2),
     }),
     errorHint: css({ color: borderColor }),
-    buttons: createFlexAuto("row", { gap: spacing?.(2) }),
+    buttons: createFlexAuto("row", { gap: spacing?.(1) }),
+    feedback: css({
+      inlineSize: "100%",
+    }),
+    feedbackInput: css({
+      inlineSize: "100%",
+      marginBlockStart: spacing?.(1),
+    }),
     footer: createFlexAuto("row", {
       borderBlockStart: border,
       fontFamily: typography?.label2?.fontFamily,
       fontSize: typography?.label2?.fontSize,
       fontWeight: typography?.label2?.fontWeight,
+      position: "relative",
+      overflow: "visible",
+      inlineSize: "100%",
+    }),
+    footerAlertOverlay: css({
+      position: "absolute",
+      insetBlockStart: 0,
+      insetInlineStart: 0,
+      insetInlineEnd: 0,
+      insetBlockEnd: 0,
+      zIndex: 10,
+      pointerEvents: "all",
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "flex-end",
+      inlineSize: "100%",
+      width: "100%",
+      padding: spacing?.(1),
+      gap: spacing?.(1),
     }),
   } as const
 }

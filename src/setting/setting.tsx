@@ -32,6 +32,7 @@ import {
 import { DataSourceSelector } from "jimu-ui/advanced/data-source-selector"
 import defaultMessages from "./translations/default"
 import type { IMConfig } from "../config/types"
+import { isFBWebbConfigured } from "../config/types"
 import { useSettingStyles } from "../config/style"
 import {
   useBooleanConfigValue,
@@ -46,6 +47,7 @@ import {
   outlineWidthHelpers,
   normalizeHostValue,
   normalizeHostList,
+  isValidFbwebbBaseUrl,
 } from "../shared/utils"
 import addIcon from "../assets/plus.svg"
 import removeIcon from "../assets/close.svg"
@@ -173,6 +175,18 @@ const Setting = (
     const value = config.outlineWidth
     return typeof value === "number" && Number.isFinite(value) ? value : 1
   })
+  const [localFbwebbBaseUrl, setLocalFbwebbBaseUrl] = React.useState(
+    config.fbwebbBaseUrl ?? ""
+  )
+  const [localFbwebbUser, setLocalFbwebbUser] = React.useState(
+    config.fbwebbUser ?? ""
+  )
+  const [localFbwebbPassword, setLocalFbwebbPassword] = React.useState(
+    config.fbwebbPassword ?? ""
+  )
+  const [localFbwebbDatabase, setLocalFbwebbDatabase] = React.useState(
+    config.fbwebbDatabase ?? ""
+  )
 
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
 
@@ -280,6 +294,67 @@ const Setting = (
       handleAddAllowedHost()
     }
   )
+
+  const handleFbwebbBaseUrlChange = hooks.useEventCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const value = event.target.value
+      setLocalFbwebbBaseUrl(value)
+
+      if (!value) {
+        setFieldErrors((prev) => ({ ...prev, fbwebbBaseUrl: undefined }))
+        return
+      }
+
+      const isValid = isValidFbwebbBaseUrl(value)
+      setFieldErrors((prev) => ({
+        ...prev,
+        fbwebbBaseUrl: isValid ? undefined : translate("errorUrlMustBeHttps"),
+      }))
+    }
+  )
+
+  const handleFbwebbBaseUrlBlur = hooks.useEventCallback(() => {
+    const trimmed = localFbwebbBaseUrl.trim()
+    if (trimmed && !isValidFbwebbBaseUrl(trimmed)) {
+      return
+    }
+    setLocalFbwebbBaseUrl(trimmed)
+    updateConfig("fbwebbBaseUrl", trimmed || undefined)
+  })
+
+  const handleFbwebbUserChange = hooks.useEventCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      setLocalFbwebbUser(event.target.value)
+    }
+  )
+
+  const handleFbwebbUserBlur = hooks.useEventCallback(() => {
+    const trimmed = localFbwebbUser.trim()
+    setLocalFbwebbUser(trimmed)
+    updateConfig("fbwebbUser", trimmed || undefined)
+  })
+
+  const handleFbwebbPasswordChange = hooks.useEventCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      setLocalFbwebbPassword(event.target.value)
+    }
+  )
+
+  const handleFbwebbPasswordBlur = hooks.useEventCallback(() => {
+    updateConfig("fbwebbPassword", localFbwebbPassword || undefined)
+  })
+
+  const handleFbwebbDatabaseChange = hooks.useEventCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      setLocalFbwebbDatabase(event.target.value)
+    }
+  )
+
+  const handleFbwebbDatabaseBlur = hooks.useEventCallback(() => {
+    const trimmed = localFbwebbDatabase.trim()
+    setLocalFbwebbDatabase(trimmed)
+    updateConfig("fbwebbDatabase", trimmed || undefined)
+  })
 
   const handleHighlightColorChange = hooks.useEventCallback((color: string) => {
     const nextColor = color || config.highlightColor
@@ -445,6 +520,22 @@ const Setting = (
     setLocalOutlineWidth(outlineWidthHelpers.normalize(baseValue))
   }, [config.outlineWidth])
 
+  hooks.useUpdateEffect(() => {
+    setLocalFbwebbBaseUrl(config.fbwebbBaseUrl ?? "")
+  }, [config.fbwebbBaseUrl])
+
+  hooks.useUpdateEffect(() => {
+    setLocalFbwebbUser(config.fbwebbUser ?? "")
+  }, [config.fbwebbUser])
+
+  hooks.useUpdateEffect(() => {
+    setLocalFbwebbPassword(config.fbwebbPassword ?? "")
+  }, [config.fbwebbPassword])
+
+  hooks.useUpdateEffect(() => {
+    setLocalFbwebbDatabase(config.fbwebbDatabase ?? "")
+  }, [config.fbwebbDatabase])
+
   hooks.useEffectOnce(() => {
     // Settings panel mounted
   })
@@ -511,6 +602,7 @@ const Setting = (
         <SettingSection>
           <SettingRow flow="wrap" level={1} css={styles.row}>
             <Alert
+              fullWidth
               css={styles.fullWidth}
               type={isQueryInFlight ? "info" : hasError ? "warning" : "success"}
               text={
@@ -588,6 +680,7 @@ const Setting = (
             {!hasRequiredDataSources && (
               <SettingRow flow="wrap" level={1} css={styles.row}>
                 <Alert
+                  fullWidth
                   css={styles.fullWidth}
                   type="warning"
                   text={translate("dataSourcesDescription")}
@@ -632,6 +725,7 @@ const Setting = (
               {fieldErrors.maxResults && (
                 <SettingRow flow="wrap" level={1} css={styles.row}>
                   <Alert
+                    fullWidth
                     css={styles.fullWidth}
                     type="error"
                     text={fieldErrors.maxResults}
@@ -835,6 +929,119 @@ const Setting = (
               </SettingRow>
             </CollapsablePanel>
           </SettingSection>
+          <SettingSection>
+            <CollapsablePanel
+              label={translate("fbwebbSettings")}
+              type="default"
+              level={1}
+              role="group"
+              aria-label={translate("fbwebbSettings")}
+            >
+              <SettingRow
+                flow="wrap"
+                level={1}
+                css={styles.row}
+                label={renderLabelWithTooltip(
+                  "fbwebbBaseUrlLabel",
+                  "fbwebbBaseUrlDescription"
+                )}
+              >
+                <TextInput
+                  css={styles.fullWidth}
+                  value={localFbwebbBaseUrl}
+                  onChange={handleFbwebbBaseUrlChange}
+                  onBlur={handleFbwebbBaseUrlBlur}
+                  placeholder="https://"
+                  aria-label={translate("fbwebbBaseUrlLabel")}
+                  aria-invalid={!!fieldErrors.fbwebbBaseUrl}
+                  spellCheck={false}
+                />
+              </SettingRow>
+              {fieldErrors.fbwebbBaseUrl && (
+                <SettingRow flow="wrap" level={1} css={styles.row}>
+                  <Alert
+                    fullWidth
+                    css={styles.fullWidth}
+                    type="error"
+                    text={fieldErrors.fbwebbBaseUrl}
+                    closable={false}
+                  />
+                </SettingRow>
+              )}
+
+              <SettingRow
+                flow="wrap"
+                level={1}
+                css={styles.row}
+                label={renderLabelWithTooltip(
+                  "fbwebbUserLabel",
+                  "fbwebbUserDescription"
+                )}
+              >
+                <TextInput
+                  css={styles.fullWidth}
+                  value={localFbwebbUser}
+                  onChange={handleFbwebbUserChange}
+                  onBlur={handleFbwebbUserBlur}
+                  placeholder=""
+                  aria-label={translate("fbwebbUserLabel")}
+                  spellCheck={false}
+                />
+              </SettingRow>
+
+              <SettingRow
+                flow="wrap"
+                level={1}
+                css={styles.row}
+                label={renderLabelWithTooltip(
+                  "fbwebbPasswordLabel",
+                  "fbwebbPasswordDescription"
+                )}
+              >
+                <TextInput
+                  css={styles.fullWidth}
+                  type="password"
+                  value={localFbwebbPassword}
+                  onChange={handleFbwebbPasswordChange}
+                  onBlur={handleFbwebbPasswordBlur}
+                  aria-label={translate("fbwebbPasswordLabel")}
+                  autoComplete="off"
+                />
+              </SettingRow>
+
+              <SettingRow
+                flow="wrap"
+                level={1}
+                css={styles.row}
+                label={renderLabelWithTooltip(
+                  "fbwebbDatabaseLabel",
+                  "fbwebbDatabaseDescription"
+                )}
+              >
+                <TextInput
+                  css={styles.fullWidth}
+                  value={localFbwebbDatabase}
+                  onChange={handleFbwebbDatabaseChange}
+                  onBlur={handleFbwebbDatabaseBlur}
+                  placeholder=""
+                  aria-label={translate("fbwebbDatabaseLabel")}
+                  spellCheck={false}
+                />
+              </SettingRow>
+
+              {isFBWebbConfigured(config) && (
+                <SettingRow flow="wrap" level={1} css={styles.row}>
+                  <Alert
+                    fullWidth
+                    css={styles.fullWidth}
+                    type="info"
+                    text={translate("fbwebbConfiguredMessage")}
+                    closable={false}
+                  />
+                </SettingRow>
+              )}
+            </CollapsablePanel>
+          </SettingSection>
         </>
       )}
 
@@ -890,6 +1097,7 @@ const Setting = (
                   {fieldErrors.relationshipId && (
                     <SettingRow flow="wrap" level={1} css={styles.row}>
                       <Alert
+                        fullWidth
                         css={styles.fullWidth}
                         type="error"
                         text={fieldErrors.relationshipId}

@@ -24,6 +24,7 @@ import {
   Loading,
   LoadingType,
   SVG,
+  TextInput,
   defaultMessages as jimuUIMessages,
 } from "jimu-ui"
 import { PropertyTable } from "./components/table"
@@ -38,6 +39,7 @@ import type {
   ExportFormat,
   SerializedQueryResult,
 } from "../config/types"
+import { isFBWebbConfigured } from "../config/types"
 import { ErrorType } from "../config/enums"
 import { useWidgetStyles } from "../config/style"
 import {
@@ -72,6 +74,9 @@ import {
   updateGraphicSymbol,
   createPropertyDispatcher,
   cursorLifecycleHelpers,
+  generateFBWebbUrl,
+  copyToClipboard,
+  maskPassword,
 } from "../shared/utils"
 import { createPropertySelectors } from "../extensions/store"
 import type { CursorGraphicsState } from "../shared/utils"
@@ -90,6 +95,7 @@ import clearIcon from "../assets/clear-selection-general.svg"
 import setupIcon from "../assets/config-missing.svg"
 import mapSelect from "../assets/map-select.svg"
 import exportIcon from "../assets/export.svg"
+import linkAddIcon from "../assets/link-add.svg"
 import { exportData } from "../shared/export"
 
 const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
@@ -141,7 +147,8 @@ class PropertyWidgetErrorBoundary extends React.Component<
         <div css={this.props.styles.errorWrap}>
           <Alert
             type="error"
-            withIcon
+            fullWidth
+            css={this.props.styles.alert}
             text={this.props.translate("errorBoundaryMessage")}
           />
           {this.state.error && (
@@ -196,6 +203,30 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       ? (selectedProperties as any).length
       : 0
   const hasSelectedProperties = selectedCount > 0
+
+  const [urlFeedback, setUrlFeedback] = React.useState<{
+    type: "success" | "warning" | "error"
+    text: string
+    url?: string
+  } | null>(null)
+
+  React.useEffect(() => {
+    if (!urlFeedback || urlFeedback.url) return
+    if (typeof window === "undefined") return
+    const timeout = window.setTimeout(() => {
+      setUrlFeedback(null)
+    }, 4000)
+    return () => {
+      window.clearTimeout(timeout)
+    }
+  }, [urlFeedback])
+
+  hooks.useUpdateEffect(() => {
+    if (hasSelectedProperties) return
+    if (urlFeedback) {
+      setUrlFeedback(null)
+    }
+  }, [hasSelectedProperties])
 
   const propertyDispatchRef = React.useRef(
     createPropertyDispatcher(props.dispatch, widgetId)
@@ -285,15 +316,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   )
 
   const renderConfiguredContent = () => {
-    if (error) {
-      return (
-        <div css={styles.emptyState} role="alert" aria-live="assertive">
-          <Alert type="error" withIcon text={error.message} />
-          {error.details && <div>{error.details}</div>}
-        </div>
-      )
-    }
-
     if (hasSelectedProperties) {
       const tableData = Array.isArray(selectedProperties)
         ? selectedProperties
@@ -564,6 +586,109 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       handleExport(format)
     }
   )
+
+  const handleGenerateUrl = hooks.useEventCallback(() => {
+    setUrlFeedback(null)
+    const tracker = createPerformanceTracker("generate_fbwebb_url")
+
+    if (!isFBWebbConfigured(config)) {
+      setError(
+        ErrorType.VALIDATION_ERROR,
+        translate("errorFBWebbNotConfigured")
+      )
+      tracker.failure("config_missing")
+      return
+    }
+
+    const currentSelection = selectedPropertiesRef.current ?? []
+    if (currentSelection.length === 0) {
+      setError(
+        ErrorType.VALIDATION_ERROR,
+        translate("errorNoPropertiesSelected")
+      )
+      tracker.failure("no_selection")
+      return
+    }
+
+    try {
+      const selectionArray = Array.isArray(currentSelection)
+        ? currentSelection
+        : Array.from(currentSelection as Iterable<GridRowData>)
+      const fnrs = selectionArray
+        .map((row) => row.FNR)
+        .filter(
+          (fnr): fnr is string | number => fnr !== null && fnr !== undefined
+        )
+
+      console.log("[URL Generation] FBWebb request", {
+        propertyCount: selectionArray.length,
+        baseUrl: config.fbwebbBaseUrl,
+        user: config.fbwebbUser,
+        database: config.fbwebbDatabase,
+        password: maskPassword(config.fbwebbPassword),
+      })
+
+      const url = generateFBWebbUrl(fnrs, config.fbwebbBaseUrl, {
+        user: config.fbwebbUser,
+        password: config.fbwebbPassword,
+        database: config.fbwebbDatabase,
+      })
+
+      const copySucceeded = copyToClipboard(url)
+      const countMessage = translate("urlGeneratedFor").replace(
+        "{count}",
+        String(fnrs.length)
+      )
+
+      if (copySucceeded) {
+        const successMessage =
+          `${translate("urlCopiedSuccess")} ${countMessage}`.trim()
+        setUrlFeedback({ type: "success", text: successMessage })
+        trackEvent({
+          category: "Property",
+          action: "generate_url",
+          label: "fbwebb",
+          value: fnrs.length,
+        })
+        tracker.success()
+      } else {
+        const warningMessage =
+          `${translate("urlCopyManualFallback")} ${countMessage}`.trim()
+        setUrlFeedback({ type: "warning", text: warningMessage, url })
+        trackEvent({
+          category: "Property",
+          action: "generate_url_manual_copy",
+          label: "fbwebb",
+          value: fnrs.length,
+        })
+        tracker.failure("clipboard_fallback")
+      }
+
+      console.log("[URL Generation] FBWebb URL ready", {
+        length: url.length,
+        password: maskPassword(config.fbwebbPassword),
+      })
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error && error.message
+          ? error.message
+          : "unknown_error"
+
+      setUrlFeedback({
+        type: "error",
+        text: translate("errorUrlGenerationFailed"),
+      })
+
+      setError(
+        ErrorType.VALIDATION_ERROR,
+        translate("errorUrlGenerationFailed"),
+        errorMessage
+      )
+
+      trackError("generate_fbwebb_url", error, errorMessage)
+      tracker.failure(errorMessage)
+    }
+  })
 
   const handlePropertyDataSourceFailed = hooks.useEventCallback(() => {
     setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"))
@@ -1075,8 +1200,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           <Loading
             css={styles.loadingState}
             type={LoadingType.Donut}
-            width={125}
-            height={125}
+            width={150}
+            height={150}
             aria-label={translate("loadingModules")}
           />
         </div>
@@ -1091,12 +1216,33 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         role="region"
         aria-label={translate("widgetTitle")}
       >
-        <div css={styles.emptyState} role="alert" aria-live="assertive">
-          <Alert
-            type="error"
-            withIcon
-            text={translate("errorLoadingModules")}
-          />
+        <div css={styles.body} role="main">
+          <div css={styles.emptyState} role="status" aria-live="polite">
+            <SVG
+              css={styles.svgState}
+              src={setupIcon}
+              width={100}
+              height={100}
+            />
+            <div css={styles.messageState}>
+              {translate("widgetNotConfigured")}
+            </div>
+          </div>
+        </div>
+
+        <div css={styles.footer}>
+          <div css={styles.col}>{translate("propertySelected")}</div>
+          <div css={styles.col}>0</div>
+
+          <div css={styles.footerAlertOverlay}>
+            <Alert
+              type="error"
+              fullWidth
+              css={styles.alert}
+              text={translate("errorLoadingModules")}
+              role="alert"
+            />
+          </div>
         </div>
       </div>
     )
@@ -1124,44 +1270,58 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         />
       ) : null}
       <div css={styles.header}>
-        <div css={styles.buttons}>
-          <Button
-            type="tertiary"
-            icon
-            onClick={handleClearAll}
-            title={translate("clearAll")}
-            disabled={!hasSelectedProperties}
-          >
-            <SVG src={clearIcon} size={20} />
-          </Button>
-          <Dropdown
-            activeIcon
-            menuRole="listbox"
-            aria-label={translate("exportData")}
-          >
-            <DropdownButton
-              arrow={false}
-              icon
+        <div css={styles.headerActions}>
+          <div css={styles.buttons}>
+            <Button
               type="tertiary"
+              icon
+              onClick={handleClearAll}
+              title={translate("clearAll")}
               disabled={!hasSelectedProperties}
-              title={translate("exportData")}
-              role="combobox"
             >
-              <SVG src={exportIcon} size={20} />
-            </DropdownButton>
-            <DropdownMenu alignment="start">
-              {EXPORT_FORMATS.map((format) => (
-                <DropdownItem
-                  key={format.id}
-                  onClick={() => handleExportFormatSelect(format.id)}
-                  role="menuitem"
-                  title={translate(`export${format.label}Desc`)}
-                >
-                  {translate(`export${format.label}`)}
-                </DropdownItem>
-              ))}
-            </DropdownMenu>
-          </Dropdown>
+              <SVG src={clearIcon} size={20} />
+            </Button>
+            {isFBWebbConfigured(config) ? (
+              <Button
+                type="tertiary"
+                icon
+                onClick={handleGenerateUrl}
+                title={translate("generateUrl")}
+                aria-label={translate("generateUrl")}
+                disabled={!hasSelectedProperties}
+              >
+                <SVG src={linkAddIcon} size={20} />
+              </Button>
+            ) : null}
+            <Dropdown
+              activeIcon
+              menuRole="listbox"
+              aria-label={translate("exportData")}
+            >
+              <DropdownButton
+                arrow={false}
+                icon
+                type="tertiary"
+                disabled={!hasSelectedProperties}
+                title={translate("exportData")}
+                role="combobox"
+              >
+                <SVG src={exportIcon} size={20} />
+              </DropdownButton>
+              <DropdownMenu alignment="start">
+                {EXPORT_FORMATS.map((format) => (
+                  <DropdownItem
+                    key={format.id}
+                    onClick={() => handleExportFormatSelect(format.id)}
+                    role="menuitem"
+                    title={translate(`export${format.label}Desc`)}
+                  >
+                    {translate(`export${format.label}`)}
+                  </DropdownItem>
+                ))}
+              </DropdownMenu>
+            </Dropdown>
+          </div>
         </div>
       </div>
       <div css={styles.body} role="main">
@@ -1185,6 +1345,49 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       <div css={styles.footer}>
         <div css={styles.col}>{translate("propertySelected")}</div>
         <div css={styles.col}>{selectedCount}</div>
+
+        {urlFeedback || error ? (
+          <div css={styles.footerAlertOverlay}>
+            {error ? (
+              <Alert
+                type="error"
+                fullWidth
+                css={styles.alert}
+                text={error.message}
+                role="alert"
+              />
+            ) : null}
+            {urlFeedback ? (
+              <>
+                <Alert
+                  type={
+                    urlFeedback.type === "success"
+                      ? "success"
+                      : urlFeedback.type === "warning"
+                        ? "warning"
+                        : "error"
+                  }
+                  fullWidth
+                  css={styles.alert}
+                  text={urlFeedback.text}
+                  role="status"
+                />
+                {urlFeedback.url ? (
+                  <TextInput
+                    value={urlFeedback.url}
+                    readOnly
+                    aria-label={translate("urlManualCopyLabel")}
+                    css={styles.feedbackInput}
+                    spellCheck={false}
+                    onFocus={(event: React.FocusEvent<HTMLInputElement>) => {
+                      event.target.select()
+                    }}
+                  />
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {mapWidgetId ? (
