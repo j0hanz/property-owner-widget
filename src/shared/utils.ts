@@ -728,23 +728,39 @@ export const syncGraphicsWithState = (params: {
     selectedRows.map((row) => helpers.normalizeFnrKey(row.FNR))
   )
 
-  // Batch process all graphics for better performance
+  // Filter graphics that should be added
   const graphicsToProcess = graphicsToAdd.filter(({ fnr }) => {
     const fnrKey = helpers.normalizeFnrKey(fnr)
     return selectedFnrs.has(fnrKey)
   })
 
-  // Add all graphics in one batch call
-  graphicsToProcess.forEach(({ graphic, fnr }) => {
-    helpers.addGraphicsToMap(
-      graphic,
-      view,
-      helpers.extractFnr,
-      helpers.normalizeFnrKey,
-      highlightColor,
-      outlineWidth
-    )
-  })
+  // Use batch addition for better performance (single DOM update)
+  if (graphicsToProcess.length > 0) {
+    // Check if batch method is available (from updated useGraphicsLayer hook)
+    const addManyFn = (helpers as any).addManyGraphicsToMap
+    if (typeof addManyFn === "function") {
+      addManyFn(
+        graphicsToProcess,
+        view,
+        helpers.extractFnr,
+        helpers.normalizeFnrKey,
+        highlightColor,
+        outlineWidth
+      )
+    } else {
+      // Fallback to individual additions if batch method not available
+      graphicsToProcess.forEach(({ graphic, fnr }) => {
+        helpers.addGraphicsToMap(
+          graphic,
+          view,
+          helpers.extractFnr,
+          helpers.normalizeFnrKey,
+          highlightColor,
+          outlineWidth
+        )
+      })
+    }
+  }
 
   return true
 }
@@ -848,13 +864,21 @@ export const processPropertyQueryResults = async (
 }
 
 export const updateRawPropertyResults = (
-  prev: Map<string, SerializedQueryResult>,
+  prev:
+    | Map<string, SerializedQueryResult>
+    | { [key: string]: SerializedQueryResult },
   rowsToProcess: Array<{ FNR: string | number; id: string }>,
   propertyResults: QueryResult[],
   toRemove: Set<string>,
   selectedProperties: Array<{ FNR: string | number; id: string }>,
   normalizeFnrKey: (fnr: any) => string
-): Map<string, SerializedQueryResult> => {
+): { [key: string]: SerializedQueryResult } => {
+  // Convert input to Map for efficient processing
+  const prevMap =
+    prev instanceof Map
+      ? prev
+      : new Map(Object.entries(prev || {}).map(([k, v]) => [k, v]))
+
   const clonePlainValue = (value: any) => {
     if (value == null) return null
     try {
@@ -910,7 +934,7 @@ export const updateRawPropertyResults = (
       : [],
   })
 
-  const updated = new Map(prev)
+  const updated = new Map(prevMap)
 
   const propertyResultsByFnr = new Map<string, SerializedQueryResult>()
   propertyResults.forEach((result) => {
@@ -958,7 +982,13 @@ export const updateRawPropertyResults = (
     }
   })
 
-  return updated
+  // Convert to plain object ONCE for Redux storage (eliminates O(n) overhead on every dispatch)
+  const plainResults: { [key: string]: SerializedQueryResult } = {}
+  updated.forEach((value, key) => {
+    plainResults[key] = value
+  })
+
+  return plainResults
 }
 
 export const createPropertyDispatcher = (
@@ -968,48 +998,6 @@ export const createPropertyDispatcher = (
   const safeDispatch = (action: unknown) => {
     if (!widgetId || typeof dispatch !== "function") return
     dispatch(action)
-  }
-
-  const convertMapToPlainObject = (
-    results:
-      | Map<string, SerializedQueryResult>
-      | ReadonlyMap<string, SerializedQueryResult>
-      | { [key: string]: SerializedQueryResult }
-      | null
-  ): { [key: string]: SerializedQueryResult } | null => {
-    if (!results) return null
-
-    const plainObj: { [key: string]: SerializedQueryResult } = {}
-
-    if (results instanceof Map) {
-      results.forEach((value, key) => {
-        plainObj[key] = value
-      })
-      return plainObj
-    }
-
-    const maybeImmutable =
-      typeof (results as any)?.asMutable === "function"
-        ? (results as any).asMutable({ deep: false })
-        : results
-
-    if (typeof maybeImmutable.forEach === "function") {
-      maybeImmutable.forEach((value: SerializedQueryResult, key: string) => {
-        plainObj[key] = value
-      })
-      return plainObj
-    }
-
-    Object.keys(
-      maybeImmutable as { [key: string]: SerializedQueryResult }
-    ).forEach((key) => {
-      const value = maybeImmutable[key]
-      if (value !== undefined) {
-        plainObj[key] = value
-      }
-    })
-
-    return plainObj
   }
 
   return {
@@ -1031,17 +1019,9 @@ export const createPropertyDispatcher = (
       safeDispatch(propertyActions.setQueryInFlight(inFlight, widgetId))
     },
     setRawResults: (
-      results:
-        | Map<string, SerializedQueryResult>
-        | ReadonlyMap<string, SerializedQueryResult>
-        | null
+      results: { [key: string]: SerializedQueryResult } | null
     ) => {
-      safeDispatch(
-        propertyActions.setRawResults(
-          convertMapToPlainObject(results) as any,
-          widgetId
-        )
-      )
+      safeDispatch(propertyActions.setRawResults(results as any, widgetId))
     },
     removeWidgetState: () => {
       safeDispatch(propertyActions.removeWidgetState(widgetId))

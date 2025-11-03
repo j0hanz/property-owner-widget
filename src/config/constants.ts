@@ -25,7 +25,7 @@ export const QUERY_DEFAULTS = {
 export const MIN_MASK_LENGTH = 3
 export const MAX_MASK_ASTERISKS = 3
 export const DEFAULT_MAX_RESULTS = 100
-export const OWNER_QUERY_CONCURRENCY = 5
+export const OWNER_QUERY_CONCURRENCY = 20
 
 export const HIGHLIGHT_MARKER_SIZE = 12
 

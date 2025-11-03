@@ -273,9 +273,9 @@ describe("createPropertyDispatcher", () => {
       ],
     }
 
-    const rawResults = new Map<string, SerializedQueryResult>([
-      ["row-1", serialized],
-    ])
+    const rawResults = {
+      "row-1": serialized,
+    }
 
     dispatcher.setRawResults(rawResults)
 
@@ -291,7 +291,6 @@ describe("createPropertyDispatcher", () => {
       "row-1": serialized,
     }
     expect(action.results).toEqual(expectedPlainObject)
-    expect(action.results).not.toBe(rawResults)
   })
 })
 
@@ -1095,9 +1094,9 @@ describe("Property Widget - Utility Helper Functions", () => {
       ],
     }
 
-    expect(updated.size).toBe(2)
-    expect(updated.get(ownerRowA.id)).toEqual(expectedSerialized)
-    expect(updated.get(ownerRowB.id)).toEqual(expectedSerialized)
+    expect(Object.keys(updated).length).toBe(2)
+    expect(updated[ownerRowA.id]).toEqual(expectedSerialized)
+    expect(updated[ownerRowB.id]).toEqual(expectedSerialized)
   })
 
   it("should remove raw property results for deselected properties", () => {
@@ -1108,28 +1107,25 @@ describe("Property Widget - Utility Helper Functions", () => {
       FASTIGHET: "Property 2",
       BOSTADR: "Owner A",
     }
-    const prev = new Map<string, SerializedQueryResult>([
-      [
-        ownerRow.id,
-        {
-          propertyId: "",
-          features: [
-            {
-              attributes: {
-                FNR: "456",
-                OBJECTID: 100,
-                UUID_FASTIGHET: "uuid-456",
-                FASTIGHET: "Property 2",
-              },
-              geometry: {},
-              aggregateGeometries: null,
-              symbol: null,
-              popupTemplate: null,
+    const prev: { [key: string]: SerializedQueryResult } = {
+      [ownerRow.id]: {
+        propertyId: "",
+        features: [
+          {
+            attributes: {
+              FNR: "456",
+              OBJECTID: 100,
+              UUID_FASTIGHET: "uuid-456",
+              FASTIGHET: "Property 2",
             },
-          ],
-        } as SerializedQueryResult,
-      ],
-    ])
+            geometry: {},
+            aggregateGeometries: null,
+            symbol: null,
+            popupTemplate: null,
+          },
+        ],
+      } as SerializedQueryResult,
+    }
     const toRemove = new Set<string>([normalizeFnrKey(ownerRow.FNR)])
     const updated = updateRawPropertyResults(
       prev,
@@ -1139,9 +1135,9 @@ describe("Property Widget - Utility Helper Functions", () => {
       [ownerRow],
       normalizeFnrKey
     )
-    expect(prev.has(ownerRow.id)).toBe(true)
-    expect(updated.has(ownerRow.id)).toBe(false)
-    expect(updated.size).toBe(0)
+    expect(ownerRow.id in prev).toBe(true)
+    expect(ownerRow.id in updated).toBe(false)
+    expect(Object.keys(updated).length).toBe(0)
   })
 
   it("should create and clear cursor graphics through sync helper", () => {
@@ -1679,7 +1675,7 @@ describe("Query Controls", () => {
     const { OWNER_QUERY_CONCURRENCY } = require("../config/constants")
 
     expect(OWNER_QUERY_CONCURRENCY).toBeDefined()
-    expect(OWNER_QUERY_CONCURRENCY).toBe(5)
+    expect(OWNER_QUERY_CONCURRENCY).toBe(20)
   })
 })
 
