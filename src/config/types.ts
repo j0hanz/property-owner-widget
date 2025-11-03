@@ -139,6 +139,14 @@ export interface SelectionGraphicsHelpers {
     highlightColor: [number, number, number, number],
     outlineWidth: number
   ) => void
+  addManyGraphicsToMap?: (
+    graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>,
+    view: __esri.MapView | null | undefined,
+    extractFnr: (attrs: any) => string | number | null,
+    normalizeFnrKey: (fnr: any) => string,
+    highlightColor: [number, number, number, number],
+    outlineWidth: number
+  ) => void
   extractFnr: (attrs: any) => string | number | null
   normalizeFnrKey: (fnr: any) => string
 }

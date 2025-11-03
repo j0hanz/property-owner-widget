@@ -159,6 +159,16 @@ export const useGraphicsLayer = (
       }
 
       if (!graphicsLayerRef.current) {
+        // Check if layer already exists in map (from previous widget instance)
+        const existingLayerInMap = view.map.findLayerById(
+          desiredLayerId
+        ) as __esri.GraphicsLayer | null
+        if (existingLayerInMap) {
+          graphicsLayerRef.current = existingLayerInMap
+          return true
+        }
+
+        // Only create if truly missing
         const shortId =
           currentWidgetId.length > 16
             ? `${currentWidgetId.substring(0, 16)}...`
@@ -310,6 +320,63 @@ export const useGraphicsLayer = (
     }
   )
 
+  const addManyGraphicsToMap = hooks.useEventCallback(
+    (
+      graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>,
+      view: __esri.MapView | null | undefined,
+      extractFnr: (attrs: any) => string | number | null,
+      normalizeFnrKey: (fnr: any) => string,
+      highlightColor: [number, number, number, number],
+      outlineWidth: number
+    ) => {
+      const currentModules = modulesRef.current
+      if (!currentModules || !graphics.length || !view) return
+      ensureGraphicsLayer(view)
+
+      const layer = graphicsLayerRef.current
+      if (!layer) return
+
+      const highlightGraphics: __esri.Graphic[] = []
+
+      graphics.forEach(({ graphic, fnr }) => {
+        const symbol = createHighlightSymbol(
+          graphic,
+          highlightColor,
+          outlineWidth
+        )
+        if (!symbol) return
+
+        const highlightGraphic = new currentModules.Graphic({
+          geometry: graphic.geometry,
+          symbol,
+          attributes: graphic.attributes
+            ? { ...graphic.attributes, FNR: fnr }
+            : { FNR: fnr },
+        })
+
+        removeGraphicsForFnr(fnr, normalizeFnrKey)
+        highlightGraphics.push(highlightGraphic)
+
+        const fnrKey = normalizeFnrKey(fnr)
+        const existing = graphicsMapRef.current.get(fnrKey)
+        if (existing) {
+          existing.push(highlightGraphic)
+        } else {
+          graphicsMapRef.current.set(fnrKey, [highlightGraphic])
+        }
+      })
+
+      // Use layer.addMany() for batch addition (single DOM update)
+      if (highlightGraphics.length > 0) {
+        requestAnimationFrame(() => {
+          if (layer && !layer.destroyed) {
+            layer.addMany(highlightGraphics)
+          }
+        })
+      }
+    }
+  )
+
   const destroyGraphicsLayer = hooks.useEventCallback(
     (view: __esri.MapView | null | undefined) => {
       if (!graphicsLayerRef.current) return
@@ -338,6 +405,7 @@ export const useGraphicsLayer = (
     clearGraphics,
     removeGraphicsForFnr,
     addGraphicsToMap,
+    addManyGraphicsToMap,
     destroyGraphicsLayer,
   }
 }

@@ -210,7 +210,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     url?: string
   } | null>(null)
 
-  React.useEffect(() => {
+  hooks.useUpdateEffect(() => {
     if (!urlFeedback || urlFeedback.url) return
     if (typeof window === "undefined") return
     const timeout = window.setTimeout(() => {
@@ -268,6 +268,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     clearGraphics,
     removeGraphicsForFnr,
     addGraphicsToMap,
+    addManyGraphicsToMap,
     destroyGraphicsLayer,
   } = useGraphicsLayer(modules, widgetId)
   const { disablePopup, restorePopup } = usePopupManager(widgetId)
@@ -786,25 +787,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         if (!isStaleRequest()) {
           const prevRawResults = rawPropertyResultsRef.current
 
-          // Convert prevRawResults to a proper Map
-          let baseRawResults: Map<string, SerializedQueryResult>
-          if (prevRawResults instanceof Map) {
-            baseRawResults = prevRawResults
-          } else if (prevRawResults && typeof prevRawResults === "object") {
-            // Handle plain objects or immutable objects from Redux
-            baseRawResults = new Map<string, SerializedQueryResult>()
-            Object.keys(prevRawResults).forEach((key) => {
-              const value = (prevRawResults as any)[key]
-              if (value && typeof value === "object") {
-                baseRawResults.set(key, value as SerializedQueryResult)
-              }
-            })
-          } else {
-            baseRawResults = new Map<string, SerializedQueryResult>()
-          }
-
+          // Convert ImmutableObject to plain object if needed
+          const prevResultsPlain = prevRawResults
+            ? ((typeof (prevRawResults as any).asMutable === "function"
+                ? (prevRawResults as any).asMutable({ deep: false })
+                : prevRawResults) as { [key: string]: SerializedQueryResult })
+            : {}
           const updatedRawResults = updateRawPropertyResults(
-            baseRawResults,
+            prevResultsPlain,
             pipelineResult.rowsToProcess,
             pipelineResult.propertyResults,
             pipelineResult.toRemove,
@@ -812,15 +802,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             normalizeFnrKey
           )
 
-          // Convert Map back to plain object for Redux storage
-          const plainResults: { [key: string]: SerializedQueryResult } = {}
-          updatedRawResults.forEach((value, key) => {
-            plainResults[key] = value
-          })
-
           // Store results but don't update UI yet
           const dispatch = propertyDispatchRef.current
-          const resultsToStore = plainResults
+          const resultsToStore = updatedRawResults
           const rowsToStore = pipelineResult.updatedRows
 
           // Clean up removed graphics first
@@ -836,16 +820,17 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           )
           const outlineWidth = getValidatedOutlineWidth(outlineWidthConfig)
 
-          // Add graphics to map first (synchronous)
+          // Add graphics to map first (batch addition for better performance)
           syncSelectionGraphics({
             graphicsToAdd: pipelineResult.graphicsToAdd,
             selectedRows: pipelineResult.updatedRows,
             getCurrentView,
             helpers: {
               addGraphicsToMap,
+              addManyGraphicsToMap,
               extractFnr,
               normalizeFnrKey,
-            },
+            } as any,
             highlightColor,
             outlineWidth,
           })
