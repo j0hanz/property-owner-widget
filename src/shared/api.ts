@@ -435,11 +435,6 @@ export const queryPropertyByPoint = async (
       }
     })
 
-    logger.debug("Mapped results", {
-      count: mappedResults.length,
-      propertyIds: mappedResults.map((r) => r.propertyId),
-    })
-
     return mappedResults
   } catch (error) {
     if (isAbortError(error)) {
@@ -468,17 +463,6 @@ export const queryOwnerByFnr = async (
       throw new Error("Owner data source not found")
     }
 
-    const layerUrl = ds.url
-    const layerDef = (ds as any).getLayerDefinition?.()
-    logger.debug("Querying owner layer", {
-      dataSourceId,
-      url: layerUrl,
-      fnr,
-      whereClause: buildFnrWhereClause(fnr),
-      layerName: layerDef?.name || "unknown",
-      layerFields: layerDef?.fields?.map((f: any) => f.name) || [],
-    })
-
     const result = await ds.query(
       {
         where: buildFnrWhereClause(fnr),
@@ -488,48 +472,21 @@ export const queryOwnerByFnr = async (
       createSignalOptions(options?.signal)
     )
 
-    logger.debug("Owner query result", {
-      fnr,
-      recordCount: result?.records?.length || 0,
-      hasRecords: !!(result?.records && result.records.length > 0),
-      firstRecord: result?.records?.[0]?.getData(),
-    })
-
     abortHelpers.throwIfAborted(options?.signal)
 
     if (!result?.records) {
-      logger.warn("Owner query returned no records", {
-        fnr,
-        dataSourceId,
-        url: layerUrl,
-        possibleCause: "FNR not found in owner layer or wrong layer configured",
-      })
       return []
     }
 
     if (result.records.length === 0) {
-      logger.warn("Owner query returned empty records array", {
-        fnr,
-        dataSourceId,
-        url: layerUrl,
-        possibleCause: "No owner data for this FNR or querying wrong layer",
-      })
+      return []
     }
 
     return result.records.map((record: FeatureDataRecord) => {
       const data = record.getData()
       const graphic: any = {
-        attributes: data, // The data IS the attributes
+        attributes: data,
       }
-
-      logger.debug("Owner record processed", {
-        fnrLength: String(fnr).length,
-        hasNameField: typeof data?.NAMN === "string" && data.NAMN.length > 0,
-        hasAddressField:
-          typeof data?.BOSTADR === "string" && data.BOSTADR.length > 0,
-        hasOwnerList: typeof data?.AGARLISTA === "string",
-      })
-
       return graphic as __esri.Graphic
     })
   } catch (error) {
@@ -1255,17 +1212,30 @@ export const runPropertySelectionPipeline = async (
     translate,
   } = params
 
+  const propQueryStart = performance.now()
+  console.log("[PERF-API] Property query started")
   const propertyResults = await queryPropertyByPoint(
     mapPoint,
     propertyDataSourceId,
     dsManager,
     { signal }
   )
+  const propQueryEnd = performance.now()
+  console.log(
+    "[PERF-API] Property query completed in",
+    propQueryEnd - propQueryStart,
+    "ms",
+    "(returned",
+    propertyResults.length,
+    "results)"
+  )
 
   if (propertyResults.length === 0) {
     return { status: "empty" }
   }
 
+  const processStart = performance.now()
+  console.log("[PERF-API] Processing property results started")
   const { rowsToProcess, graphicsToAdd } = await processPropertyQueryResults({
     propertyResults,
     config: {
@@ -1299,6 +1269,15 @@ export const runPropertySelectionPipeline = async (
       processIndividual: propertyQueryService.processIndividual,
     },
   })
+  const processEnd = performance.now()
+  console.log(
+    "[PERF-API] Processing completed in",
+    processEnd - processStart,
+    "ms",
+    "(produced",
+    rowsToProcess.length,
+    "rows)"
+  )
 
   abortHelpers.throwIfAborted(signal)
 
