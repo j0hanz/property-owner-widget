@@ -1,3 +1,4 @@
+import copy from "copy-to-clipboard"
 import type {
   OwnerAttributes,
   ValidationResult,
@@ -1285,6 +1286,107 @@ export const outlineWidthHelpers = {
     }
     return halfStep.toFixed(1)
   },
+}
+
+const FBWEBB_URL_MAX_LENGTH = 2048
+
+const isPrivateHostname = (hostname: string): boolean => {
+  const lower = hostname.toLowerCase()
+  return (
+    lower === "localhost" ||
+    lower === "127.0.0.1" ||
+    lower === "::1" ||
+    lower === "[::1]" ||
+    /^10\./.test(lower) ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(lower) ||
+    /^192\.168\./.test(lower)
+  )
+}
+
+const sanitizeFbwebbValue = (value: string): string =>
+  stripHtml(value || "").trim()
+
+const sanitizeFnrForUrl = (value: string | number): string | null => {
+  if (value === null || value === undefined) return null
+  const normalized = stripHtml(String(value)).replace(/[^0-9A-Za-z]/g, "")
+  return normalized || null
+}
+
+export const isValidFbwebbBaseUrl = (url: string): boolean => {
+  const sanitized = sanitizeFbwebbValue(url)
+  if (!sanitized || sanitized.length > FBWEBB_URL_MAX_LENGTH) {
+    return false
+  }
+
+  try {
+    const parsed = new URL(sanitized)
+    if (parsed.protocol !== "https:") return false
+    if (parsed.port && parsed.port !== "443") return false
+    if (!parsed.hostname || isPrivateHostname(parsed.hostname)) return false
+    return true
+  } catch (_error) {
+    return false
+  }
+}
+
+export const generateFBWebbUrl = (
+  fnrs: Array<string | number>,
+  baseUrl: string,
+  params: { user: string; password: string; database: string }
+): string => {
+  const sanitizedBaseUrl = sanitizeFbwebbValue(baseUrl)
+  if (!isValidFbwebbBaseUrl(sanitizedBaseUrl)) {
+    throw new Error("Invalid FBWebb base URL")
+  }
+
+  const uniqueFnrs = Array.from(
+    new Set(
+      (Array.isArray(fnrs) ? fnrs : [])
+        .map(sanitizeFnrForUrl)
+        .filter((value): value is string => Boolean(value))
+    )
+  )
+
+  if (uniqueFnrs.length === 0) {
+    throw new Error("No FNRs provided")
+  }
+
+  const user = sanitizeFbwebbValue(params.user)
+  const password = sanitizeFbwebbValue(params.password)
+  const database = sanitizeFbwebbValue(params.database)
+
+  if (!user || !password || !database) {
+    throw new Error("Missing FBWebb configuration")
+  }
+
+  const url = new URL(sanitizedBaseUrl)
+  const searchParams = new URLSearchParams()
+  searchParams.set("User", user)
+  searchParams.set("Pass", password)
+  searchParams.set("Database", database)
+  const fnrList = uniqueFnrs.join(",")
+  url.search = `${searchParams.toString()}&fnr=${fnrList}`
+  return url.toString()
+}
+
+export const copyToClipboard = (text: string): boolean => {
+  try {
+    return copy(text, {
+      debug: false,
+      format: "text/plain",
+    })
+  } catch (_error) {
+    return false
+  }
+}
+
+export const maskPassword = (password: string | null | undefined): string => {
+  const sanitized = sanitizeFbwebbValue(password || "")
+  if (!sanitized) return "****"
+  if (sanitized.length <= 2) return sanitized
+  const prefix = sanitized.slice(0, 2)
+  const maskLength = Math.min(4, Math.max(1, sanitized.length - 2))
+  return `${prefix}${"*".repeat(maskLength)}`
 }
 
 export const normalizeHostValue = (value: string): string =>

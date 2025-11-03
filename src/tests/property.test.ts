@@ -21,6 +21,10 @@ import {
   updateRawPropertyResults,
   createPropertyDispatcher,
   computeWidgetsToClose,
+  generateFBWebbUrl,
+  copyToClipboard,
+  maskPassword,
+  isValidFbwebbBaseUrl,
 } from "../shared/utils"
 import {
   isValidArcGISUrl,
@@ -39,7 +43,16 @@ import type {
 } from "../config/types"
 import { PropertyActionType } from "../extensions/store"
 import type { PropertyAction } from "../extensions/store"
-import { WidgetState } from "jimu-core"
+import { WidgetState, Immutable } from "jimu-core"
+import copyLib from "copy-to-clipboard"
+import { isFBWebbConfigured } from "../config/types"
+
+jest.mock("copy-to-clipboard", () => ({
+  __esModule: true,
+  default: jest.fn(),
+}))
+
+const copyMock = copyLib as unknown as jest.MockedFunction<typeof copyLib>
 
 const mockFeatureLayerInstances: MockFeatureLayer[] = []
 let featureLayerCtorCount = 0
@@ -1419,6 +1432,101 @@ describe("Property Widget - Undo Functionality", () => {
     expect(restoredProperties).toHaveLength(2)
     expect(restoredProperties[0].FNR).toBe("123")
     expect(restoredProperties[1].FNR).toBe("456")
+  })
+})
+
+describe("FBWebb utilities", () => {
+  const baseUrl =
+    "https://fbwebb.lund.se/FBWebb/WebbRapporter/Fastighetsforteckning"
+  const params = { user: "fblasa", password: "fblasa", database: "Lund" }
+
+  beforeEach(() => {
+    copyMock.mockReset()
+  })
+
+  it("should validate HTTPS FBWebb base URLs", () => {
+    expect(isValidFbwebbBaseUrl(baseUrl)).toBe(true)
+    expect(isValidFbwebbBaseUrl("http://fbwebb.lund.se")).toBe(false)
+    expect(isValidFbwebbBaseUrl("https://127.0.0.1/fbwebb")).toBe(false)
+  })
+
+  it("should generate URLs with deduplicated FNR values", () => {
+    const url = generateFBWebbUrl(
+      [120086316, 120086316, 121049900],
+      baseUrl,
+      params
+    )
+
+    expect(url).toContain("fnr=120086316,121049900")
+    expect(url).toContain("User=fblasa")
+    expect(url).toContain("Database=Lund")
+  })
+
+  it("should throw for missing configuration", () => {
+    expect(() =>
+      generateFBWebbUrl([120086316], baseUrl, {
+        user: "",
+        password: "",
+        database: "",
+      })
+    ).toThrow("Missing FBWebb configuration")
+  })
+
+  it("should throw when no FNR values are provided", () => {
+    expect(() => generateFBWebbUrl([], baseUrl, params)).toThrow(
+      "No FNRs provided"
+    )
+  })
+
+  it("should copy to clipboard when library succeeds", () => {
+    copyMock.mockReturnValue(true)
+    const result = copyToClipboard("test-url")
+
+    expect(result).toBe(true)
+    expect(copyMock).toHaveBeenCalledWith(
+      "test-url",
+      expect.objectContaining({ format: "text/plain" })
+    )
+  })
+
+  it("should return false when clipboard copy fails", () => {
+    copyMock.mockReturnValue(false)
+    const result = copyToClipboard("test-url")
+
+    expect(result).toBe(false)
+  })
+
+  it("should return false when clipboard throws", () => {
+    copyMock.mockImplementation(() => {
+      throw new Error("denied")
+    })
+
+    expect(copyToClipboard("test-url")).toBe(false)
+  })
+
+  it("should mask passwords for logging", () => {
+    expect(maskPassword("fblasa")).toBe("fb****")
+    expect(maskPassword("ab")).toBe("ab")
+    expect(maskPassword("")).toBe("****")
+  })
+
+  it("should detect configured FBWebb settings", () => {
+    const configured = Immutable({
+      fbwebbBaseUrl: baseUrl,
+      fbwebbUser: "user",
+      fbwebbPassword: "pass",
+      fbwebbDatabase: "Lund",
+    }) as any
+
+    const missing = Immutable({
+      fbwebbBaseUrl: baseUrl,
+      fbwebbUser: "",
+      fbwebbPassword: "",
+      fbwebbDatabase: "",
+    }) as any
+
+    expect(isFBWebbConfigured(configured)).toBe(true)
+    expect(isFBWebbConfigured(missing)).toBe(false)
   })
 })
 

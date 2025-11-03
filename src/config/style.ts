@@ -40,10 +40,15 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       gap: spacing?.(2),
       backgroundColor: color?.surface?.paper,
     }),
-    header: createFlexAuto("row", {
+    header: createFlex("column", {
+      alignItems: "stretch",
+      gap: spacing?.(1),
+      paddingInline: spacing?.(1),
+    }),
+    headerActions: createFlexAuto("row", {
       alignItems: "center",
       justifyContent: "end",
-      paddingInline: spacing?.(1),
+      gap: spacing?.(2),
     }),
     cols: createFlexAuto("row", {
       borderBlockStart: border,
@@ -146,7 +151,14 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       padding: spacing?.(2),
     }),
     errorHint: css({ color: borderColor }),
-    buttons: createFlexAuto("row", { gap: spacing?.(2) }),
+    buttons: createFlexAuto("row", { gap: spacing?.(1) }),
+    feedback: css({
+      inlineSize: "100%",
+    }),
+    feedbackInput: css({
+      inlineSize: "100%",
+      marginBlockStart: spacing?.(1),
+    }),
     footer: createFlexAuto("row", {
       borderBlockStart: border,
       fontFamily: typography?.label2?.fontFamily,
