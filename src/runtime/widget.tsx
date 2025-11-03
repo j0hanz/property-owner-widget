@@ -852,14 +852,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             highlightColor,
             outlineWidth,
           })
-          const graphicsEnd = performance.now()
+          const graphicsStart = performance.now()
           console.log(
-            "[PERF] Graphics sync completed at",
-            graphicsEnd - perfStart,
-            "ms",
-            "(took",
-            graphicsEnd - graphicsStart,
-            "ms)"
+            "[PERF] Graphics sync started at",
+            graphicsStart - perfStart,
+            "ms"
           )
 
           // Now update Redux state AFTER graphics are visible
