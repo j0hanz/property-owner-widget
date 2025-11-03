@@ -10,6 +10,8 @@ import type {
   SerializedQueryResult,
   SerializedQueryFeature,
   QueryResult,
+  CursorGraphicsState,
+  ProcessPropertyQueryParams,
 } from "../config/types"
 import type { DataSourceManager } from "jimu-core"
 import { isValidationFailure as checkValidationFailure } from "../config/types"
@@ -26,6 +28,7 @@ import {
   HIGHLIGHT_MARKER_SIZE,
   OUTLINE_WIDTH,
   CURSOR_TOOLTIP_STYLE,
+  HEX_COLOR_PATTERN,
 } from "../config/constants"
 import { propertyActions } from "../extensions/store"
 
@@ -171,12 +174,6 @@ const buildOwnerIdentityKey = (
 export const ownerIdentity = {
   buildKey: buildOwnerIdentityKey,
   normalizeValue: normalizeOwnerValue,
-}
-
-export interface CursorGraphicsState {
-  pointGraphic: __esri.Graphic | null
-  tooltipGraphic: __esri.Graphic | null
-  lastTooltipText: string | null
 }
 
 export const buildTooltipSymbol = (
@@ -382,8 +379,6 @@ export const formatPropertyWithShare = (
 // ============================================================================
 // GRAPHICS & HIGHLIGHTING
 // ============================================================================
-
-const HEX_COLOR_PATTERN = /^#?([0-9a-fA-F]{6})$/
 
 export const buildHighlightColor = (
   color?: string,
@@ -758,6 +753,11 @@ export const syncGraphicsWithState = (params: {
 
 export { isValidationSuccess, isValidationFailure } from "../config/types"
 
+export type {
+  CursorGraphicsState,
+  ProcessPropertyQueryParams,
+} from "../config/types"
+
 export const validateMapClickPipeline = (params: {
   event: any
   modules: EsriModules | null
@@ -813,22 +813,6 @@ export const validateMapClickPipeline = (params: {
       mapPoint: validatedMap.data.mapPoint,
       manager: validatedDs.data.manager,
     },
-  }
-}
-
-interface ProcessPropertyQueryParams {
-  propertyResults: any[]
-  config: {
-    propertyDataSourceId: string
-    ownerDataSourceId: string
-    enablePIIMasking: boolean
-    relationshipId?: number
-    enableBatchOwnerQuery?: boolean
-  }
-  processingContext: any
-  services: {
-    processBatch: (params: any) => Promise<any>
-    processIndividual: (params: any) => Promise<any>
   }
 }
 

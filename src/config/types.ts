@@ -376,3 +376,76 @@ export interface LoadingBlockProps {
   translate: (key: string) => string
   size?: number
 }
+
+// =============================================================================
+// UTILITY INTERFACES FROM SHARED MODULES
+// Interfaces extracted from utils.ts, api.ts, hooks.ts, and export.ts
+// =============================================================================
+
+export interface CursorGraphicsState {
+  pointGraphic: __esri.Graphic | null
+  tooltipGraphic: __esri.Graphic | null
+  lastTooltipText: string | null
+}
+
+export interface ProcessPropertyQueryParams {
+  propertyResults: any[]
+  config: {
+    propertyDataSourceId: string
+    ownerDataSourceId: string
+    enablePIIMasking: boolean
+    relationshipId?: number
+    enableBatchOwnerQuery?: boolean
+  }
+  processingContext: any
+  services: {
+    processBatch: (params: any) => Promise<any>
+    processIndividual: (params: any) => Promise<any>
+  }
+}
+
+export interface PropertySelectionPipelineParams {
+  mapPoint: __esri.Point
+  propertyDataSourceId: string
+  ownerDataSourceId: string
+  dsManager: DataSourceManager
+  maxResults: number
+  toggleEnabled: boolean
+  enableBatchOwnerQuery?: boolean
+  relationshipId?: number
+  enablePIIMasking: boolean
+  signal: AbortSignal
+  selectedProperties: GridRowData[]
+  translate: (key: string) => string
+}
+
+export type PropertySelectionPipelineResult =
+  | { status: "empty" }
+  | {
+      status: "success"
+      rowsToProcess: GridRowData[]
+      graphicsToAdd: Array<{
+        graphic: __esri.Graphic
+        fnr: string | number
+      }>
+      updatedRows: GridRowData[]
+      toRemove: Set<string>
+      propertyResults: QueryResult[]
+    }
+
+export interface HoverQueryParams {
+  config: {
+    propertyDataSourceId: string
+    ownerDataSourceId: string
+    allowedHosts?: readonly string[]
+  }
+  dsManager: any
+  enablePIIMasking: boolean
+  translate: (key: string) => string
+}
+
+export type DebouncedFn<T extends (...args: any[]) => void> = ((
+  ...args: Parameters<T>
+) => void) & {
+  cancel: () => void
+}

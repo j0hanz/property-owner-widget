@@ -14,6 +14,8 @@ import type {
   PropertyBatchQueryParams,
   PropertyIndividualQueryParams,
   ValidationResult,
+  PropertySelectionPipelineParams,
+  PropertySelectionPipelineResult,
 } from "../config/types"
 import { isValidationFailure } from "../config/types"
 import {
@@ -32,7 +34,11 @@ import {
   calculatePropertyUpdates,
   processPropertyQueryResults,
 } from "./utils"
-import { OWNER_QUERY_CONCURRENCY } from "../config/constants"
+import {
+  OWNER_QUERY_CONCURRENCY,
+  QUERY_CACHE_MAX_SIZE,
+  QUERY_CACHE_EVICTION_PERCENTAGE,
+} from "../config/constants"
 
 // ============================================================================
 // QUERY CACHE SERVICE
@@ -41,7 +47,7 @@ import { OWNER_QUERY_CONCURRENCY } from "../config/constants"
 
 const queryCacheService = {
   cache: new Map<string, { value: any; timestamp: number }>(),
-  maxSize: 100,
+  maxSize: QUERY_CACHE_MAX_SIZE,
   hits: 0,
   misses: 0,
 
@@ -65,7 +71,9 @@ const queryCacheService = {
   },
 
   evictOldest(): void {
-    const entriesToRemove = Math.floor(this.maxSize * 0.2)
+    const entriesToRemove = Math.floor(
+      this.maxSize * QUERY_CACHE_EVICTION_PERCENTAGE
+    )
     const sorted = Array.from(this.cache.entries()).sort(
       (a, b) => a[1].timestamp - b[1].timestamp
     )
@@ -1228,35 +1236,6 @@ export const propertyQueryService = {
   processBatch: processBatchQuery,
   processIndividual: processIndividualQuery,
 }
-
-export interface PropertySelectionPipelineParams {
-  mapPoint: __esri.Point
-  propertyDataSourceId: string
-  ownerDataSourceId: string
-  dsManager: DataSourceManager
-  maxResults: number
-  toggleEnabled: boolean
-  enableBatchOwnerQuery?: boolean
-  relationshipId?: number
-  enablePIIMasking: boolean
-  signal: AbortSignal
-  selectedProperties: GridRowData[]
-  translate: (key: string) => string
-}
-
-export type PropertySelectionPipelineResult =
-  | { status: "empty" }
-  | {
-      status: "success"
-      rowsToProcess: GridRowData[]
-      graphicsToAdd: Array<{
-        graphic: __esri.Graphic
-        fnr: string | number
-      }>
-      updatedRows: GridRowData[]
-      toRemove: Set<string>
-      propertyResults: QueryResult[]
-    }
 
 export const runPropertySelectionPipeline = async (
   params: PropertySelectionPipelineParams

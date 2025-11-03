@@ -79,3 +79,21 @@ export const EXPORT_FORMATS: ExportFormatDefinition[] = [
     mimeType: "application/geo+json",
   },
 ]
+
+// Hex color validation pattern
+export const HEX_COLOR_PATTERN = /^#?([0-9a-fA-F]{6})$/
+
+// Query cache settings
+export const QUERY_CACHE_MAX_SIZE = 100
+export const QUERY_CACHE_EVICTION_PERCENTAGE = 0.2
+
+// CSV export settings
+export const CSV_HEADERS = [
+  "FNR",
+  "UUID_FASTIGHET",
+  "FASTIGHET",
+  "BOSTADR",
+] as const
+
+// Hover query settings
+export const HOVER_QUERY_THROTTLE_MS = 100

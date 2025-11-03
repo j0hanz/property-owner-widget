@@ -5,8 +5,7 @@ import type {
   CsvHeaderValues,
   ExportOptions,
 } from "../config/types"
-
-const CSV_HEADERS = ["FNR", "UUID_FASTIGHET", "FASTIGHET", "BOSTADR"] as const
+import { CSV_HEADERS } from "../config/constants"
 
 const sanitizeValue = (value: any): string => {
   if (value == null) {

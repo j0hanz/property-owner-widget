@@ -1,6 +1,10 @@
 import { React, hooks } from "jimu-core"
 import { loadArcGISJSAPIModules } from "jimu-arcgis"
-import type { EsriModules } from "../config/types"
+import type {
+  EsriModules,
+  HoverQueryParams,
+  DebouncedFn,
+} from "../config/types"
 import {
   ESRI_MODULES_TO_LOAD,
   ABORT_CONTROLLER_POOL_SIZE,
@@ -653,12 +657,6 @@ export const useValidatedNumericHandler = (params: {
   return { handleChange, handleBlur }
 }
 
-type DebouncedFn<T extends (...args: any[]) => void> = ((
-  ...args: Parameters<T>
-) => void) & {
-  cancel: () => void
-}
-
 export const useNumericValidator = (
   fieldKey: string,
   min: number,
@@ -809,17 +807,6 @@ export const useDebounce = <T extends (...args: any[]) => void>(
   })
 
   return debouncedRef.current
-}
-
-export interface HoverQueryParams {
-  config: {
-    propertyDataSourceId: string
-    ownerDataSourceId: string
-    allowedHosts?: readonly string[]
-  }
-  dsManager: any
-  enablePIIMasking: boolean
-  translate: (key: string) => string
 }
 
 export const useHoverQuery = (params: HoverQueryParams) => {
