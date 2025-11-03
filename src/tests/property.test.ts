@@ -31,7 +31,12 @@ import {
 } from "../shared/api"
 import { convertToCSV, convertToGeoJSON, exportData } from "../shared/export"
 import { CURSOR_TOOLTIP_STYLE } from "../config/constants"
-import type { OwnerAttributes, GridRowData } from "../config/types"
+import type {
+  OwnerAttributes,
+  GridRowData,
+  SerializedQueryResult,
+  QueryResult,
+} from "../config/types"
 import { PropertyActionType } from "../extensions/store"
 import type { PropertyAction } from "../extensions/store"
 import { WidgetState } from "jimu-core"
@@ -242,9 +247,21 @@ describe("createPropertyDispatcher", () => {
     const widgetId = "widget_property_results"
     const dispatcher = createPropertyDispatcher(dispatch, widgetId)
 
-    const rawResults = new Map<string, any>([
-      ["row-1", { value: 1 }],
-      ["row-2", { value: 2 }],
+    const serialized: SerializedQueryResult = {
+      propertyId: "123",
+      features: [
+        {
+          attributes: { FNR: "123" },
+          geometry: null,
+          aggregateGeometries: null,
+          symbol: null,
+          popupTemplate: null,
+        },
+      ],
+    }
+
+    const rawResults = new Map<string, SerializedQueryResult>([
+      ["row-1", serialized],
     ])
 
     dispatcher.setRawResults(rawResults)
@@ -1035,32 +1052,36 @@ describe("Property Widget - Utility Helper Functions", () => {
     const updated = updateRawPropertyResults(
       new Map(),
       [ownerRowA, ownerRowB],
-      [propertyResult],
+      [propertyResult as unknown as QueryResult],
       new Set(),
       [],
       normalizeFnrKey
     )
 
-    expect(updated.size).toBe(2)
-    expect(updated.get(ownerRowA.id)).toBe(propertyResult)
-    expect(updated.get(ownerRowB.id)).toBe(propertyResult)
-  })
-
-  it("should remove raw property results for deselected properties", () => {
-    const propertyResult = {
+    const expectedSerialized = {
+      propertyId: "",
       features: [
         {
           attributes: {
-            FNR: "456",
-            OBJECTID: 100,
-            UUID_FASTIGHET: "uuid-456",
-            FASTIGHET: "Property 2",
+            FNR: "123",
+            OBJECTID: 42,
+            UUID_FASTIGHET: "uuid-123",
+            FASTIGHET: "Property 1",
           },
           geometry: {},
+          aggregateGeometries: null,
+          symbol: null,
+          popupTemplate: null,
         },
       ],
     }
 
+    expect(updated.size).toBe(2)
+    expect(updated.get(ownerRowA.id)).toEqual(expectedSerialized)
+    expect(updated.get(ownerRowB.id)).toEqual(expectedSerialized)
+  })
+
+  it("should remove raw property results for deselected properties", () => {
     const ownerRow: GridRowData = {
       id: createRowId("456", 1),
       FNR: "456",
@@ -1068,10 +1089,29 @@ describe("Property Widget - Utility Helper Functions", () => {
       FASTIGHET: "Property 2",
       BOSTADR: "Owner A",
     }
-
-    const prev = new Map<string, any>([[ownerRow.id, propertyResult]])
+    const prev = new Map<string, SerializedQueryResult>([
+      [
+        ownerRow.id,
+        {
+          propertyId: "",
+          features: [
+            {
+              attributes: {
+                FNR: "456",
+                OBJECTID: 100,
+                UUID_FASTIGHET: "uuid-456",
+                FASTIGHET: "Property 2",
+              },
+              geometry: {},
+              aggregateGeometries: null,
+              symbol: null,
+              popupTemplate: null,
+            },
+          ],
+        } as SerializedQueryResult,
+      ],
+    ])
     const toRemove = new Set<string>([normalizeFnrKey(ownerRow.FNR)])
-
     const updated = updateRawPropertyResults(
       prev,
       [],
@@ -1080,7 +1120,6 @@ describe("Property Widget - Utility Helper Functions", () => {
       [ownerRow],
       normalizeFnrKey
     )
-
     expect(prev.has(ownerRow.id)).toBe(true)
     expect(updated.has(ownerRow.id)).toBe(false)
     expect(updated.size).toBe(0)
@@ -1244,7 +1283,6 @@ describe("Property Widget - Undo Functionality", () => {
       UUID_FASTIGHET: "uuid-123",
       FASTIGHET: "Property 1",
       BOSTADR: "Owner 1",
-      graphic: {} as __esri.Graphic,
     }
 
     const undoHistory = [
@@ -1268,7 +1306,6 @@ describe("Property Widget - Undo Functionality", () => {
         UUID_FASTIGHET: "uuid-123",
         FASTIGHET: "Property 1",
         BOSTADR: "Owner 1",
-        graphic: {} as __esri.Graphic,
       },
       {
         id: "456_2",
@@ -1276,7 +1313,6 @@ describe("Property Widget - Undo Functionality", () => {
         UUID_FASTIGHET: "uuid-456",
         FASTIGHET: "Property 2",
         BOSTADR: "Owner 2",
-        graphic: {} as __esri.Graphic,
       },
     ]
 
@@ -1305,7 +1341,6 @@ describe("Property Widget - Undo Functionality", () => {
           UUID_FASTIGHET: `uuid-${i}`,
           FASTIGHET: `Property ${i}`,
           BOSTADR: `Owner ${i}`,
-          graphic: {} as __esri.Graphic,
         },
       ],
     }))
@@ -1324,7 +1359,6 @@ describe("Property Widget - Undo Functionality", () => {
       UUID_FASTIGHET: "uuid-123",
       FASTIGHET: "Property 1",
       BOSTADR: "Owner 1",
-      graphic: {} as __esri.Graphic,
     }
 
     const currentProperties = [
@@ -1334,7 +1368,6 @@ describe("Property Widget - Undo Functionality", () => {
         UUID_FASTIGHET: "uuid-456",
         FASTIGHET: "Property 2",
         BOSTADR: "Owner 2",
-        graphic: {} as __esri.Graphic,
       },
     ]
 
@@ -1359,7 +1392,6 @@ describe("Property Widget - Undo Functionality", () => {
         UUID_FASTIGHET: "uuid-123",
         FASTIGHET: "Property 1",
         BOSTADR: "Owner 1",
-        graphic: {} as __esri.Graphic,
       },
       {
         id: "456_2",
@@ -1367,7 +1399,6 @@ describe("Property Widget - Undo Functionality", () => {
         UUID_FASTIGHET: "uuid-456",
         FASTIGHET: "Property 2",
         BOSTADR: "Owner 2",
-        graphic: {} as __esri.Graphic,
       },
     ]
 
@@ -1604,25 +1635,13 @@ describe("Export Utilities - GeoJSON", () => {
     UUID_FASTIGHET: "uuid-geo",
     FASTIGHET: "<em>Geo property</em>",
     BOSTADR: "<span>Geo owner</span>",
+    geometryType: null,
   }
 
   it("should convert polygon geometry", () => {
     const polygonRow: GridRowData = {
       ...baseRow,
-      graphic: {
-        geometry: {
-          type: "polygon",
-          rings: [
-            [
-              [0, 0],
-              [1, 0],
-              [1, 1],
-              [0, 1],
-              [0, 0],
-            ],
-          ],
-        },
-      } as unknown as __esri.Graphic,
+      geometryType: "polygon",
     }
 
     const geojson = convertToGeoJSON([polygonRow]) as any
@@ -1639,13 +1658,7 @@ describe("Export Utilities - GeoJSON", () => {
   it("should sanitize HTML in properties", () => {
     const rowWithHtml: GridRowData = {
       ...baseRow,
-      graphic: {
-        geometry: {
-          type: "point",
-          x: 10,
-          y: 20,
-        },
-      } as unknown as __esri.Graphic,
+      geometryType: "point",
     }
 
     const geojson = convertToGeoJSON([rowWithHtml]) as any

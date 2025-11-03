@@ -36,6 +36,7 @@ import type {
   GridRowData,
   SelectionGraphicsParams,
   ExportFormat,
+  SerializedQueryResult,
 } from "../config/types"
 import { ErrorType } from "../config/enums"
 import { useWidgetStyles } from "../config/style"
@@ -610,8 +611,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             prevRawResults instanceof Map
               ? prevRawResults
               : prevRawResults
-                ? new Map(prevRawResults as ReadonlyMap<string, any>)
-                : new Map<string, any>()
+                ? new Map(
+                    prevRawResults as ReadonlyMap<string, SerializedQueryResult>
+                  )
+                : new Map<string, SerializedQueryResult>()
 
           const updatedRawResults = updateRawPropertyResults(
             baseRawResults,

@@ -6,6 +6,7 @@ import type {
   IMPropertyGlobalState,
   IMStateWithProperty,
   PropertyWidgetState,
+  SerializedQueryResult,
 } from "../config/types"
 
 export enum PropertyActionType {
@@ -46,7 +47,7 @@ export type PropertyAction =
     }
   | {
       type: PropertyActionType.SET_RAW_RESULTS
-      results: Map<string, any> | null
+      results: Map<string, SerializedQueryResult> | null
       widgetId: string
     }
   | {
@@ -82,7 +83,7 @@ export const propertyActions = {
     widgetId,
   }),
   setRawResults: (
-    results: Map<string, any> | null,
+    results: Map<string, SerializedQueryResult> | null,
     widgetId: string
   ): PropertyAction => ({
     type: PropertyActionType.SET_RAW_RESULTS,

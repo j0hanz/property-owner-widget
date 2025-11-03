@@ -898,7 +898,7 @@ const createGridRow = (params: {
   uuidFastighet: string
   fastighet: string
   bostadr: string
-  graphic: __esri.Graphic
+  geometryType: string | null
   createRowId: (fnr: string | number, objectId: number) => string
   rawOwner?: OwnerAttributes
 }): GridRowData => ({
@@ -907,7 +907,7 @@ const createGridRow = (params: {
   UUID_FASTIGHET: params.uuidFastighet,
   FASTIGHET: params.fastighet,
   BOSTADR: params.bostadr,
-  graphic: params.graphic,
+  geometryType: params.geometryType,
   rawOwner: params.rawOwner,
 })
 
@@ -930,6 +930,8 @@ const buildPropertyRows = (options: {
     context,
   } = options
 
+  const geometryType = propertyGraphic?.geometry?.type ?? null
+
   if (ownerFeatures.length > 0) {
     const uniqueOwners = deduplicateOwnerEntries(ownerFeatures, {
       fnr,
@@ -950,7 +952,7 @@ const buildPropertyRows = (options: {
           config.enablePIIMasking,
           context.messages.unknownOwner
         ),
-        graphic: propertyGraphic,
+        geometryType,
         createRowId: context.helpers.createRowId,
         rawOwner: attrs,
       })
@@ -977,7 +979,7 @@ const buildPropertyRows = (options: {
       uuidFastighet: propertyAttrs.UUID_FASTIGHET,
       fastighet: propertyAttrs.FASTIGHET,
       bostadr: fallbackMessage,
-      graphic: propertyGraphic,
+      geometryType,
       createRowId: context.helpers.createRowId,
       rawOwner: fallbackOwner,
     }),
@@ -1129,7 +1131,7 @@ const processBatchQuery = async (
               uuidFastighet: attrs.UUID_FASTIGHET,
               fastighet: propertyWithShare,
               bostadr: formattedOwner,
-              graphic,
+              geometryType: graphic?.geometry?.type || null,
               createRowId: context.helpers.createRowId,
               rawOwner: owner,
             })
@@ -1154,7 +1156,7 @@ const processBatchQuery = async (
             uuidFastighet: attrs.UUID_FASTIGHET,
             fastighet: attrs.FASTIGHET,
             bostadr: fallbackMessage,
-            graphic,
+            geometryType: graphic?.geometry?.type || null,
             createRowId: context.helpers.createRowId,
             rawOwner: fallbackOwner,
           })

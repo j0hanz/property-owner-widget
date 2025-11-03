@@ -68,7 +68,7 @@ export interface GridRowData {
   UUID_FASTIGHET: string
   FASTIGHET: string
   BOSTADR: string
-  graphic?: __esri.Graphic
+  geometryType?: string | null
   rawOwner?: OwnerAttributes
 }
 
@@ -145,7 +145,7 @@ export interface PropertyWidgetState {
   error: ErrorState | null
   selectedProperties: GridRowData[]
   isQueryInFlight: boolean
-  rawPropertyResults: Map<string, any> | null
+  rawPropertyResults: Map<string, SerializedQueryResult> | null
 }
 
 export interface IMPropertyGlobalState {
@@ -161,6 +161,19 @@ export interface IMStateWithProperty extends IMState {
 export interface QueryResult {
   features: __esri.Graphic[]
   propertyId: string | number
+}
+
+export interface SerializedQueryFeature {
+  attributes: { [key: string]: any } | null
+  geometry: { [key: string]: any } | null
+  aggregateGeometries?: { [key: string]: any } | null
+  symbol?: { [key: string]: any } | null
+  popupTemplate?: { [key: string]: any } | null
+}
+
+export interface SerializedQueryResult {
+  propertyId: string | number
+  features: SerializedQueryFeature[]
 }
 
 // =============================================================================

@@ -7,6 +7,9 @@ import type {
   IMConfig,
   GridRowData,
   ErrorState,
+  SerializedQueryResult,
+  SerializedQueryFeature,
+  QueryResult,
 } from "../config/types"
 import type { DataSourceManager } from "jimu-core"
 import { isValidationFailure as checkValidationFailure } from "../config/types"
@@ -863,16 +866,71 @@ export const processPropertyQueryResults = async (
 }
 
 export const updateRawPropertyResults = (
-  prev: Map<string, any>,
-  rowsToProcess: any[],
-  propertyResults: any[],
+  prev: Map<string, SerializedQueryResult>,
+  rowsToProcess: Array<{ FNR: string | number; id: string }>,
+  propertyResults: QueryResult[],
   toRemove: Set<string>,
-  selectedProperties: any[],
+  selectedProperties: Array<{ FNR: string | number; id: string }>,
   normalizeFnrKey: (fnr: any) => string
-): Map<string, any> => {
+): Map<string, SerializedQueryResult> => {
+  const clonePlainValue = (value: any) => {
+    if (value == null) return null
+    try {
+      return JSON.parse(JSON.stringify(value))
+    } catch (_error) {
+      if (Array.isArray(value)) {
+        return value.map((item) => clonePlainValue(item))
+      }
+      return { ...value }
+    }
+  }
+
+  const serializeFeature = (
+    feature: __esri.Graphic | undefined | null
+  ): SerializedQueryFeature => {
+    if (!feature) {
+      return {
+        attributes: null,
+        geometry: null,
+        aggregateGeometries: null,
+        symbol: null,
+        popupTemplate: null,
+      }
+    }
+
+    const geometry = (feature as any)?.geometry as __esri.Geometry | undefined
+    const geometryJson = geometry
+      ? typeof geometry.toJSON === "function"
+        ? geometry.toJSON()
+        : clonePlainValue(geometry)
+      : null
+
+    return {
+      attributes:
+        feature.attributes && typeof feature.attributes === "object"
+          ? { ...feature.attributes }
+          : null,
+      geometry: geometryJson ?? null,
+      aggregateGeometries: clonePlainValue(
+        (feature as any)?.aggregateGeometries ?? null
+      ),
+      symbol: clonePlainValue((feature as any)?.symbol ?? null),
+      popupTemplate: clonePlainValue((feature as any)?.popupTemplate ?? null),
+    }
+  }
+
+  const serializePropertyResult = (
+    result: QueryResult
+  ): SerializedQueryResult => ({
+    propertyId: result?.propertyId ?? "",
+    features: Array.isArray(result?.features)
+      ? result.features.map((feature) => serializeFeature(feature))
+      : [],
+  })
+
   const updated = new Map(prev)
 
-  const propertyResultsByFnr = new Map<string, any>()
+  const propertyResultsByFnr = new Map<string, SerializedQueryResult>()
   propertyResults.forEach((result) => {
     const feature = result?.features?.[0]
     const attributes = feature?.attributes as
@@ -880,7 +938,10 @@ export const updateRawPropertyResults = (
       | undefined
     const fnrValue = attributes?.FNR ?? attributes?.fnr
     if (fnrValue != null) {
-      propertyResultsByFnr.set(normalizeFnrKey(fnrValue), result)
+      propertyResultsByFnr.set(
+        normalizeFnrKey(fnrValue),
+        serializePropertyResult(result)
+      )
     }
   })
 
@@ -896,8 +957,9 @@ export const updateRawPropertyResults = (
     let propertyResult = propertyResultsByFnr.get(fnrKey)
 
     if (!propertyResult && propertyResults.length > 0) {
-      const fallback =
+      const fallback = serializePropertyResult(
         propertyResults[Math.min(fallbackIndex, propertyResults.length - 1)]
+      )
       fallbackIndex += 1
       propertyResult = fallback
     }
@@ -927,7 +989,10 @@ export const createPropertyDispatcher = (
   }
 
   const cloneMap = (
-    results: Map<string, any> | ReadonlyMap<string, any> | null
+    results:
+      | Map<string, SerializedQueryResult>
+      | ReadonlyMap<string, SerializedQueryResult>
+      | null
   ) => {
     if (!results) return null
     if (results instanceof Map) return new Map(results)
@@ -953,7 +1018,10 @@ export const createPropertyDispatcher = (
       safeDispatch(propertyActions.setQueryInFlight(inFlight, widgetId))
     },
     setRawResults: (
-      results: Map<string, any> | ReadonlyMap<string, any> | null
+      results:
+        | Map<string, SerializedQueryResult>
+        | ReadonlyMap<string, SerializedQueryResult>
+        | null
     ) => {
       safeDispatch(propertyActions.setRawResults(cloneMap(results), widgetId))
     },
