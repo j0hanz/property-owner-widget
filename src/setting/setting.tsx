@@ -4,6 +4,7 @@ import {
   React,
   hooks,
   jsx,
+  ReactRedux,
   type UseDataSource,
   type ImmutableObject,
   DataSourceTypes,
@@ -54,6 +55,7 @@ import {
 import addIcon from "../assets/plus.svg"
 import removeIcon from "../assets/close.svg"
 import infoIcon from "../assets/info.svg"
+import { createPropertySelectors } from "../extensions/store"
 
 interface FieldErrors {
   [key: string]: string | undefined
@@ -65,6 +67,20 @@ const Setting = (
   const { config, id, onSettingChange, useMapWidgetIds } = props
   const translate = hooks.useTranslation(jimuUIMessages, defaultMessages)
   const styles = useSettingStyles()
+
+  // Redux integration for runtime state visibility
+  const selectorsRef = React.useRef(createPropertySelectors(id))
+  const selectors = selectorsRef.current
+  const selectedProperties = ReactRedux.useSelector(
+    selectors.selectSelectedProperties
+  )
+  const isQueryInFlight = ReactRedux.useSelector(
+    selectors.selectIsQueryInFlight
+  )
+  const hasError = ReactRedux.useSelector(selectors.selectError) !== null
+  const selectedCount = Array.isArray(selectedProperties)
+    ? selectedProperties.length
+    : 0
 
   const renderLabelWithTooltip = (
     labelKey: string,
@@ -501,6 +517,27 @@ const Setting = (
 
   return (
     <>
+      {(selectedCount > 0 || isQueryInFlight || hasError) && (
+        <SettingSection>
+          <SettingRow flow="wrap" level={1} css={styles.row}>
+            <Alert
+              css={styles.fullWidth}
+              type={isQueryInFlight ? "info" : hasError ? "warning" : "success"}
+              text={
+                isQueryInFlight
+                  ? translate("runtimeStateQuerying")
+                  : hasError
+                    ? translate("runtimeStateError")
+                    : translate("runtimeStateSelected").replace(
+                        "{count}",
+                        String(selectedCount)
+                      )
+              }
+              closable={false}
+            />
+          </SettingRow>
+        </SettingSection>
+      )}
       <SettingSection>
         <SettingRow
           flow="wrap"

@@ -60,6 +60,9 @@ System.register([], function (e) {
         errorInvalidNumber: "Ange ett heltal större än noll.",
         errorMaxResultsInvalid: "Max resultat måste vara mellan 1 och 1000.",
         errorRelationshipIdInvalid: "Relations-ID måste vara mellan 0 och 99.",
+        runtimeStateQuerying: "Fråga pågår...",
+        runtimeStateError: "Frågefel uppstod. Kontrollera widget för detaljer.",
+        runtimeStateSelected: "{count} fastigheter valda för närvarande",
       })
     },
   }
