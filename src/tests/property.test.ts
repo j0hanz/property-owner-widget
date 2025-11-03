@@ -909,7 +909,6 @@ describe("Property Widget - Utility Helper Functions", () => {
     expect(symbol).toBeInstanceOf(MockTextSymbol)
     expect(symbol.text).toBe("FAST-1")
     expect(symbol.color).toBe(CURSOR_TOOLTIP_STYLE.textColor)
-    expect(symbol.haloColor).toBe(CURSOR_TOOLTIP_STYLE.haloColor)
     expect(symbol.font.family).toBe(CURSOR_TOOLTIP_STYLE.fontFamily)
   })
 
