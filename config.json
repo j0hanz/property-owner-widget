@@ -16,7 +16,7 @@
 	"enableBatchOwnerQuery": false,
 	"relationshipId": 0,
 	"autoZoomOnSelection": false,
-	"highlightColor": "#00B4D8",
+	"highlightColor": "#b54900",
 	"highlightOpacity": 0.4,
-	"outlineWidth": 2
+	"outlineWidth": 1
 }

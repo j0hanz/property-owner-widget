@@ -47,11 +47,6 @@ import {
   normalizeHostValue,
   normalizeHostList,
 } from "../shared/utils"
-import {
-  DEFAULT_HIGHLIGHT_COLOR,
-  HIGHLIGHT_SYMBOL_ALPHA,
-  OUTLINE_WIDTH,
-} from "../config/constants"
 import addIcon from "../assets/plus.svg"
 import removeIcon from "../assets/close.svg"
 import infoIcon from "../assets/info.svg"
@@ -163,23 +158,20 @@ const Setting = (
     normalizeHostList(config.allowedHosts)
   )
   const [localHighlightColor, setLocalHighlightColor] = React.useState(
-    config.highlightColor || DEFAULT_HIGHLIGHT_COLOR
+    config.highlightColor
   )
   const [localHighlightOpacity, setLocalHighlightOpacity] = React.useState(
     () => {
       const baseValue =
         typeof config.highlightOpacity === "number"
           ? config.highlightOpacity
-          : HIGHLIGHT_SYMBOL_ALPHA
+          : 0.4
       return opacityHelpers.fromPercent(opacityHelpers.toPercent(baseValue))
     }
   )
   const [localOutlineWidth, setLocalOutlineWidth] = React.useState(() => {
-    const baseValue =
-      typeof config.outlineWidth === "number"
-        ? config.outlineWidth
-        : OUTLINE_WIDTH
-    return outlineWidthHelpers.normalize(baseValue)
+    const value = config.outlineWidth
+    return typeof value === "number" && Number.isFinite(value) ? value : 1
   })
 
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({})
@@ -290,7 +282,7 @@ const Setting = (
   )
 
   const handleHighlightColorChange = hooks.useEventCallback((color: string) => {
-    const nextColor = color || DEFAULT_HIGHLIGHT_COLOR
+    const nextColor = color || config.highlightColor
     setLocalHighlightColor(nextColor)
     updateConfig("highlightColor", nextColor)
   })
@@ -434,14 +426,14 @@ const Setting = (
   }, [config.allowedHosts])
 
   hooks.useUpdateEffect(() => {
-    setLocalHighlightColor(config.highlightColor || DEFAULT_HIGHLIGHT_COLOR)
+    setLocalHighlightColor(config.highlightColor)
   }, [config.highlightColor])
 
   hooks.useUpdateEffect(() => {
     const baseValue =
       typeof config.highlightOpacity === "number"
         ? config.highlightOpacity
-        : HIGHLIGHT_SYMBOL_ALPHA
+        : 0.4
     setLocalHighlightOpacity(
       opacityHelpers.fromPercent(opacityHelpers.toPercent(baseValue))
     )
@@ -449,9 +441,7 @@ const Setting = (
 
   hooks.useUpdateEffect(() => {
     const baseValue =
-      typeof config.outlineWidth === "number"
-        ? config.outlineWidth
-        : OUTLINE_WIDTH
+      typeof config.outlineWidth === "number" ? config.outlineWidth : 1
     setLocalOutlineWidth(outlineWidthHelpers.normalize(baseValue))
   }, [config.outlineWidth])
 

@@ -24,9 +24,6 @@ export const QUERY_DEFAULTS = {
 } as const
 export const MIN_MASK_LENGTH = 3
 export const MAX_MASK_ASTERISKS = 3
-export const DEFAULT_HIGHLIGHT_COLOR = "#b54900"
-export const HIGHLIGHT_SYMBOL_ALPHA = 0.5
-export const OUTLINE_WIDTH = 1
 export const DEFAULT_MAX_RESULTS = 100
 export const OWNER_QUERY_CONCURRENCY = 5
 
@@ -96,4 +93,4 @@ export const CSV_HEADERS = [
 ] as const
 
 // Hover query settings
-export const HOVER_QUERY_THROTTLE_MS = 100
+export const HOVER_QUERY_THROTTLE_MS = 50

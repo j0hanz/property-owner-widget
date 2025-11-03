@@ -23,10 +23,7 @@ import {
 import {
   MIN_MASK_LENGTH,
   MAX_MASK_ASTERISKS,
-  DEFAULT_HIGHLIGHT_COLOR,
-  HIGHLIGHT_SYMBOL_ALPHA,
   HIGHLIGHT_MARKER_SIZE,
-  OUTLINE_WIDTH,
   CURSOR_TOOLTIP_STYLE,
   HEX_COLOR_PATTERN,
 } from "../config/constants"
@@ -381,23 +378,21 @@ export const formatPropertyWithShare = (
 // ============================================================================
 
 export const buildHighlightColor = (
-  color?: string,
-  opacity?: number
+  color: string,
+  opacity: number
 ): [number, number, number, number] => {
-  const fallbackOpacity = HIGHLIGHT_SYMBOL_ALPHA
-  const fallbackColor = DEFAULT_HIGHLIGHT_COLOR
-
   const sanitized = typeof color === "string" ? color.trim() : ""
   const match = sanitized ? HEX_COLOR_PATTERN.exec(sanitized) : null
-  const hex = match ? match[1] : fallbackColor.replace("#", "")
+
+  // If no valid color match, use the input color as-is (it's from config.json)
+  const hex = match ? match[1] : color.replace("#", "")
 
   const r = parseInt(hex.substring(0, 2), 16)
   const g = parseInt(hex.substring(2, 4), 16)
   const b = parseInt(hex.substring(4, 6), 16)
 
   const clampedOpacity = (() => {
-    if (typeof opacity !== "number" || !Number.isFinite(opacity))
-      return fallbackOpacity
+    if (typeof opacity !== "number" || !Number.isFinite(opacity)) return 0.4
     if (opacity < 0) return 0
     if (opacity > 1) return 1
     return opacity
@@ -555,12 +550,9 @@ export const parseArcGISError = (
   return defaultMessage
 }
 
-export const getValidatedOutlineWidth = (
-  width: unknown,
-  defaultWidth: number = OUTLINE_WIDTH
-): number => {
+export const getValidatedOutlineWidth = (width: unknown): number => {
   if (typeof width !== "number" || !Number.isFinite(width)) {
-    return defaultWidth
+    return 1
   }
   if (width < 0.5) return 0.5
   if (width > 10) return 10
