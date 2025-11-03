@@ -376,21 +376,6 @@ export const formatPropertyWithShare = (
   return trimmedShare ? `${property} (${trimmedShare})` : property
 }
 
-/**
- * Owner Processing Pipeline
- * Consolidated API for owner data formatting and masking
- */
-export const ownerProcessing = {
-  format: formatOwnerInfo,
-  mask: { name: maskName, address: maskAddress },
-  buildIdentity: ownerIdentity.buildKey,
-  processBatch: (
-    owners: OwnerAttributes[],
-    maskPII: boolean,
-    unknownText: string
-  ) => owners.map((o) => formatOwnerInfo(o, maskPII, unknownText)),
-}
-
 // ============================================================================
 // GRAPHICS & HIGHLIGHTING
 // ============================================================================
@@ -582,20 +567,6 @@ export const getValidatedOutlineWidth = (
   if (width < 0.5) return 0.5
   if (width > 10) return 10
   return width
-}
-
-export const typeGuards = {
-  isString: (value: unknown): value is string => {
-    return typeof value === "string"
-  },
-
-  isFiniteNumber: (value: unknown): value is number => {
-    return typeof value === "number" && Number.isFinite(value)
-  },
-
-  isNonEmptyString: (value: unknown): value is string => {
-    return typeof value === "string" && value.length > 0
-  },
 }
 
 export const buildFnrWhereClause = (

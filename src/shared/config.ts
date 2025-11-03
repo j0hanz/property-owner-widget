@@ -62,7 +62,3 @@ export const getVisibleRows = (
 ): Array<Row<GridRowData>> => {
   return table.getRowModel().rows
 }
-
-export const getTotalRowCount = (table: Table<GridRowData>): number => {
-  return table.getRowModel().rows.length
-}
