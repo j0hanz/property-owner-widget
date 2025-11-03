@@ -700,7 +700,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   const handleMapClick = hooks.useEventCallback(
     async (event: __esri.ViewClickEvent) => {
-      abortAll()
+      const perfStart = performance.now()
+      console.log("[PERF] Map click started at", perfStart)
+      // Don't abort all on every click - only abort when starting new query
+      // abortAll() removes ability to benefit from any caching
       const tracker = createPerformanceTracker("map_click_query")
 
       const validation = validateMapClickPipeline({
@@ -736,6 +739,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       const controller = getController()
 
       try {
+        const pipelineStart = performance.now()
+        console.log(
+          "[PERF] Pipeline started at",
+          pipelineStart - perfStart,
+          "ms"
+        )
         const pipelineResult = await runPropertySelectionPipeline({
           mapPoint,
           propertyDataSourceId: config.propertyDataSourceId,
@@ -750,6 +759,15 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           selectedProperties: selectionForPipeline,
           translate,
         })
+        const pipelineEnd = performance.now()
+        console.log(
+          "[PERF] Pipeline completed at",
+          pipelineEnd - perfStart,
+          "ms",
+          "(took",
+          pipelineEnd - pipelineStart,
+          "ms)"
+        )
 
         const abortStatus = abortHelpers.checkAbortedOrStale(
           controller.signal,
@@ -813,10 +831,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           )
 
           // Convert Map back to plain object for Redux storage
+          const conversionStart = performance.now()
           const plainResults: { [key: string]: SerializedQueryResult } = {}
           updatedRawResults.forEach((value, key) => {
             plainResults[key] = value
           })
+          console.log(
+            "[PERF] Conversion to plain object at",
+            conversionStart - perfStart,
+            "ms"
+          )
 
           // Store results but don't update UI yet
           const dispatch = propertyDispatchRef.current
@@ -837,6 +861,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           const outlineWidth = getValidatedOutlineWidth(outlineWidthConfig)
 
           // Add graphics to map first (synchronous)
+          const graphicsStart = performance.now()
+          console.log(
+            "[PERF] Graphics sync started at",
+            graphicsStart - perfStart,
+            "ms"
+          )
           syncSelectionGraphics({
             graphicsToAdd: pipelineResult.graphicsToAdd,
             selectedRows: pipelineResult.updatedRows,
@@ -849,11 +879,36 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             highlightColor,
             outlineWidth,
           })
+          const graphicsEnd = performance.now()
+          console.log(
+            "[PERF] Graphics sync completed at",
+            graphicsEnd - perfStart,
+            "ms",
+            "(took",
+            graphicsEnd - graphicsStart,
+            "ms)"
+          )
 
           // Now update Redux state AFTER graphics are visible
+          const reduxStart = performance.now()
+          console.log(
+            "[PERF] Redux update started at",
+            reduxStart - perfStart,
+            "ms"
+          )
           dispatch.setSelectedProperties(rowsToStore)
           dispatch.setRawResults(resultsToStore as any)
           dispatch.setQueryInFlight(false)
+          const reduxEnd = performance.now()
+          console.log(
+            "[PERF] Redux update completed at",
+            reduxEnd - perfStart,
+            "ms",
+            "(took",
+            reduxEnd - reduxStart,
+            "ms)"
+          )
+          console.log("[PERF] TOTAL TIME:", reduxEnd - perfStart, "ms")
         }
 
         tracker.success()
