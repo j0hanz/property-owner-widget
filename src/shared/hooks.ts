@@ -289,13 +289,7 @@ export const useGraphicsLayer = (
       })
 
       removeGraphicsForFnr(fnr, normalizeFnrKey)
-
-      // Use requestAnimationFrame to batch DOM updates
-      requestAnimationFrame(() => {
-        if (layer && !layer.destroyed) {
-          layer.add(highlightGraphic)
-        }
-      })
+      layer.add(highlightGraphic)
 
       if (!fnr) return
 
