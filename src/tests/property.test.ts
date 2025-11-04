@@ -498,6 +498,7 @@ describe("createPropertyDispatcher", () => {
         UUID_FASTIGHET: "uuid-1",
         FASTIGHET: "Test 1:1",
         BOSTADR: "maskAddress",
+        ADDRESS: "Test Address",
       },
     ];
 
@@ -897,9 +898,11 @@ describe("Property Widget - Data Source Validation", () => {
 
 describe("Property Widget - Utility Functions", () => {
   it("should format property with share correctly", () => {
-    expect(formatPropertyWithShare("Test 1:1", "1/2")).toBe("Test 1:1 (1/2)");
-    expect(formatPropertyWithShare("Test 1:1", "")).toBe("Test 1:1");
-    expect(formatPropertyWithShare("Test 1:1")).toBe("Test 1:1");
+    expect(formatPropertyWithShare("Test 1:1", "1/2")).toBe(
+      "Test 1:1\u00A0(1/2)"
+    );
+    expect(formatPropertyWithShare("Test 1:1", "")).toBe("Test 1:1\u00A0");
+    expect(formatPropertyWithShare("Test 1:1")).toBe("Test 1:1\u00A0");
   });
 
   it("should create unique row IDs", () => {
@@ -1315,6 +1318,7 @@ describe("Property Widget - Utility Helper Functions", () => {
       UUID_FASTIGHET: "uuid-123",
       FASTIGHET: "Property 1",
       BOSTADR: "Owner 1",
+      ADDRESS: "Address 1",
     };
 
     const ownerRowB: GridRowData = {
@@ -1323,6 +1327,7 @@ describe("Property Widget - Utility Helper Functions", () => {
       UUID_FASTIGHET: "uuid-123",
       FASTIGHET: "Property 1",
       BOSTADR: "Owner 2",
+      ADDRESS: "Address 2",
     };
 
     const updated = updateRawPropertyResults(
@@ -1364,6 +1369,7 @@ describe("Property Widget - Utility Helper Functions", () => {
       UUID_FASTIGHET: "uuid-456",
       FASTIGHET: "Property 2",
       BOSTADR: "Owner A",
+      ADDRESS: "Address A",
     };
     const prev: { [key: string]: SerializedQueryResult } = {
       [ownerRow.id]: {
@@ -1513,6 +1519,7 @@ describe("Property Selection Pipeline - Performance Optimizations", () => {
         UUID_FASTIGHET: "uuid-123",
         FASTIGHET: "Property 123",
         BOSTADR: "Owner 123",
+        ADDRESS: "Address 123",
       },
     ];
 
@@ -2057,6 +2064,7 @@ describe("Export Utilities - CSV", () => {
     UUID_FASTIGHET: "uuid-123",
     FASTIGHET: "Property",
     BOSTADR: "Owner",
+    ADDRESS: "Test Address",
   };
 
   it("should escape commas in values", () => {
@@ -2116,6 +2124,7 @@ describe("Export Utilities - GeoJSON", () => {
     UUID_FASTIGHET: "uuid-geo",
     FASTIGHET: "<em>Geo property</em>",
     BOSTADR: "<span>Geo owner</span>",
+    ADDRESS: "Geo Address",
     geometryType: null,
   };
 
@@ -2167,6 +2176,7 @@ describe("Export Utilities - exportData", () => {
         UUID_FASTIGHET: "uuid-export",
         FASTIGHET: "Export Property",
         BOSTADR: "Export Owner",
+        ADDRESS: "Export Address",
       },
     ];
 

@@ -49,6 +49,7 @@ import {
   createRowId,
   formatPropertyWithShare,
   formatOwnerInfo,
+  formatAddress,
   extractFnr,
 } from "./utils";
 
@@ -280,6 +281,7 @@ const createGridRow = (params: CreateGridRowParams): GridRowData => ({
   UUID_FASTIGHET: params.uuidFastighet,
   FASTIGHET: params.fastighet,
   BOSTADR: params.bostadr,
+  ADDRESS: params.address,
   geometryType: params.geometryType,
   rawOwner: params.rawOwner,
 });
@@ -355,6 +357,7 @@ const buildPropertyRows = (
           maskPII,
           context.messages.unknownOwner
         ),
+        address: formatAddress(owner, maskPII),
         geometryType,
         createRowId: context.helpers.createRowId,
         rawOwner: owner,
@@ -385,6 +388,7 @@ const buildPropertyRows = (
       uuidFastighet: validated.attrs.UUID_FASTIGHET,
       fastighet: validated.attrs.FASTIGHET,
       bostadr: fallbackMessage,
+      address: "",
       geometryType,
       createRowId: context.helpers.createRowId,
       rawOwner: fallbackOwner,
@@ -1064,6 +1068,7 @@ const processBatchQuery = async (
                 owner.UUID_FASTIGHET ?? validated.attrs.UUID_FASTIGHET,
               fastighet: propertyWithShare,
               bostadr: formattedOwner,
+              address: formatAddress(owner, config.enablePIIMasking),
               geometryType: validated.graphic.geometry?.type ?? null,
               createRowId: context.helpers.createRowId,
               rawOwner: owner,
@@ -1094,6 +1099,7 @@ const processBatchQuery = async (
             uuidFastighet: validated.attrs.UUID_FASTIGHET,
             fastighet: validated.attrs.FASTIGHET,
             bostadr: fallbackMessage,
+            address: "",
             geometryType: validated.graphic.geometry?.type ?? null,
             createRowId: context.helpers.createRowId,
             rawOwner: fallbackOwner,

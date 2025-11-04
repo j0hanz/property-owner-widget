@@ -30,8 +30,8 @@ export const createPropertyTableColumns = (params: {
       enableColumnFilter: true,
       filterFn: "includesString",
     }),
-    columnHelper.accessor("BOSTADR", {
-      id: GRID_COLUMN_KEYS.BOSTADR,
+    columnHelper.accessor("ADDRESS", {
+      id: GRID_COLUMN_KEYS.ADDRESS,
       header: () => translate("columnAddress"),
       cell: (info) => info.getValue(),
       enableSorting: true,

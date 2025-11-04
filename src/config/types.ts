@@ -111,6 +111,7 @@ export interface GridRowData {
   UUID_FASTIGHET: string;
   FASTIGHET: string;
   BOSTADR: string;
+  ADDRESS: string;
   geometryType?: string | null;
   rawOwner?: OwnerAttributes;
 }
@@ -678,6 +679,7 @@ export interface CreateGridRowParams {
   uuidFastighet: string;
   fastighet: string;
   bostadr: string;
+  address: string;
   geometryType: string | null;
   createRowId: (fnr: FnrValue, objectId: number) => string;
   rawOwner?: OwnerAttributes;

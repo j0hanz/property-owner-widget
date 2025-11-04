@@ -13,6 +13,7 @@ export const ESRI_MODULES_TO_LOAD = [
 export const GRID_COLUMN_KEYS = {
   FASTIGHET: "FASTIGHET",
   BOSTADR: "BOSTADR",
+  ADDRESS: "ADDRESS",
 } as const;
 
 export const QUERY_DEFAULTS = {
@@ -90,6 +91,7 @@ export const CSV_HEADERS = [
   "UUID_FASTIGHET",
   "FASTIGHET",
   "BOSTADR",
+  "ADDRESS",
 ] as const;
 
 // Hover query settings

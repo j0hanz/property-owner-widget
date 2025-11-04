@@ -389,7 +389,36 @@ export const formatPropertyWithShare = (
   share?: string
 ): string => {
   const trimmedShare = share?.trim();
-  return trimmedShare ? `${property} (${trimmedShare})` : property;
+  const propertyWithNbsp = `${property}\u00A0`;
+  return trimmedShare
+    ? `${propertyWithNbsp}(${trimmedShare})`
+    : propertyWithNbsp;
+};
+
+export const formatAddress = (
+  owner: OwnerAttributes,
+  maskPII: boolean
+): string => {
+  const rawAddress = stripHtmlInternal(owner.BOSTADR || "");
+  const postalCode = stripHtmlInternal(owner.POSTNR || "").replace(/\s+/g, "");
+  const city = stripHtmlInternal(owner.POSTADR || "");
+
+  const addressParts: string[] = [];
+
+  if (rawAddress) {
+    const maskedAddress = maskPII ? maskAddress(rawAddress) : rawAddress;
+    addressParts.push(maskedAddress);
+  }
+
+  const postalParts: string[] = [];
+  if (postalCode) postalParts.push(postalCode);
+  if (city) postalParts.push(city);
+
+  if (postalParts.length > 0) {
+    addressParts.push(postalParts.join(" "));
+  }
+
+  return addressParts.join(", ");
 };
 
 // ============================================================================
