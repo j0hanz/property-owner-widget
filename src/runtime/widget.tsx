@@ -1001,7 +1001,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
   );
 
-  const { onActiveViewChange, getCurrentView, reactivateMapView } =
+  const { onActiveViewChange, getCurrentView, reactivateMapView, cleanup } =
     useMapViewLifecycle({
       modules,
       ensureGraphicsLayer,
@@ -1278,8 +1278,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       prevRuntimeState !== WidgetState.Closed
     ) {
       handleWidgetReset();
+      cleanup();
     }
-  }, [runtimeState, prevRuntimeState, handleWidgetReset]);
+  }, [runtimeState, prevRuntimeState, handleWidgetReset, cleanup]);
 
   hooks.useUpdateEffect(() => {
     const isOpening =

@@ -42,12 +42,12 @@ import type {
   QueryResult,
   EsriModules,
   Config,
+  PropertyAction,
   PropertyQueryHelpers,
   PropertyQueryMessages,
   PropertyProcessingContext,
 } from "../config/types";
 import { PropertyActionType } from "../config/enums";
-import type { PropertyAction } from "../config/types";
 import { WidgetState } from "jimu-core";
 import type { DataSourceManager, FeatureLayerDataSource } from "jimu-core";
 import copyLib from "copy-to-clipboard";
