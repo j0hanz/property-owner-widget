@@ -606,6 +606,12 @@ export type QueryConstructor = new (
   properties?: __esri.QueryProperties
 ) => __esri.Query;
 
+export interface PromiseUtilsLike {
+  eachAlways: <T>(
+    promises: Array<Promise<T>>
+  ) => Promise<Array<{ value?: T; error?: unknown }>>;
+}
+
 export interface RelationshipQueryLike {
   objectIds: number[];
   relationshipId: number;

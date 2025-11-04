@@ -18,10 +18,12 @@ import type {
   PropertyProcessingContext,
   PropertySelectionPipelineParams,
   PropertySelectionPipelineResult,
+  PromiseUtilsLike,
   QueryResult,
   ValidationResult,
   FeatureLayerConstructor,
   QueryConstructor,
+  QueryTaskLike,
   QueryTaskConstructor,
   RelationshipQueryConstructor,
   SignalOptions,
@@ -63,7 +65,22 @@ let cachedFeatureLayerCtor: FeatureLayerConstructor | null = null;
 let cachedQueryCtor: QueryConstructor | null = null;
 let cachedQueryTaskCtor: QueryTaskConstructor | null = null;
 let cachedRelationshipQueryCtor: RelationshipQueryConstructor | null = null;
+let cachedPromiseUtils: PromiseUtilsLike | null = null;
 const featureLayerCache = new Map<string, __esri.FeatureLayer>();
+const relationshipQueryTaskCache = new Map<string, QueryTaskLike>();
+
+const getPromiseUtils = async (): Promise<PromiseUtilsLike> => {
+  if (cachedPromiseUtils) {
+    return cachedPromiseUtils;
+  }
+
+  const [promiseUtils] = (await loadArcGISJSAPIModules([
+    "esri/core/promiseUtils",
+  ])) as [PromiseUtilsLike];
+
+  cachedPromiseUtils = promiseUtils;
+  return promiseUtils;
+};
 
 const stripIpv6Brackets = (hostname: string): string => {
   if (hostname.startsWith("[") && hostname.endsWith("]")) {
@@ -129,6 +146,14 @@ const clearFeatureLayerCache = (): void => {
     }
   });
   featureLayerCache.clear();
+  relationshipQueryTaskCache.forEach((task) => {
+    const destroy = (task as { destroy?: () => void }).destroy;
+    if (typeof destroy === "function") {
+      destroy.call(task);
+    }
+  });
+  relationshipQueryTaskCache.clear();
+  cachedPromiseUtils = null;
 };
 
 const createValidationError = (
@@ -504,14 +529,8 @@ const processBatchOfProperties = async (params: {
   const { batch, context, config, currentRowCount } = params;
   const { helpers, maxResults } = context;
 
-  const modules = await loadArcGISJSAPIModules(["esri/core/promiseUtils"]);
+  const promiseUtils = await getPromiseUtils();
   abortHelpers.throwIfAborted(context.signal);
-
-  const promiseUtils = modules[0] as {
-    eachAlways: <T>(
-      promises: Array<Promise<T>>
-    ) => Promise<Array<{ value?: T; error?: unknown }>>;
-  };
 
   const ownerData = await promiseUtils.eachAlways(
     batch.map((validated) =>
@@ -870,7 +889,11 @@ export const queryOwnersByRelationship = async (
       throw new Error("Relationship query modules failed to load");
     }
 
-    const queryTask = new QueryTaskCtor({ url: layerUrl });
+    let queryTask = relationshipQueryTaskCache.get(layerUrl) ?? null;
+    if (!queryTask) {
+      queryTask = new QueryTaskCtor({ url: layerUrl });
+      relationshipQueryTaskCache.set(layerUrl, queryTask);
+    }
     const relationshipQuery = new RelationshipQueryCtor();
 
     const objectIds: number[] = [];
@@ -878,22 +901,45 @@ export const queryOwnersByRelationship = async (
 
     const signalOptions = createSignalOptions(options?.signal);
 
-    const propertyResult = await propertyDs.query(
-      {
-        where: propertyFnrs.map((fnr) => buildFnrWhereClause(fnr)).join(" OR "),
-        outFields: ["FNR", "OBJECTID"],
-        returnGeometry: false,
-      },
-      toDataSourceQueryOptions(signalOptions)
+    const BATCH_SIZE = 50;
+    const fnrBatches: FnrValue[][] = [];
+    for (let index = 0; index < propertyFnrs.length; index += BATCH_SIZE) {
+      fnrBatches.push(propertyFnrs.slice(index, index + BATCH_SIZE));
+    }
+
+    const batchPromises = fnrBatches.map((batch) =>
+      propertyDs.query(
+        {
+          where: batch.map((fnr) => buildFnrWhereClause(fnr)).join(" OR "),
+          outFields: ["FNR", "OBJECTID"],
+          returnGeometry: false,
+        },
+        toDataSourceQueryOptions(signalOptions)
+      )
     );
 
-    abortHelpers.throwIfAborted(options?.signal);
+    const propertyRecords: FeatureDataRecord[] = [];
+    for (
+      let index = 0;
+      index < batchPromises.length;
+      index += OWNER_QUERY_CONCURRENCY
+    ) {
+      const slice = batchPromises.slice(index, index + OWNER_QUERY_CONCURRENCY);
+      const settled = await Promise.all(slice);
+      settled.forEach((result) => {
+        const records = ((result?.records ?? []) as FeatureDataRecord[]) || [];
+        if (records.length > 0) {
+          propertyRecords.push(...records);
+        }
+      });
+      abortHelpers.throwIfAborted(options?.signal);
+    }
 
-    if (!propertyResult?.records || propertyResult.records.length === 0) {
+    if (propertyRecords.length === 0) {
       return new Map();
     }
 
-    propertyResult.records.forEach((record: FeatureDataRecord) => {
+    propertyRecords.forEach((record: FeatureDataRecord) => {
       const data = record.getData() as PropertyAttributes;
       const objectId = data.OBJECTID;
       const fnr = String(data.FNR);
@@ -1160,6 +1206,65 @@ export const runPropertySelectionPipeline = async (
 
   if (propertyResults.length === 0) {
     return { status: "empty" };
+  }
+
+  const extractFnrFromResult = (result: QueryResult): FnrValue | null => {
+    const feature = result?.features?.[0];
+    const attrs = feature?.attributes as AttributeMap | null | undefined;
+    return attrs ? extractFnr(attrs) : null;
+  };
+
+  const computeToggleOnlyRemoval = (
+    results: QueryResult[],
+    selected: GridRowData[]
+  ): Set<string> | null => {
+    if (!toggleEnabled || selected.length === 0) {
+      return null;
+    }
+
+    const selectedFnrs = new Set(
+      selected.map((row) => normalizeFnrKey(row.FNR))
+    );
+    if (selectedFnrs.size === 0) {
+      return null;
+    }
+
+    const toRemove = new Set<string>();
+
+    for (const result of results) {
+      const fnr = extractFnrFromResult(result);
+      if (fnr == null) {
+        return null;
+      }
+
+      const key = normalizeFnrKey(fnr);
+      if (!selectedFnrs.has(key)) {
+        return null;
+      }
+      toRemove.add(key);
+    }
+
+    return toRemove.size > 0 ? toRemove : null;
+  };
+
+  const toggleOnlyRemovals = computeToggleOnlyRemoval(
+    propertyResults,
+    selectedProperties
+  );
+
+  if (toggleOnlyRemovals && toggleOnlyRemovals.size > 0) {
+    const updatedRows = selectedProperties.filter(
+      (row) => !toggleOnlyRemovals.has(normalizeFnrKey(row.FNR))
+    );
+
+    return {
+      status: "success",
+      rowsToProcess: [],
+      graphicsToAdd: [],
+      updatedRows,
+      toRemove: toggleOnlyRemovals,
+      propertyResults,
+    };
   }
 
   const processStart = performance.now();

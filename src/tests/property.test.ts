@@ -32,6 +32,8 @@ import {
   propertyQueryService,
   queryPropertyByPoint,
   clearQueryCache,
+  runPropertySelectionPipeline,
+  queryOwnersByRelationship,
 } from "../shared/api";
 import { convertToCSV, convertToGeoJSON, exportData } from "../shared/export";
 import { CURSOR_TOOLTIP_STYLE } from "../config/constants";
@@ -46,12 +48,19 @@ import type {
   PropertyQueryHelpers,
   PropertyQueryMessages,
   PropertyProcessingContext,
+  RelationshipQueryLike,
 } from "../config/types";
 import { PropertyActionType } from "../config/enums";
 import { WidgetState } from "jimu-core";
-import type { DataSourceManager, FeatureLayerDataSource } from "jimu-core";
+import type {
+  DataSourceManager,
+  FeatureLayerDataSource,
+  FeatureDataRecord,
+} from "jimu-core";
 import copyLib from "copy-to-clipboard";
 import { isFBWebbConfigured } from "../config/types";
+import * as apiModule from "../shared/api";
+import * as utilsModule from "../shared/utils";
 
 jest.mock("copy-to-clipboard", () => ({
   __esModule: true,
@@ -309,6 +318,28 @@ type MutableURL = typeof URL & {
   revokeObjectURL?: (url: string) => void;
 };
 
+interface MockQueryTaskInstance {
+  url: string;
+  executeRelationshipQuery: jest.Mock;
+  destroy: jest.Mock;
+}
+
+const mockQueryTaskInstances: MockQueryTaskInstance[] = [];
+const mockRelationshipQueryInstances: Array<{
+  objectIds?: number[];
+  relationshipId?: number;
+  outFields?: string[];
+}> = [];
+const mockQueryTaskExecute = jest.fn();
+const mockQueryTaskDestroy = jest.fn();
+
+const resetMockQueryTaskState = () => {
+  mockQueryTaskInstances.length = 0;
+  mockRelationshipQueryInstances.length = 0;
+  mockQueryTaskExecute.mockReset();
+  mockQueryTaskDestroy.mockReset();
+};
+
 jest.mock("jimu-arcgis", () => ({
   loadArcGISJSAPIModules: jest.fn((modules: string[]) => {
     return Promise.resolve(
@@ -330,6 +361,35 @@ jest.mock("jimu-arcgis", () => ({
         }
         if (moduleId === "esri/rest/support/Query") {
           return MockQuery;
+        }
+        if (moduleId === "esri/tasks/QueryTask") {
+          class MockQueryTask {
+            url: string;
+            executeRelationshipQuery: jest.Mock;
+            destroy: jest.Mock;
+
+            constructor(options: { url: string }) {
+              this.url = options.url;
+              this.executeRelationshipQuery = mockQueryTaskExecute;
+              this.destroy = mockQueryTaskDestroy;
+              mockQueryTaskInstances.push(this);
+            }
+          }
+
+          return MockQueryTask;
+        }
+        if (moduleId === "esri/rest/support/RelationshipQuery") {
+          class MockRelationshipQuery {
+            objectIds: number[] = [];
+            relationshipId = -1;
+            outFields: string[] = [];
+
+            constructor() {
+              mockRelationshipQueryInstances.push(this);
+            }
+          }
+
+          return MockRelationshipQuery;
         }
         return {};
       })
@@ -1441,6 +1501,76 @@ describe("Property Widget - Utility Helper Functions", () => {
   });
 });
 
+describe("Property Selection Pipeline - Performance Optimizations", () => {
+  const translate = (key: string) => key;
+
+  it("should skip owner processing when toggling existing selections", async () => {
+    const dsManager = createMockDataSourceManager(() => null);
+    const selected: GridRowData[] = [
+      {
+        id: "123_1",
+        FNR: "123",
+        UUID_FASTIGHET: "uuid-123",
+        FASTIGHET: "Property 123",
+        BOSTADR: "Owner 123",
+      },
+    ];
+
+    const propertyResults: QueryResult[] = [
+      {
+        propertyId: "123",
+        features: [
+          createMockGraphic({
+            attributes: {
+              FNR: "123",
+              OBJECTID: 1,
+              UUID_FASTIGHET: "uuid-123",
+              FASTIGHET: "Property 123",
+            },
+          }),
+        ],
+      },
+    ];
+
+    const propertySpy = jest
+      .spyOn(apiModule, "queryPropertyByPoint")
+      .mockResolvedValue(propertyResults);
+    const processSpy = jest.spyOn(utilsModule, "processPropertyQueryResults");
+
+    const abortController = new AbortController();
+
+    const result = await runPropertySelectionPipeline({
+      mapPoint: createMockPoint(0, 0, { wkid: 3006 }),
+      propertyDataSourceId: "property",
+      ownerDataSourceId: "owner",
+      dsManager,
+      maxResults: 10,
+      toggleEnabled: true,
+      enableBatchOwnerQuery: false,
+      relationshipId: undefined,
+      enablePIIMasking: true,
+      signal: abortController.signal,
+      selectedProperties: selected,
+      translate,
+    });
+
+    expect(result.status).toBe("success");
+    if (result.status !== "success") {
+      throw new Error("Expected success result");
+    }
+
+    const normalizedFnr = normalizeFnrKey("123");
+    expect(result.toRemove.has(normalizedFnr)).toBe(true);
+    expect(result.updatedRows).toHaveLength(0);
+    expect(result.rowsToProcess).toHaveLength(0);
+    expect(result.graphicsToAdd).toHaveLength(0);
+    expect(processSpy).not.toHaveBeenCalled();
+
+    propertySpy.mockRestore();
+    processSpy.mockRestore();
+  });
+});
+
 describe("Property Widget - Undo Functionality", () => {
   it("should track remove operations in undo history", () => {
     const mockRow = {
@@ -1739,10 +1869,12 @@ describe("Query Controls", () => {
     resetMockFeatureLayerState();
     setMockQueryFeaturesResponse(createDefaultQueryResponse());
     clearQueryCache();
+    resetMockQueryTaskState();
   });
 
   afterEach(() => {
     clearQueryCache();
+    resetMockQueryTaskState();
   });
 
   it("should clear cached FeatureLayers without errors", async () => {
@@ -1829,6 +1961,92 @@ describe("Query Controls", () => {
 
     expect(OWNER_QUERY_CONCURRENCY).toBeDefined();
     expect(OWNER_QUERY_CONCURRENCY).toBe(20);
+  });
+
+  it("should chunk relationship owner queries to respect batch size", async () => {
+    const propertyDs = createMockFeatureLayerDataSource(
+      "https://example.com/arcgis/rest/services/Parcels/MapServer/0"
+    );
+    const ownerDs = createMockFeatureLayerDataSource(
+      "https://example.com/arcgis/rest/services/Owners/MapServer/0"
+    );
+
+    const whereClauses: string[] = [];
+    let objectIdCounter = 1;
+
+    (propertyDs.query as jest.Mock).mockImplementation(
+      (params: { where: string }) => {
+        const where = params?.where ?? "";
+        whereClauses.push(where);
+        const clauses = where.split(" OR ");
+        const records = clauses.map((clause) => {
+          const match = clause.match(/FNR\s*=\s*'?([^']+)'?/i);
+          const fnrValue = match ? match[1] : String(objectIdCounter);
+          const currentId = objectIdCounter++;
+          return {
+            getData: () => ({
+              OBJECTID: currentId,
+              FNR: fnrValue,
+              UUID_FASTIGHET: `uuid-${currentId}`,
+              FASTIGHET: `Property ${currentId}`,
+            }),
+          } as unknown as FeatureDataRecord;
+        });
+        return Promise.resolve({ records });
+      }
+    );
+
+    mockQueryTaskExecute.mockImplementation(
+      (relationshipQuery: RelationshipQueryLike) => {
+        const response: {
+          [objectId: number]: { features: __esri.Graphic[] };
+        } = {};
+        (relationshipQuery.objectIds || []).forEach((objectId) => {
+          response[objectId] = {
+            features: [
+              createMockGraphic({
+                attributes: {
+                  OBJECTID: objectId,
+                  FNR: String(objectId),
+                  UUID_FASTIGHET: `uuid-${objectId}`,
+                  FASTIGHET: `Property ${objectId}`,
+                  NAMN: `Owner ${objectId}`,
+                },
+              }),
+            ],
+          };
+        });
+        return Promise.resolve(response);
+      }
+    );
+
+    const dsManager = createMockDataSourceManager((id) => {
+      if (id === "property") {
+        return propertyDs;
+      }
+      if (id === "owner") {
+        return ownerDs;
+      }
+      return null;
+    });
+
+    const propertyFnrs = Array.from({ length: 120 }, (_, index) => index + 1);
+
+    const ownersMap = await queryOwnersByRelationship(
+      propertyFnrs,
+      "property",
+      "owner",
+      dsManager,
+      2,
+      { signal: new AbortController().signal }
+    );
+
+    expect((propertyDs.query as jest.Mock).mock.calls.length).toBe(3);
+    whereClauses.forEach((clause) => {
+      expect(clause.split(" OR ").length).toBeLessThanOrEqual(50);
+    });
+    expect(mockQueryTaskExecute).toHaveBeenCalledTimes(1);
+    expect(ownersMap.size).toBe(propertyFnrs.length);
   });
 });
 
