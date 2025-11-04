@@ -1375,8 +1375,17 @@ const isPrivateHostname = (hostname: string): boolean => {
   );
 };
 
-const sanitizeFbwebbValue = (value: string): string =>
+const sanitizeFbwebbBaseUrl = (value: string): string =>
   stripHtml(value || "").trim();
+
+const normalizeFbwebbCredential = (
+  value: string | null | undefined
+): string => {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim();
+};
 
 const sanitizeFnrForUrl = (value: string | number): string | null => {
   if (value === null || value === undefined) return null;
@@ -1385,7 +1394,7 @@ const sanitizeFnrForUrl = (value: string | number): string | null => {
 };
 
 export const isValidFbwebbBaseUrl = (url: string): boolean => {
-  const sanitized = sanitizeFbwebbValue(url);
+  const sanitized = sanitizeFbwebbBaseUrl(url);
   if (!sanitized || sanitized.length > FBWEBB_URL_MAX_LENGTH) {
     return false;
   }
@@ -1406,7 +1415,7 @@ export const generateFBWebbUrl = (
   baseUrl: string,
   params: { user: string; password: string; database: string }
 ): string => {
-  const sanitizedBaseUrl = sanitizeFbwebbValue(baseUrl);
+  const sanitizedBaseUrl = sanitizeFbwebbBaseUrl(baseUrl);
   if (!isValidFbwebbBaseUrl(sanitizedBaseUrl)) {
     throw new Error("Invalid FBWebb base URL");
   }
@@ -1423,9 +1432,9 @@ export const generateFBWebbUrl = (
     throw new Error("No FNRs provided");
   }
 
-  const user = sanitizeFbwebbValue(params.user);
-  const password = sanitizeFbwebbValue(params.password);
-  const database = sanitizeFbwebbValue(params.database);
+  const user = normalizeFbwebbCredential(params.user);
+  const password = normalizeFbwebbCredential(params.password);
+  const database = normalizeFbwebbCredential(params.database);
 
   if (!user || !password || !database) {
     throw new Error("Missing FBWebb configuration");
@@ -1453,7 +1462,7 @@ export const copyToClipboard = (text: string): boolean => {
 };
 
 export const maskPassword = (password: string | null | undefined): string => {
-  const sanitized = sanitizeFbwebbValue(password || "");
+  const sanitized = normalizeFbwebbCredential(password);
   if (!sanitized) return "****";
   if (sanitized.length <= 2) return sanitized;
   const prefix = sanitized.slice(0, 2);
