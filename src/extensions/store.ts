@@ -94,7 +94,11 @@ const ensureSubState = (
   widgetId: string
 ): ImmutableObject<PropertyWidgetState> => {
   const current = global.byId?.[widgetId];
-  return current ?? createImmutableState();
+  if (!current) return createImmutableState();
+  if (typeof (current as { set?: unknown }).set === "function") {
+    return current;
+  }
+  return Immutable(current);
 };
 
 const setSubState = (
