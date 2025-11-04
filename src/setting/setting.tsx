@@ -31,7 +31,12 @@ import {
 } from "jimu-ui/advanced/setting-components";
 import { DataSourceSelector } from "jimu-ui/advanced/data-source-selector";
 import defaultMessages from "./translations/default";
-import type { IMConfig } from "../config/types";
+import type {
+  IMConfig,
+  FieldErrors,
+  ImmutableArrayFactory,
+  MutableAccessor,
+} from "../config/types";
 import { isFBWebbConfigured } from "../config/types";
 import { useSettingStyles } from "../config/style";
 import {
@@ -54,22 +59,12 @@ import removeIcon from "../assets/close.svg";
 import infoIcon from "../assets/info.svg";
 import { createPropertySelectors } from "../extensions/store";
 
-interface FieldErrors {
-  [key: string]: string | undefined;
-}
-
-type ImmutableArrayFactory = <T>(values: readonly T[]) => ImmutableArray<T>;
-
 const getImmutableArrayFactory = (): ImmutableArrayFactory =>
   Immutable as unknown as ImmutableArrayFactory;
 
 function toImmutableArray<T>(values: readonly T[]): ImmutableArray<T> {
   const factory = getImmutableArrayFactory();
   return factory(values);
-}
-
-interface MutableAccessor<T> {
-  asMutable?: (options?: { deep?: boolean }) => T;
 }
 
 function hasAsMutable<T>(value: unknown): value is MutableAccessor<T> {

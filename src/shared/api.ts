@@ -20,6 +20,17 @@ import type {
   PropertySelectionPipelineResult,
   QueryResult,
   ValidationResult,
+  FeatureLayerConstructor,
+  QueryConstructor,
+  QueryTaskConstructor,
+  RelationshipQueryConstructor,
+  SignalOptions,
+  ValidateDataSourcesParams,
+  ValidatedProperty,
+  OwnerFetchSuccess,
+  OwnerQueryResolution,
+  ProcessingAccumulator,
+  CreateGridRowParams,
 } from "../config/types";
 import { isValidationFailure } from "../config/types";
 import { OWNER_QUERY_CONCURRENCY } from "../config/constants";
@@ -38,34 +49,6 @@ import {
   formatOwnerInfo,
   extractFnr,
 } from "./utils";
-
-type FeatureLayerConstructor = new (
-  properties?: __esri.FeatureLayerProperties
-) => __esri.FeatureLayer;
-
-type QueryConstructor = new (
-  properties?: __esri.QueryProperties
-) => __esri.Query;
-
-interface RelationshipQueryLike {
-  objectIds: number[];
-  relationshipId: number;
-  outFields: string[];
-}
-
-interface QueryTaskLike {
-  executeRelationshipQuery: (
-    query: RelationshipQueryLike,
-    options?: SignalOptions
-  ) => Promise<{
-    [objectId: number]: { features?: __esri.Graphic[] } | undefined;
-  }>;
-}
-
-type QueryTaskConstructor = new (...args: unknown[]) => QueryTaskLike;
-type RelationshipQueryConstructor = new (
-  ...args: unknown[]
-) => RelationshipQueryLike;
 
 const ARC_GIS_LAYER_PATTERN = /\/(mapserver|featureserver)\/\d+(?:\/query)?$/i;
 const PRIVATE_IPV4_PATTERNS = [
@@ -129,10 +112,6 @@ const isAllowedHost = (
 };
 
 const isStandardPort = (port: string): boolean => port === "" || port === "443";
-
-interface SignalOptions {
-  signal: AbortSignal;
-}
 
 const createSignalOptions = (
   signal?: AbortSignal
@@ -234,36 +213,6 @@ const validateDataSourceUrl = (
   return { valid: true, data: { url } };
 };
 
-interface ValidateDataSourcesParams {
-  propertyDsId?: string | null;
-  ownerDsId?: string | null;
-  dsManager: DataSourceManager | null;
-  allowedHosts?: readonly string[];
-  translate: (key: string) => string;
-}
-
-interface ValidatedProperty {
-  fnr: FnrValue;
-  attrs: PropertyAttributes;
-  graphic: __esri.Graphic;
-}
-
-interface OwnerFetchSuccess {
-  validated: ValidatedProperty;
-  owners: OwnerAttributes[];
-  queryFailed: boolean;
-}
-
-interface OwnerQueryResolution {
-  value?: OwnerFetchSuccess;
-  error?: unknown;
-}
-
-interface ProcessingAccumulator {
-  rows: GridRowData[];
-  graphics: Array<{ graphic: __esri.Graphic; fnr: FnrValue }>;
-}
-
 const toOwnerAttributes = (
   graphic: __esri.Graphic | null | undefined
 ): OwnerAttributes | null => {
@@ -299,17 +248,6 @@ const deduplicateOwnerEntries = (
 
   return unique;
 };
-
-interface CreateGridRowParams {
-  fnr: FnrValue;
-  objectId: number;
-  uuidFastighet: string;
-  fastighet: string;
-  bostadr: string;
-  geometryType: string | null;
-  createRowId: (fnr: FnrValue, objectId: number) => string;
-  rawOwner?: OwnerAttributes;
-}
 
 const createGridRow = (params: CreateGridRowParams): GridRowData => ({
   id: params.createRowId(params.fnr, params.objectId),

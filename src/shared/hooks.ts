@@ -7,6 +7,10 @@ import type {
   HoverQueryParams,
   DebouncedFn,
   FnrValue,
+  ConfigDictionary,
+  ConfigWithSet,
+  ConfigUpdater,
+  EsriStubGlobal,
 } from "../config/types";
 import {
   ESRI_MODULES_TO_LOAD,
@@ -19,14 +23,6 @@ import {
   logger,
 } from "./utils";
 
-interface ConfigDictionary {
-  readonly [key: string]: unknown;
-}
-
-interface ConfigWithSet<T> {
-  readonly set: (key: string, value: unknown) => T;
-}
-
 const isConfigDictionary = (value: unknown): value is ConfigDictionary => {
   return typeof value === "object" && value !== null;
 };
@@ -38,14 +34,6 @@ const hasConfigSet = <T>(value: unknown): value is ConfigWithSet<T> => {
   const candidate = value as { set?: unknown };
   return typeof candidate.set === "function";
 };
-
-type ConfigUpdater = (key: string, value: unknown) => void;
-
-interface EsriStubGlobal {
-  __ESRI_TEST_STUB__?: (
-    modules: readonly string[]
-  ) => EsriModules | Promise<EsriModules> | Partial<EsriModules>;
-}
 
 const isConstructor = (
   value: unknown

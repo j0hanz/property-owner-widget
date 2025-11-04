@@ -1,13 +1,9 @@
-import type { TelemetryEvent, PerformanceMetric } from "../config/types";
-
-type NavigatorWithPrivacy = Navigator & {
-  globalPrivacyControl?: boolean;
-  msDoNotTrack?: string;
-};
-
-type WindowWithPrivacy = Window & {
-  doNotTrack?: string;
-};
+import type {
+  TelemetryEvent,
+  PerformanceMetric,
+  NavigatorWithPrivacy,
+  WindowWithPrivacy,
+} from "../config/types";
 
 export const isAllowedToTrack = (): boolean => {
   try {

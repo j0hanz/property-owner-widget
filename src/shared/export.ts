@@ -7,6 +7,7 @@ import type {
   SerializedQueryResult,
   SerializedQueryFeature,
   SerializedRecord,
+  GeoJsonGeometry,
 } from "../config/types";
 import { CSV_HEADERS } from "../config/constants";
 
@@ -135,12 +136,6 @@ const stripRingsFromGeometry = (
     };
   });
 };
-
-type GeoJsonGeometry =
-  | { type: "Polygon" }
-  | { type: "MultiLineString" }
-  | { type: "Point" }
-  | null;
 
 export const convertToGeoJSON = (rows: GridRowData[]): SerializedRecord => {
   const features = (rows || [])

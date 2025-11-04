@@ -1,6 +1,13 @@
-import type { ImmutableObject, DataSourceManager, IMState } from "jimu-core";
+import type {
+  ImmutableObject,
+  DataSourceManager,
+  IMState,
+  UseDataSource,
+  ImmutableArray,
+} from "jimu-core";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { WidgetStyles } from "./style";
+import type { Immutable } from "seamless-immutable";
 
 export interface AttributeMap {
   [key: string]: unknown;
@@ -503,3 +510,216 @@ export type DebouncedFn<T extends (...args: unknown[]) => void> = ((
 ) => void) & {
   cancel: () => void;
 };
+
+// =============================================================================
+// BROWSER & WINDOW INTERFACES
+// Privacy signal interfaces for telemetry
+// =============================================================================
+
+export type NavigatorWithPrivacy = Navigator & {
+  globalPrivacyControl?: boolean;
+  msDoNotTrack?: string;
+};
+
+export type WindowWithPrivacy = Window & {
+  doNotTrack?: string;
+};
+
+// =============================================================================
+// UTILITY INTERFACES
+// Generic utility types used across modules
+// =============================================================================
+
+export interface UnknownRecord {
+  [key: string]: unknown;
+}
+
+export type UseDataSourceCandidate =
+  | UseDataSource
+  | ImmutableObject<UseDataSource>
+  | null
+  | undefined;
+
+export type MapViewWithPopupToggle = __esri.MapView & {
+  popupEnabled?: boolean;
+};
+
+// =============================================================================
+// CONFIGURATION INTERFACES
+// Config manipulation and settings panel types
+// =============================================================================
+
+export interface ConfigDictionary {
+  readonly [key: string]: unknown;
+}
+
+export interface ConfigWithSet<T> {
+  readonly set: (key: string, value: unknown) => T;
+}
+
+export type ConfigUpdater = (key: string, value: unknown) => void;
+
+export interface EsriStubGlobal {
+  __ESRI_TEST_STUB__?: (
+    modules: readonly string[]
+  ) => EsriModules | Promise<EsriModules> | Partial<EsriModules>;
+}
+
+// =============================================================================
+// EXPORT & GEOJSON TYPES
+// Data export format types
+// =============================================================================
+
+export type GeoJsonGeometry =
+  | { type: "Polygon" }
+  | { type: "MultiLineString" }
+  | { type: "Point" }
+  | null;
+
+// =============================================================================
+// SETTINGS PANEL INTERFACES
+// Settings panel form validation and manipulation
+// =============================================================================
+
+export interface FieldErrors {
+  [key: string]: string | undefined;
+}
+
+export type ImmutableArrayFactory = <T>(
+  values: readonly T[]
+) => ImmutableArray<T>;
+
+export interface MutableAccessor<T> {
+  asMutable?: (options?: { deep?: boolean }) => T;
+}
+
+// =============================================================================
+// ARCGIS API CONSTRUCTORS & INTERFACES
+// ArcGIS JS API constructor types and query interfaces
+// =============================================================================
+
+export type FeatureLayerConstructor = new (
+  properties?: __esri.FeatureLayerProperties
+) => __esri.FeatureLayer;
+
+export type QueryConstructor = new (
+  properties?: __esri.QueryProperties
+) => __esri.Query;
+
+export interface RelationshipQueryLike {
+  objectIds: number[];
+  relationshipId: number;
+  outFields: string[];
+}
+
+export interface QueryTaskLike {
+  executeRelationshipQuery: (
+    query: RelationshipQueryLike,
+    options?: SignalOptions
+  ) => Promise<{
+    [objectId: number]: { features?: __esri.Graphic[] } | undefined;
+  }>;
+}
+
+export type QueryTaskConstructor = new (...args: unknown[]) => QueryTaskLike;
+
+export type RelationshipQueryConstructor = new (
+  ...args: unknown[]
+) => RelationshipQueryLike;
+
+export interface SignalOptions {
+  signal: AbortSignal;
+}
+
+// =============================================================================
+// DATA SOURCE VALIDATION INTERFACES
+// Data source validation and processing types
+// =============================================================================
+
+export interface ValidateDataSourcesParams {
+  propertyDsId?: string | null;
+  ownerDsId?: string | null;
+  dsManager: DataSourceManager | null;
+  allowedHosts?: readonly string[];
+  translate: (key: string) => string;
+}
+
+export interface ValidatedProperty {
+  fnr: FnrValue;
+  attrs: PropertyAttributes;
+  graphic: __esri.Graphic;
+}
+
+export interface OwnerFetchSuccess {
+  validated: ValidatedProperty;
+  owners: OwnerAttributes[];
+  queryFailed: boolean;
+}
+
+export interface OwnerQueryResolution {
+  value?: OwnerFetchSuccess;
+  error?: unknown;
+}
+
+export interface ProcessingAccumulator {
+  rows: GridRowData[];
+  graphics: Array<{ graphic: __esri.Graphic; fnr: FnrValue }>;
+}
+
+export interface CreateGridRowParams {
+  fnr: FnrValue;
+  objectId: number;
+  uuidFastighet: string;
+  fastighet: string;
+  bostadr: string;
+  geometryType: string | null;
+  createRowId: (fnr: FnrValue, objectId: number) => string;
+  rawOwner?: OwnerAttributes;
+}
+
+export interface MapClickValidationParams {
+  event: __esri.ViewClickEvent | null | undefined;
+  modules: EsriModules | null;
+  translate: (key: string) => string;
+}
+
+// =============================================================================
+// REDUX ACTION TYPES
+// Redux action union types for state management
+// =============================================================================
+
+export type PropertyAction =
+  | {
+      type: "PROPERTY_WIDGET/SET_ERROR";
+      error: ErrorState | null;
+      widgetId: string;
+    }
+  | {
+      type: "PROPERTY_WIDGET/CLEAR_ERROR";
+      widgetId: string;
+    }
+  | {
+      type: "PROPERTY_WIDGET/SET_SELECTED_PROPERTIES";
+      properties: GridRowData[];
+      widgetId: string;
+    }
+  | {
+      type: "PROPERTY_WIDGET/CLEAR_ALL";
+      widgetId: string;
+    }
+  | {
+      type: "PROPERTY_WIDGET/SET_QUERY_IN_FLIGHT";
+      inFlight: boolean;
+      widgetId: string;
+    }
+  | {
+      type: "PROPERTY_WIDGET/SET_RAW_RESULTS";
+      results: { [key: string]: SerializedQueryResult } | null;
+      widgetId: string;
+    }
+  | {
+      type: "PROPERTY_WIDGET/REMOVE_WIDGET_STATE";
+      widgetId: string;
+    };
+
+export type SeamlessImmutableFactory = <T>(input: T) => Immutable<T>;

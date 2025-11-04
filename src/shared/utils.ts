@@ -16,12 +16,15 @@ import type {
   ProcessPropertyResult,
   FnrValue,
   SerializedRecord,
+  UnknownRecord,
+  MapClickValidationParams,
+  UseDataSourceCandidate,
+  MapViewWithPopupToggle,
 } from "../config/types";
 import type {
   DataSourceManager,
   UseDataSource,
   ImmutableArray,
-  ImmutableObject,
 } from "jimu-core";
 import { isValidationFailure as checkValidationFailure } from "../config/types";
 import {
@@ -57,10 +60,6 @@ export const textSanitizer = {
 
 export const stripHtml = (value: string): string =>
   textSanitizer.stripHtml(value);
-
-interface UnknownRecord {
-  [key: string]: unknown;
-}
 
 const isRecord = (value: unknown): value is UnknownRecord => {
   return typeof value === "object" && value !== null;
@@ -701,12 +700,6 @@ export const calculatePropertyUpdates = <
 
   return { toRemove, toAdd, updatedRows };
 };
-
-interface MapClickValidationParams {
-  event: __esri.ViewClickEvent | null | undefined;
-  modules: EsriModules | null;
-  translate: (key: string) => string;
-}
 
 export const validateMapClickInputs = (
   params: MapClickValidationParams
@@ -1479,17 +1472,6 @@ export const normalizeHostList = (
   return Array.from(new Set(normalized));
 };
 
-export type UseDataSourceCandidate =
-  | ImmutableObject<UseDataSource>
-  | UseDataSource
-  | {
-      readonly dataSourceId?: string;
-      readonly get?: (key: string) => unknown;
-      readonly asMutable?: (options?: {
-        deep?: boolean;
-      }) => UseDataSource | UseDataSource[];
-    };
-
 const hasGetter = (
   value: unknown
 ): value is { get: (key: string) => unknown } => {
@@ -1604,8 +1586,6 @@ export const dataSourceHelpers = {
     return null;
   },
 };
-
-type MapViewWithPopupToggle = __esri.MapView & { popupEnabled?: boolean };
 
 class PopupSuppressionManager {
   private readonly ownersByView = new WeakMap<__esri.MapView, Set<symbol>>();

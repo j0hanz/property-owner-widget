@@ -8,53 +8,12 @@ import type {
   PropertyWidgetState,
   SerializedQueryResult,
   SerializedQueryResultMap,
+  PropertyAction,
+  SeamlessImmutableFactory,
 } from "../config/types";
-
-export enum PropertyActionType {
-  SET_ERROR = "PROPERTY_WIDGET/SET_ERROR",
-  CLEAR_ERROR = "PROPERTY_WIDGET/CLEAR_ERROR",
-  SET_SELECTED_PROPERTIES = "PROPERTY_WIDGET/SET_SELECTED_PROPERTIES",
-  CLEAR_ALL = "PROPERTY_WIDGET/CLEAR_ALL",
-  SET_QUERY_IN_FLIGHT = "PROPERTY_WIDGET/SET_QUERY_IN_FLIGHT",
-  SET_RAW_RESULTS = "PROPERTY_WIDGET/SET_RAW_RESULTS",
-  REMOVE_WIDGET_STATE = "PROPERTY_WIDGET/REMOVE_WIDGET_STATE",
-}
+import { PropertyActionType } from "../config/enums";
 
 export const PROPERTY_ACTION_TYPES = Object.values(PropertyActionType);
-
-export type PropertyAction =
-  | {
-      type: PropertyActionType.SET_ERROR;
-      error: ErrorState | null;
-      widgetId: string;
-    }
-  | {
-      type: PropertyActionType.CLEAR_ERROR;
-      widgetId: string;
-    }
-  | {
-      type: PropertyActionType.SET_SELECTED_PROPERTIES;
-      properties: GridRowData[];
-      widgetId: string;
-    }
-  | {
-      type: PropertyActionType.CLEAR_ALL;
-      widgetId: string;
-    }
-  | {
-      type: PropertyActionType.SET_QUERY_IN_FLIGHT;
-      inFlight: boolean;
-      widgetId: string;
-    }
-  | {
-      type: PropertyActionType.SET_RAW_RESULTS;
-      results: { [key: string]: SerializedQueryResult } | null;
-      widgetId: string;
-    }
-  | {
-      type: PropertyActionType.REMOVE_WIDGET_STATE;
-      widgetId: string;
-    };
 
 export const propertyActions = {
   setError: (error: ErrorState | null, widgetId: string): PropertyAction => ({
@@ -96,10 +55,6 @@ export const propertyActions = {
     widgetId,
   }),
 };
-
-type SeamlessImmutableFactory = <T>(
-  input: T
-) => SeamlessImmutableNs.Immutable<T>;
 
 const resolveImmutableFactory = (): SeamlessImmutableFactory => {
   const candidate = SeamlessImmutableNs as {
