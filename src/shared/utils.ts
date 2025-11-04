@@ -408,9 +408,9 @@ export const formatAddressOnly = (
   const city = stripHtmlInternal(owner.POSTADR || "");
 
   const parts: string[] = [];
-  
+
   if (addressPart) parts.push(addressPart);
-  
+
   const postalCity = [postalCode, city].filter(Boolean).join(" ");
   if (postalCity) parts.push(postalCity);
 

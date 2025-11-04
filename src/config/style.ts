@@ -112,11 +112,12 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     td: css({
       padding: spacing?.(1),
       borderInlineEnd: border,
-      "&:last-child": {
-        borderInlineEnd: "none",
-      },
       overflow: "hidden",
       whiteSpace: "nowrap",
+      "&:last-child": {
+        borderInlineEnd: "none",
+        whiteSpace: "normal",
+      },
       fontFamily: typography?.label2?.fontFamily,
       fontSize: typography?.label2?.fontSize,
       fontWeight: typography?.label2?.fontWeight,
