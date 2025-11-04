@@ -61,7 +61,6 @@ import {
 import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api";
 import {
   formatOwnerInfo,
-  formatAddress,
   extractFnr,
   isAbortError,
   normalizeFnrKey,
@@ -445,14 +444,15 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       if (!row.rawOwner || typeof row.rawOwner !== "object") {
         return row;
       }
+      const formattedOwner = formatOwnerInfo(
+        row.rawOwner,
+        piiMaskingEnabled,
+        translate("unknownOwner")
+      );
       return {
         ...row,
-        BOSTADR: formatOwnerInfo(
-          row.rawOwner,
-          piiMaskingEnabled,
-          translate("unknownOwner")
-        ),
-        ADDRESS: formatAddress(row.rawOwner, piiMaskingEnabled),
+        BOSTADR: formattedOwner,
+        ADDRESS: formattedOwner,
       };
     });
 
