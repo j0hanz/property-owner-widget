@@ -61,6 +61,7 @@ import {
 import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api";
 import {
   formatOwnerInfo,
+  formatAddressOnly,
   extractFnr,
   isAbortError,
   normalizeFnrKey,
@@ -452,7 +453,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       return {
         ...row,
         BOSTADR: formattedOwner,
-        ADDRESS: formattedOwner,
+        ADDRESS: formatAddressOnly(row.rawOwner, piiMaskingEnabled),
       };
     });
 

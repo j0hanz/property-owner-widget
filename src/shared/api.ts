@@ -49,6 +49,7 @@ import {
   createRowId,
   formatPropertyWithShare,
   formatOwnerInfo,
+  formatAddressOnly,
   extractFnr,
 } from "./utils";
 
@@ -356,11 +357,7 @@ const buildPropertyRows = (
           maskPII,
           context.messages.unknownOwner
         ),
-        address: context.helpers.formatOwnerInfo(
-          owner,
-          maskPII,
-          context.messages.unknownOwner
-        ),
+        address: formatAddressOnly(owner, maskPII),
         geometryType,
         createRowId: context.helpers.createRowId,
         rawOwner: owner,
@@ -1071,7 +1068,7 @@ const processBatchQuery = async (
                 owner.UUID_FASTIGHET ?? validated.attrs.UUID_FASTIGHET,
               fastighet: propertyWithShare,
               bostadr: formattedOwner,
-              address: formattedOwner,
+              address: formatAddressOnly(owner, config.enablePIIMasking),
               geometryType: validated.graphic.geometry?.type ?? null,
               createRowId: context.helpers.createRowId,
               rawOwner: owner,

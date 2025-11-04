@@ -395,30 +395,26 @@ export const formatPropertyWithShare = (
     : propertyWithNbsp;
 };
 
-export const formatAddress = (
+export const formatAddressOnly = (
   owner: OwnerAttributes,
   maskPII: boolean
 ): string => {
+  // Build address string from BOSTADR (street), POSTNR (postal code), POSTADR (city)
   const rawAddress = stripHtmlInternal(owner.BOSTADR || "");
+  const addressPart =
+    maskPII && rawAddress ? ownerPrivacy.maskAddress(rawAddress) : rawAddress;
+
   const postalCode = stripHtmlInternal(owner.POSTNR || "").replace(/\s+/g, "");
   const city = stripHtmlInternal(owner.POSTADR || "");
 
-  const addressParts: string[] = [];
+  const parts: string[] = [];
+  
+  if (addressPart) parts.push(addressPart);
+  
+  const postalCity = [postalCode, city].filter(Boolean).join(" ");
+  if (postalCity) parts.push(postalCity);
 
-  if (rawAddress) {
-    const maskedAddress = maskPII ? maskAddress(rawAddress) : rawAddress;
-    addressParts.push(maskedAddress);
-  }
-
-  const postalParts: string[] = [];
-  if (postalCode) postalParts.push(postalCode);
-  if (city) postalParts.push(city);
-
-  if (postalParts.length > 0) {
-    addressParts.push(postalParts.join(" "));
-  }
-
-  return addressParts.join(", ");
+  return parts.join(", ");
 };
 
 // ============================================================================
