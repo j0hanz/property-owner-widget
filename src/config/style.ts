@@ -116,6 +116,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
         borderInlineEnd: "none",
       },
       overflow: "hidden",
+      whiteSpace: "nowrap",
       fontFamily: typography?.label2?.fontFamily,
       fontSize: typography?.label2?.fontSize,
       fontWeight: typography?.label2?.fontWeight,
