@@ -13,8 +13,16 @@ import type {
   QueryResult,
   CursorGraphicsState,
   ProcessPropertyQueryParams,
+  ProcessPropertyResult,
+  FnrValue,
+  SerializedRecord,
 } from "../config/types";
-import type { DataSourceManager } from "jimu-core";
+import type {
+  DataSourceManager,
+  UseDataSource,
+  ImmutableArray,
+  ImmutableObject,
+} from "jimu-core";
 import { isValidationFailure as checkValidationFailure } from "../config/types";
 import {
   validateDataSources as validateDataSourcesCore,
@@ -50,18 +58,30 @@ export const textSanitizer = {
 export const stripHtml = (value: string): string =>
   textSanitizer.stripHtml(value);
 
+interface UnknownRecord {
+  [key: string]: unknown;
+}
+
+const isRecord = (value: unknown): value is UnknownRecord => {
+  return typeof value === "object" && value !== null;
+};
+
 // ============================================================================
 // LOGGING UTILITIES
 // ============================================================================
 
 export const logger = {
-  debug: (context: string, data?: { [key: string]: any }) => {
+  debug: (_context: string, _data?: { [key: string]: unknown }) => {
     // Debug logging disabled in production
   },
-  warn: (context: string, data?: { [key: string]: any }) => {
+  warn: (_context: string, _data?: { [key: string]: unknown }) => {
     // Warning logging disabled in production
   },
-  error: (context: string, error: unknown, data?: { [key: string]: any }) => {
+  error: (
+    context: string,
+    error: unknown,
+    data?: { [key: string]: unknown }
+  ) => {
     console.error(`Property Widget: ${context}`, error, data || {});
   },
 };
@@ -243,8 +263,7 @@ export const syncCursorGraphics = ({
   if (!next.pointGraphic) {
     next.pointGraphic = new modules.Graphic({
       geometry: mapPoint,
-      symbol: {
-        type: "simple-marker",
+      symbol: new modules.SimpleMarkerSymbol({
         style: "cross",
         size: HIGHLIGHT_MARKER_SIZE,
         color: highlightColor,
@@ -252,7 +271,7 @@ export const syncCursorGraphics = ({
           color: [highlightColor[0], highlightColor[1], highlightColor[2], 1],
           width: 2.5,
         },
-      } as any,
+      }),
     });
     layer.add(next.pointGraphic);
   } else {
@@ -542,11 +561,19 @@ export const parseArcGISError = (
 ): string => {
   if (!error) return defaultMessage;
   if (typeof error === "string") return error;
-  if (typeof (error as any).details?.message === "string") {
-    return (error as any).details.message;
-  }
-  if (typeof (error as any).message === "string") {
-    return (error as any).message;
+  if (isRecord(error)) {
+    const details = "details" in error ? error.details : undefined;
+    if (isRecord(details)) {
+      const detailMessage = details.message;
+      if (typeof detailMessage === "string") {
+        return detailMessage;
+      }
+    }
+
+    const message = "message" in error ? error.message : undefined;
+    if (typeof message === "string") {
+      return message;
+    }
   }
   return defaultMessage;
 };
@@ -582,10 +609,10 @@ export const buildFnrWhereClause = (
 export const cleanupRemovedGraphics = (params: {
   toRemove: Set<string>;
   removeGraphicsForFnr: (
-    fnr: string | number,
-    normalize: (fnr: any) => string
+    fnr: FnrValue,
+    normalize: (fnr: FnrValue | null | undefined) => string
   ) => void;
-  normalizeFnrKey: (fnr: any) => string;
+  normalizeFnrKey: (fnr: FnrValue | null | undefined) => string;
 }): void => {
   const { toRemove, removeGraphicsForFnr, normalizeFnrKey: normalize } = params;
 
@@ -675,12 +702,16 @@ export const calculatePropertyUpdates = <
   return { toRemove, toAdd, updatedRows };
 };
 
+interface MapClickValidationParams {
+  event: __esri.ViewClickEvent | null | undefined;
+  modules: EsriModules | null;
+  translate: (key: string) => string;
+}
+
 export const validateMapClickInputs = (
-  event: any,
-  modules: any,
-  config: any,
-  translate: (key: string) => string
+  params: MapClickValidationParams
 ): ValidationResult<{ mapPoint: __esri.Point }> => {
+  const { event, modules, translate } = params;
   if (!modules) {
     return {
       valid: false,
@@ -737,9 +768,8 @@ export const syncGraphicsWithState = (params: {
   // Use batch addition for better performance (single DOM update)
   if (graphicsToProcess.length > 0) {
     // Check if batch method is available (from updated useGraphicsLayer hook)
-    const addManyFn = (helpers as any).addManyGraphicsToMap;
-    if (typeof addManyFn === "function") {
-      addManyFn(
+    if (helpers.addManyGraphicsToMap) {
+      helpers.addManyGraphicsToMap(
         graphicsToProcess,
         view,
         helpers.extractFnr,
@@ -749,7 +779,7 @@ export const syncGraphicsWithState = (params: {
       );
     } else {
       // Fallback to individual additions if batch method not available
-      graphicsToProcess.forEach(({ graphic, fnr }) => {
+      graphicsToProcess.forEach(({ graphic }) => {
         helpers.addGraphicsToMap(
           graphic,
           view,
@@ -773,7 +803,7 @@ export type {
 } from "../config/types";
 
 export const validateMapClickPipeline = (params: {
-  event: any;
+  event: __esri.ViewClickEvent | null | undefined;
   modules: EsriModules | null;
   config: IMConfig;
   dsManager: DataSourceManager | null;
@@ -784,12 +814,11 @@ export const validateMapClickPipeline = (params: {
 }> => {
   const { event, modules, config, dsManager, translate } = params;
 
-  const mapValidation = validateMapClickInputs(
+  const mapValidation = validateMapClickInputs({
     event,
     modules,
-    config,
-    translate
-  );
+    translate,
+  });
   if (checkValidationFailure(mapValidation)) {
     return mapValidation as ValidationResult<{
       mapPoint: __esri.Point;
@@ -832,7 +861,7 @@ export const validateMapClickPipeline = (params: {
 
 export const processPropertyQueryResults = async (
   params: ProcessPropertyQueryParams
-): Promise<{ rowsToProcess: any[]; graphicsToAdd: any[] }> => {
+): Promise<ProcessPropertyResult> => {
   const { propertyResults, config, processingContext, services } = params;
 
   const useBatchQuery =
@@ -871,7 +900,7 @@ export const updateRawPropertyResults = (
   propertyResults: QueryResult[],
   toRemove: Set<string>,
   selectedProperties: Array<{ FNR: string | number; id: string }>,
-  normalizeFnrKey: (fnr: any) => string
+  normalizeFnrKey: (fnr: FnrValue | null | undefined) => string
 ): { [key: string]: SerializedQueryResult } => {
   // Convert input to Map for efficient processing
   const prevMap =
@@ -879,16 +908,47 @@ export const updateRawPropertyResults = (
       ? prev
       : new Map(Object.entries(prev || {}).map(([k, v]) => [k, v]));
 
-  const clonePlainValue = (value: any) => {
-    if (value == null) return null;
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch (_error) {
-      if (Array.isArray(value)) {
-        return value.map((item) => clonePlainValue(item));
-      }
-      return { ...value };
+  const clonePlainValue = (value: unknown): unknown => {
+    if (value == null) {
+      return null;
     }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => clonePlainValue(item));
+    }
+
+    if (isRecord(value)) {
+      const withToJSON = value as UnknownRecord & {
+        toJSON?: () => unknown;
+      };
+      if (typeof withToJSON.toJSON === "function") {
+        return clonePlainValue(withToJSON.toJSON());
+      }
+
+      try {
+        return JSON.parse(JSON.stringify(value)) as unknown;
+      } catch (_error) {
+        const result: UnknownRecord = {};
+        Object.entries(value).forEach(([key, entryValue]) => {
+          result[key] = clonePlainValue(entryValue);
+        });
+        return result;
+      }
+    }
+
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      return value;
+    }
+
+    return null;
+  };
+
+  type GraphicWithAggregates = __esri.Graphic & {
+    aggregateGeometries?: unknown;
   };
 
   const serializeFeature = (
@@ -904,24 +964,33 @@ export const updateRawPropertyResults = (
       };
     }
 
-    const geometry = (feature as any)?.geometry as __esri.Geometry | undefined;
+    const geometry = feature.geometry as __esri.Geometry | undefined;
     const geometryJson = geometry
       ? typeof geometry.toJSON === "function"
-        ? geometry.toJSON()
-        : clonePlainValue(geometry)
+        ? (geometry.toJSON() as SerializedRecord)
+        : (clonePlainValue(geometry) as SerializedRecord | null)
       : null;
+
+    const aggregateGeometries = (feature as GraphicWithAggregates)
+      .aggregateGeometries;
 
     return {
       attributes:
         feature.attributes && typeof feature.attributes === "object"
-          ? { ...feature.attributes }
+          ? {
+              ...(feature.attributes as UnknownRecord),
+            }
           : null,
       geometry: geometryJson ?? null,
       aggregateGeometries: clonePlainValue(
-        (feature as any)?.aggregateGeometries ?? null
-      ),
-      symbol: clonePlainValue((feature as any)?.symbol ?? null),
-      popupTemplate: clonePlainValue((feature as any)?.popupTemplate ?? null),
+        aggregateGeometries ?? null
+      ) as SerializedRecord | null,
+      symbol: clonePlainValue(
+        feature.symbol ?? null
+      ) as SerializedRecord | null,
+      popupTemplate: clonePlainValue(
+        feature.popupTemplate ?? null
+      ) as SerializedRecord | null,
     };
   };
 
@@ -1021,7 +1090,7 @@ export const createPropertyDispatcher = (
     setRawResults: (
       results: { [key: string]: SerializedQueryResult } | null
     ) => {
-      safeDispatch(propertyActions.setRawResults(results as any, widgetId));
+      safeDispatch(propertyActions.setRawResults(results, widgetId));
     },
     removeWidgetState: () => {
       safeDispatch(propertyActions.removeWidgetState(widgetId));
@@ -1032,7 +1101,9 @@ export const createPropertyDispatcher = (
 /** Computes list of widget IDs that should be closed when this widget opens */
 export const computeWidgetsToClose = (
   runtimeInfo:
-    | { [id: string]: { state?: any; isClassLoaded?: boolean } | undefined }
+    | {
+        [id: string]: { state?: unknown; isClassLoaded?: boolean } | undefined;
+      }
     | null
     | undefined,
   currentWidgetId: string,
@@ -1042,22 +1113,34 @@ export const computeWidgetsToClose = (
 
   const ids: string[] = [];
 
-  const resolveEntry = (collection: unknown, key: string): any => {
-    if (!collection) return null;
-    if (typeof (collection as any)?.get === "function") {
-      return (collection as any).get(key);
-    }
-    return (collection as any)?.[key] ?? null;
+  const hasGetMethod = (
+    value: unknown
+  ): value is { get: (key: string) => unknown } => {
+    return isRecord(value) && typeof value.get === "function";
   };
 
-  const readString = (source: any, key: string): string => {
+  const resolveEntry = (collection: unknown, key: string): unknown => {
+    if (!collection) return undefined;
+    if (hasGetMethod(collection)) {
+      return collection.get(key);
+    }
+    if (isRecord(collection)) {
+      return collection[key];
+    }
+    return undefined;
+  };
+
+  const readString = (source: unknown, key: string): string => {
     if (!source) return "";
-    if (typeof source.get === "function") {
+    if (hasGetMethod(source)) {
       const value = source.get(key);
       return typeof value === "string" ? value : "";
     }
-    const value = source?.[key];
-    return typeof value === "string" ? value : "";
+    if (isRecord(source)) {
+      const value = source[key];
+      return typeof value === "string" ? value : "";
+    }
+    return "";
   };
 
   const hasPropertyKeyword = (value: string): boolean => {
@@ -1089,7 +1172,18 @@ export const computeWidgetsToClose = (
     if (id === currentWidgetId || !info) continue;
     const stateRaw = info.state;
     if (!stateRaw) continue;
-    const normalized = String(stateRaw).toUpperCase();
+    const normalizedSource =
+      typeof stateRaw === "string"
+        ? stateRaw
+        : typeof stateRaw === "number"
+          ? String(stateRaw)
+          : null;
+
+    if (!normalizedSource) {
+      continue;
+    }
+
+    const normalized = normalizedSource.toUpperCase();
 
     // Skip widgets that are already closed or hidden
     if (normalized === "CLOSED" || normalized === "HIDDEN") {
@@ -1111,7 +1205,7 @@ export const executeHoverQuery = async (params: {
     ownerDataSourceId: string;
     allowedHosts?: readonly string[];
   };
-  dsManager: any;
+  dsManager: DataSourceManager | null;
   signal: AbortSignal;
   enablePIIMasking: boolean;
   translate: (key: string) => string;
@@ -1385,52 +1479,147 @@ export const normalizeHostList = (
   return Array.from(new Set(normalized));
 };
 
+export type UseDataSourceCandidate =
+  | ImmutableObject<UseDataSource>
+  | UseDataSource
+  | {
+      readonly dataSourceId?: string;
+      readonly get?: (key: string) => unknown;
+      readonly asMutable?: (options?: {
+        deep?: boolean;
+      }) => UseDataSource | UseDataSource[];
+    };
+
+const hasGetter = (
+  value: unknown
+): value is { get: (key: string) => unknown } => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as { get?: unknown };
+  return typeof candidate.get === "function";
+};
+
+const hasAsMutable = (
+  value: unknown
+): value is {
+  asMutable: (options?: { deep?: boolean }) => UseDataSource | UseDataSource[];
+} => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as { asMutable?: unknown };
+  return typeof candidate.asMutable === "function";
+};
+
+const isIndexedCollection = (
+  collection: unknown
+): collection is {
+  readonly length?: number;
+  readonly [index: number]: UseDataSourceCandidate;
+} => {
+  if (!collection || typeof collection !== "object") {
+    return false;
+  }
+
+  const candidate = collection as { length?: unknown };
+  return typeof candidate.length === "number";
+};
+
 export const dataSourceHelpers = {
-  extractId: (useDataSource: unknown): string | null => {
-    if (!useDataSource) {
+  extractId: (useDataSource: UseDataSourceCandidate | null | undefined) => {
+    if (!useDataSource || typeof useDataSource !== "object") {
       return null;
     }
 
-    const getId = (useDataSource as any)?.get;
-    if (typeof getId === "function") {
-      return getId.call(useDataSource, "dataSourceId") ?? null;
+    if (hasGetter(useDataSource)) {
+      const value = useDataSource.get("dataSourceId");
+      return typeof value === "string" ? value : null;
     }
 
-    return (useDataSource as any)?.dataSourceId ?? null;
+    if ("dataSourceId" in useDataSource) {
+      const value = (useDataSource as { dataSourceId?: unknown }).dataSourceId;
+      return typeof value === "string" ? value : null;
+    }
+
+    return null;
   },
 
-  findById: (useDataSources: unknown, dataSourceId?: string): unknown => {
+  findById: (
+    useDataSources:
+      | ImmutableArray<UseDataSource>
+      | UseDataSource[]
+      | UseDataSourceCandidate[]
+      | null
+      | undefined,
+    dataSourceId?: string
+  ): UseDataSourceCandidate | null => {
     if (!dataSourceId || !useDataSources) {
       return null;
     }
 
     const collection = useDataSources as {
-      find?: (predicate: (candidate: unknown) => boolean) => unknown;
+      readonly find?: (
+        predicate: (candidate: UseDataSourceCandidate) => boolean
+      ) => UseDataSourceCandidate | undefined;
     };
 
-    if (typeof collection.find !== "function") {
-      return null;
+    if (typeof collection.find === "function") {
+      const match = collection.find((candidate) => {
+        if (!candidate) {
+          return false;
+        }
+        return dataSourceHelpers.extractId(candidate) === dataSourceId;
+      });
+      if (match) {
+        return match;
+      }
     }
 
-    const match = collection.find((candidate: unknown) => {
-      if (!candidate) {
-        return false;
+    if (hasAsMutable(useDataSources)) {
+      const mutable = useDataSources.asMutable({ deep: false });
+      if (Array.isArray(mutable)) {
+        return dataSourceHelpers.findById(mutable, dataSourceId);
       }
-      return dataSourceHelpers.extractId(candidate) === dataSourceId;
-    });
+    }
 
-    return match ?? null;
+    if (Array.isArray(useDataSources) || isIndexedCollection(useDataSources)) {
+      const indexed = useDataSources as {
+        readonly length?: number;
+        readonly [index: number]: UseDataSourceCandidate;
+      };
+
+      const length = indexed.length ?? 0;
+      for (let index = 0; index < length; index += 1) {
+        const candidate = indexed[index];
+        if (
+          candidate &&
+          dataSourceHelpers.extractId(candidate) === dataSourceId
+        ) {
+          return candidate;
+        }
+      }
+    }
+
+    return null;
   },
 };
+
+type MapViewWithPopupToggle = __esri.MapView & { popupEnabled?: boolean };
 
 class PopupSuppressionManager {
   private readonly ownersByView = new WeakMap<__esri.MapView, Set<symbol>>();
   private readonly originalStateByView = new WeakMap<__esri.MapView, boolean>();
 
+  private resolveView(view: __esri.MapView): MapViewWithPopupToggle {
+    return view as MapViewWithPopupToggle;
+  }
+
   acquire(ownerId: symbol, view: __esri.MapView | null | undefined): void {
     if (!view) return;
 
-    const popupEnabled = (view as any).popupEnabled;
+    const viewWithPopup = this.resolveView(view);
+    const popupEnabled = viewWithPopup.popupEnabled;
     if (typeof popupEnabled !== "boolean") return;
 
     let owners = this.ownersByView.get(view);
@@ -1441,7 +1630,7 @@ class PopupSuppressionManager {
     }
 
     owners.add(ownerId);
-    (view as any).popupEnabled = false;
+    viewWithPopup.popupEnabled = false;
   }
 
   release(ownerId: symbol, view: __esri.MapView | null | undefined): void {
@@ -1459,7 +1648,8 @@ class PopupSuppressionManager {
     const originalState = this.originalStateByView.get(view);
 
     if (originalState !== undefined) {
-      (view as any).popupEnabled = originalState;
+      const viewWithPopup = this.resolveView(view);
+      viewWithPopup.popupEnabled = originalState;
       this.originalStateByView.delete(view);
       this.ownersByView.delete(view);
     }

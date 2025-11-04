@@ -4,17 +4,49 @@ import type {
   GridRowData,
   CsvHeaderValues,
   ExportOptions,
+  SerializedQueryResult,
+  SerializedQueryFeature,
+  SerializedRecord,
 } from "../config/types";
 import { CSV_HEADERS } from "../config/constants";
 
-const sanitizeValue = (value: any): string => {
+const sanitizeValue = (value: unknown): string => {
   if (value == null) {
     return "";
   }
-  return stripHtml(String(value));
+  if (typeof value === "string") {
+    return stripHtml(value);
+  }
+  if (typeof value === "number" || typeof value === "bigint") {
+    return stripHtml(String(value));
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  if (typeof value === "object") {
+    try {
+      return stripHtml(JSON.stringify(value));
+    } catch (error) {
+      const typeName = (value as { constructor?: { name?: string } })
+        .constructor?.name;
+      trackError(
+        "export_sanitize_object",
+        error,
+        `failed to serialize value of type ${typeName ?? typeof value}`
+      );
+      return "";
+    }
+  }
+  if (typeof value === "symbol") {
+    return stripHtml(value.description ?? "");
+  }
+  if (typeof value === "function") {
+    return stripHtml(value.name ?? "");
+  }
+  return "";
 };
 
-const escapeCsvValue = (value: any): string => {
+const escapeCsvValue = (value: unknown): string => {
   const sanitized = sanitizeValue(value);
   if (
     sanitized.includes(",") ||
@@ -47,43 +79,74 @@ export const convertToCSV = (rows: GridRowData[]): string => {
   return [csvHeaders, ...csvRows].join("\n");
 };
 
-const stripRingsFromGeometry = (data: any[]): any[] => {
+const cloneRecord = (
+  record: SerializedRecord | null
+): SerializedRecord | null => {
+  if (!record) {
+    return null;
+  }
+  return { ...record };
+};
+
+const stripRingsFromGeometry = (
+  data: readonly SerializedQueryResult[]
+): SerializedQueryResult[] => {
   return data.map((result) => {
-    if (!result?.features) return result;
+    if (!result?.features) {
+      return result;
+    }
 
-    return {
-      ...result,
-      features: result.features.map((feature: any) => {
-        if (!feature) return feature;
+    const sanitizedFeatures = result.features.map(
+      (feature): SerializedQueryFeature => {
+        if (!feature) {
+          return {
+            attributes: null,
+            geometry: null,
+            aggregateGeometries: null,
+            symbol: null,
+            popupTemplate: null,
+          };
+        }
 
-        // Convert feature to plain object, preserving all properties
-        const plainFeature: any = {
-          aggregateGeometries: feature.aggregateGeometries ?? null,
+        const sanitized: SerializedQueryFeature = {
+          attributes: cloneRecord(feature.attributes),
           geometry: null,
-          symbol: feature.symbol ?? null,
-          attributes: feature.attributes ?? null,
-          popupTemplate: feature.popupTemplate ?? null,
+          aggregateGeometries: cloneRecord(feature.aggregateGeometries ?? null),
+          symbol: cloneRecord(feature.symbol ?? null),
+          popupTemplate: cloneRecord(feature.popupTemplate ?? null),
         };
 
         if (feature.geometry) {
-          // Extract geometry properties, excluding rings
-          const geom = feature.geometry;
-          const { rings, ...otherGeomProps } = geom;
-
-          plainFeature.geometry = otherGeomProps;
+          const { rings, ...other } = feature.geometry as {
+            [key: string]: unknown;
+            rings?: unknown;
+          };
+          sanitized.geometry = { ...other };
+          void rings;
         }
 
-        return plainFeature;
-      }),
+        return sanitized;
+      }
+    );
+
+    return {
+      ...result,
+      features: sanitizedFeatures,
     };
   });
 };
 
-export const convertToGeoJSON = (rows: GridRowData[]): object => {
+type GeoJsonGeometry =
+  | { type: "Polygon" }
+  | { type: "MultiLineString" }
+  | { type: "Point" }
+  | null;
+
+export const convertToGeoJSON = (rows: GridRowData[]): SerializedRecord => {
   const features = (rows || [])
     .filter((row) => Boolean(row.geometryType))
     .map((row) => {
-      let geojsonGeometry: any = null;
+      let geojsonGeometry: GeoJsonGeometry = null;
       const geometryType = (row.geometryType || "").toLowerCase();
       if (geometryType === "polygon" || geometryType === "extent") {
         geojsonGeometry = {
@@ -130,7 +193,7 @@ const buildFilename = (
 };
 
 export const exportData = (
-  rawData: any[] | null | undefined,
+  rawData: readonly SerializedQueryResult[] | null | undefined,
   selectedProperties: GridRowData[],
   options: ExportOptions
 ): void => {

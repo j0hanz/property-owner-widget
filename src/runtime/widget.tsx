@@ -12,6 +12,8 @@ import {
   WidgetState,
   appActions,
   getAppStore,
+  type UseDataSource,
+  type ImmutableObject,
 } from "jimu-core";
 import { JimuMapViewComponent } from "jimu-arcgis";
 import {
@@ -36,8 +38,12 @@ import type {
   ErrorBoundaryProps,
   GridRowData,
   SelectionGraphicsParams,
+  SelectionGraphicsHelpers,
   ExportFormat,
   SerializedQueryResult,
+  SerializedQueryResultMap,
+  ErrorState,
+  IMStateWithProperty,
 } from "../config/types";
 import { isFBWebbConfigured } from "../config/types";
 import { ErrorType } from "../config/enums";
@@ -184,6 +190,34 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   }
   const selectors = selectorsRef.current;
 
+  const ensureImmutableUseDataSource = (
+    candidate: ReturnType<typeof dataSourceHelpers.findById>
+  ): ImmutableObject<UseDataSource> | null => {
+    if (!candidate) {
+      return null;
+    }
+
+    const mutableCandidate = candidate as {
+      asMutable?: (options?: { deep?: boolean }) => unknown;
+    };
+
+    if (typeof mutableCandidate.asMutable === "function") {
+      return candidate as ImmutableObject<UseDataSource>;
+    }
+
+    return null;
+  };
+
+  const isSerializedResultRecord = (
+    value: unknown
+  ): value is SerializedQueryResultMap => {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+
+    return !(value instanceof Map);
+  };
+
   const runtimeState = ReactRedux.useSelector((state: IMState) => {
     const widgetInfo = state.widgetsRuntimeInfo?.[widgetId];
     if (widgetInfo?.state !== undefined) {
@@ -193,15 +227,18 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   });
   const prevRuntimeState = hooks.usePrevious(runtimeState);
 
-  const error = ReactRedux.useSelector(selectors.selectError);
-  const selectedProperties = ReactRedux.useSelector(
-    selectors.selectSelectedProperties
+  const error = ReactRedux.useSelector<IMStateWithProperty, ErrorState | null>(
+    selectors.selectError
   );
-  const rawPropertyResults = ReactRedux.useSelector(selectors.selectRawResults);
-  const selectedCount =
-    typeof (selectedProperties as any)?.length === "number"
-      ? (selectedProperties as any).length
-      : 0;
+  const selectedProperties = ReactRedux.useSelector<
+    IMStateWithProperty,
+    GridRowData[]
+  >(selectors.selectSelectedProperties);
+  const rawPropertyResults = ReactRedux.useSelector<
+    IMStateWithProperty,
+    SerializedQueryResultMap | null
+  >(selectors.selectRawResults);
+  const selectedCount = selectedProperties.length;
   const hasSelectedProperties = selectedCount > 0;
 
   const [urlFeedback, setUrlFeedback] = React.useState<{
@@ -211,11 +248,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   } | null>(null);
 
   hooks.useUpdateEffect(() => {
-    if (!urlFeedback || urlFeedback.url) return;
-    if (typeof window === "undefined") return;
+    if (!urlFeedback || urlFeedback.url || typeof window === "undefined") {
+      return undefined;
+    }
+
     const timeout = window.setTimeout(() => {
       setUrlFeedback(null);
     }, 4000);
+
     return () => {
       window.clearTimeout(timeout);
     };
@@ -238,21 +278,24 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     );
   }, [props.dispatch, widgetId]);
 
-  const selectedPropertiesRef = hooks.useLatest(selectedProperties);
-  const rawPropertyResultsRef = hooks.useLatest(rawPropertyResults);
+  const selectedPropertiesRef =
+    hooks.useLatest<GridRowData[]>(selectedProperties);
+  const rawPropertyResultsRef =
+    hooks.useLatest<SerializedQueryResultMap | null>(rawPropertyResults);
 
   hooks.useEffectOnce(() => {
     // Widget mounted
   });
 
-  const propertyUseDataSource = dataSourceHelpers.findById(
-    props.useDataSources,
-    config.propertyDataSourceId
-  ) as any;
-  const ownerUseDataSource = dataSourceHelpers.findById(
-    props.useDataSources,
-    config.ownerDataSourceId
-  ) as any;
+  const propertyUseDataSource = ensureImmutableUseDataSource(
+    dataSourceHelpers.findById(
+      props.useDataSources,
+      config.propertyDataSourceId
+    )
+  );
+  const ownerUseDataSource = ensureImmutableUseDataSource(
+    dataSourceHelpers.findById(props.useDataSources, config.ownerDataSourceId)
+  );
   const propertyUseDataSourceId = dataSourceHelpers.extractId(
     propertyUseDataSource
   );
@@ -438,15 +481,19 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
     const existingRaw = rawPropertyResultsRef.current;
     if (existingRaw && Object.keys(existingRaw).length > 0) {
-      const nextRaw: { [key: string]: SerializedQueryResult } = {};
+      const nextRaw: SerializedQueryResultMap = {};
       Object.keys(existingRaw).forEach((key) => {
         if (!removedProperties.some((prop) => prop.id === key)) {
           const rawValue = existingRaw[key];
-          // Convert immutable object to plain object
-          nextRaw[key] = JSON.parse(JSON.stringify(rawValue));
+          if (rawValue) {
+            const clonedValue = JSON.parse(
+              JSON.stringify(rawValue)
+            ) as SerializedQueryResult;
+            nextRaw[key] = clonedValue;
+          }
         }
       });
-      propertyDispatchRef.current.setRawResults(nextRaw as any);
+      propertyDispatchRef.current.setRawResults(nextRaw);
     }
   }, [maxResults, normalizeFnrKey, removeGraphicsForFnr, trackEvent]);
 
@@ -461,7 +508,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     );
   }, [config.enableBatchOwnerQuery, config.relationshipId]);
 
-  const tableColumnsRef = React.useRef<Array<ColumnDef<GridRowData, any>>>(
+  const tableColumnsRef = React.useRef<Array<ColumnDef<GridRowData>>>(
     createPropertyTableColumns({ translate })
   );
   const tableColumns = tableColumnsRef.current;
@@ -484,7 +531,55 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         }
       | undefined;
 
-    const appWidgets = (state as any)?.appConfig?.widgets;
+    const appWidgets = (() => {
+      if (!state || typeof state !== "object") {
+        return null;
+      }
+
+      const baseState = state as {
+        appConfig?: unknown;
+        get?: (key: string) => unknown;
+      };
+
+      const readWidgets = (candidate: unknown): unknown => {
+        if (!candidate || typeof candidate !== "object") {
+          return null;
+        }
+
+        const source = candidate as {
+          widgets?: unknown;
+          get?: (key: string) => unknown;
+        };
+
+        if (typeof source.get === "function") {
+          const viaGetter = source.get("widgets");
+          if (viaGetter !== undefined) {
+            return viaGetter;
+          }
+        }
+
+        if ("widgets" in source) {
+          return source.widgets ?? null;
+        }
+
+        return null;
+      };
+
+      const directWidgets = readWidgets(baseState.appConfig);
+      if (directWidgets !== null) {
+        return directWidgets;
+      }
+
+      if (typeof baseState.get === "function") {
+        const configViaGetter = baseState.get("appConfig");
+        const widgetsFromGetter = readWidgets(configViaGetter);
+        if (widgetsFromGetter !== null) {
+          return widgetsFromGetter;
+        }
+      }
+
+      return null;
+    })();
     const targets = computeWidgetsToClose(runtimeInfo, widgetId, appWidgets);
     if (targets.length === 0) return;
 
@@ -521,21 +616,18 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
 
     // Convert rawPropertyResults to Map for consistent access
-    let resultsMap: Map<string, any>;
+    let resultsMap: Map<string, SerializedQueryResult>;
     if (rawPropertyResults instanceof Map) {
       resultsMap = rawPropertyResults;
-    } else if (rawPropertyResults && typeof rawPropertyResults === "object") {
+    } else if (isSerializedResultRecord(rawPropertyResults)) {
       // Handle Redux immutable object or plain object
       resultsMap = new Map();
-      // Use for...in to handle both plain objects and Immutable objects
-      for (const key in rawPropertyResults) {
-        if (Object.prototype.hasOwnProperty.call(rawPropertyResults, key)) {
-          const value = (rawPropertyResults as any)[key];
-          if (value !== null && value !== undefined) {
-            resultsMap.set(key, value);
-          }
+      Object.keys(rawPropertyResults).forEach((key) => {
+        const value = rawPropertyResults[key];
+        if (value !== null && value !== undefined) {
+          resultsMap.set(key, value);
         }
-      }
+      });
     } else {
       console.log(
         "[Export] Invalid rawPropertyResults type:",
@@ -550,7 +642,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       return;
     }
 
-    const selectedRawData: any[] = [];
+    const selectedRawData: SerializedQueryResult[] = [];
     selectedProperties.forEach((row) => {
       const rawData = resultsMap.get(row.id);
       console.log("[Export] Looking up row:", row.id, "Found:", !!rawData);
@@ -563,9 +655,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       return;
     }
 
-    const selectedRows = Array.isArray(selectedProperties)
-      ? selectedProperties
-      : Array.from(selectedProperties as Iterable<GridRowData>);
+    const selectedRows = Array.from(selectedProperties);
 
     try {
       exportData(selectedRawData, selectedRows, {
@@ -612,9 +702,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
 
     try {
-      const selectionArray = Array.isArray(currentSelection)
-        ? currentSelection
-        : Array.from(currentSelection as Iterable<GridRowData>);
+      const selectionArray = Array.from(currentSelection);
       const fnrs = selectionArray
         .map((row) => row.FNR)
         .filter(
@@ -804,13 +892,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         if (!isStaleRequest()) {
           const prevRawResults = rawPropertyResultsRef.current;
-
-          // Convert ImmutableObject to plain object if needed
-          const prevResultsPlain = prevRawResults
-            ? ((typeof (prevRawResults as any).asMutable === "function"
-                ? (prevRawResults as any).asMutable({ deep: false })
-                : prevRawResults) as { [key: string]: SerializedQueryResult })
-            : {};
+          const prevResultsPlain: SerializedQueryResultMap =
+            prevRawResults ?? {};
           const updatedRawResults = updateRawPropertyResults(
             prevResultsPlain,
             pipelineResult.rowsToProcess,
@@ -839,16 +922,18 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           const outlineWidth = getValidatedOutlineWidth(outlineWidthConfig);
 
           // Add graphics to map first (batch addition for better performance)
+          const graphicsHelpers = {
+            addGraphicsToMap,
+            addManyGraphicsToMap,
+            extractFnr,
+            normalizeFnrKey,
+          } satisfies SelectionGraphicsHelpers;
+
           syncSelectionGraphics({
             graphicsToAdd: pipelineResult.graphicsToAdd,
             selectedRows: pipelineResult.updatedRows,
             getCurrentView,
-            helpers: {
-              addGraphicsToMap,
-              addManyGraphicsToMap,
-              extractFnr,
-              normalizeFnrKey,
-            } as any,
+            helpers: graphicsHelpers,
             highlightColor,
             outlineWidth,
           });
@@ -867,7 +952,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             "ms"
           );
           dispatch.setSelectedProperties(rowsToStore);
-          dispatch.setRawResults(resultsToStore as any);
+          dispatch.setRawResults(resultsToStore);
           dispatch.setQueryInFlight(false);
           const reduxEnd = performance.now();
           console.log(
@@ -1025,7 +1110,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   // Setup pointer-move listener when widget is active
   hooks.useUpdateEffect(() => {
     const view = getCurrentView();
-    if (!view) return;
+    if (!view) {
+      return undefined;
+    }
 
     const isActive =
       runtimeState === WidgetState.Opened ||

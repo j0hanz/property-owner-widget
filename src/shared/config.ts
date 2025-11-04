@@ -18,7 +18,7 @@ const columnHelper = createColumnHelper<GridRowData>();
 
 export const createPropertyTableColumns = (params: {
   translate: (key: string) => string;
-}): Array<ColumnDef<GridRowData, any>> => {
+}): Array<ColumnDef<GridRowData>> => {
   const { translate } = params;
 
   return [

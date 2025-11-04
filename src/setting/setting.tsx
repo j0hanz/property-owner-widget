@@ -6,7 +6,7 @@ import {
   jsx,
   ReactRedux,
   type UseDataSource,
-  type ImmutableObject,
+  type ImmutableArray,
   DataSourceTypes,
   Immutable,
 } from "jimu-core";
@@ -58,6 +58,28 @@ interface FieldErrors {
   [key: string]: string | undefined;
 }
 
+type ImmutableArrayFactory = <T>(values: readonly T[]) => ImmutableArray<T>;
+
+const getImmutableArrayFactory = (): ImmutableArrayFactory =>
+  Immutable as unknown as ImmutableArrayFactory;
+
+function toImmutableArray<T>(values: readonly T[]): ImmutableArray<T> {
+  const factory = getImmutableArrayFactory();
+  return factory(values);
+}
+
+interface MutableAccessor<T> {
+  asMutable?: (options?: { deep?: boolean }) => T;
+}
+
+function hasAsMutable<T>(value: unknown): value is MutableAccessor<T> {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as MutableAccessor<T>;
+  return typeof candidate.asMutable === "function";
+}
+
 const Setting = (
   props: AllWidgetSettingProps<IMConfig>
 ): React.ReactElement => {
@@ -103,38 +125,36 @@ const Setting = (
     );
   };
 
-  const toMutableUseDataSource = (
-    source: ImmutableObject<UseDataSource> | UseDataSource | null
-  ): UseDataSource | null => {
-    if (!source) {
-      return null;
+  const toMutableUseDataSourceArray = (
+    collection?: ImmutableArray<UseDataSource> | UseDataSource[] | null
+  ): UseDataSource[] => {
+    if (!collection) {
+      return [];
     }
-    const asMutable = (source as any).asMutable;
-    if (typeof asMutable === "function") {
-      return asMutable.call(source, { deep: true }) as UseDataSource;
+
+    if (Array.isArray(collection)) {
+      return collection.slice();
     }
-    return source as unknown as UseDataSource;
+
+    if (hasAsMutable<UseDataSource[]>(collection)) {
+      const mutable = collection.asMutable?.({ deep: true });
+      return Array.isArray(mutable) ? mutable : [];
+    }
+
+    return [];
   };
 
   const buildSelectorValue = (dataSourceId?: string) => {
     if (!dataSourceId || !props.useDataSources) {
-      return Immutable([]);
+      return toImmutableArray<UseDataSource>([]);
     }
 
-    const collection = props.useDataSources as any;
-    const matches =
-      typeof collection.filter === "function"
-        ? collection.filter(
-            (ds: UseDataSource) => ds?.dataSourceId === dataSourceId
-          )
-        : [];
+    const collection = toMutableUseDataSourceArray(props.useDataSources);
+    const mutableMatches = collection.filter(
+      (ds) => ds?.dataSourceId === dataSourceId
+    );
 
-    const mutableMatches: UseDataSource[] =
-      typeof matches?.asMutable === "function"
-        ? matches.asMutable({ deep: true })
-        : matches;
-
-    return Immutable(mutableMatches);
+    return toImmutableArray<UseDataSource>(mutableMatches);
   };
 
   const getBooleanConfig = useBooleanConfigValue(config);
@@ -382,12 +402,11 @@ const Setting = (
     (useDataSources: UseDataSource[]) => {
       const selectedDs = useDataSources?.[0] ?? null;
       const propertyId = selectedDs?.dataSourceId ?? "";
-      const ownerSource =
-        ((props.useDataSources as any)?.find?.(
-          (ds: UseDataSource) => ds?.dataSourceId === config.ownerDataSourceId
-        ) as ImmutableObject<UseDataSource> | UseDataSource | undefined) ??
-        null;
-      const ownerMutable = toMutableUseDataSource(ownerSource);
+      const existingSources = toMutableUseDataSourceArray(props.useDataSources);
+      const ownerMutable =
+        existingSources.find(
+          (ds) => ds?.dataSourceId === config.ownerDataSourceId
+        ) ?? null;
       const shouldSyncOwner =
         (!!propertyId && !config.ownerDataSourceId) ||
         (!!propertyId &&
@@ -425,17 +444,12 @@ const Setting = (
     (useDataSources: UseDataSource[]) => {
       const selectedOwner = useDataSources?.[0] ?? null;
       const ownerId = selectedOwner?.dataSourceId ?? "";
+      const existingSources = toMutableUseDataSourceArray(props.useDataSources);
 
-      // Find existing property data source
-      const propertySource =
-        ((props.useDataSources as any)?.find?.(
-          (ds: UseDataSource) =>
-            ds?.dataSourceId === config.propertyDataSourceId
-        ) as ImmutableObject<UseDataSource> | UseDataSource | undefined) ??
-        null;
-
-      // Ensure property source is mutable
-      let propertyMutable = toMutableUseDataSource(propertySource);
+      let propertyMutable =
+        existingSources.find(
+          (ds) => ds?.dataSourceId === config.propertyDataSourceId
+        ) ?? null;
       if (!propertyMutable && config.propertyDataSourceId) {
         propertyMutable = {
           dataSourceId: config.propertyDataSourceId,
@@ -444,7 +458,6 @@ const Setting = (
         } as UseDataSource;
       }
 
-      // Build updated data sources list
       const updatedUseDataSources: UseDataSource[] = [];
       if (propertyMutable) {
         updatedUseDataSources.push(propertyMutable);
@@ -652,7 +665,7 @@ const Setting = (
               )}
             >
               <DataSourceSelector
-                types={Immutable([DataSourceTypes.FeatureLayer])}
+                types={toImmutableArray([DataSourceTypes.FeatureLayer])}
                 useDataSources={propertySelectorValue}
                 mustUseDataSource
                 onChange={handlePropertyDataSourceChange}
@@ -671,7 +684,7 @@ const Setting = (
               )}
             >
               <DataSourceSelector
-                types={Immutable([DataSourceTypes.FeatureLayer])}
+                types={toImmutableArray([DataSourceTypes.FeatureLayer])}
                 useDataSources={ownerSelectorValue}
                 mustUseDataSource
                 onChange={handleOwnerDataSourceChange}

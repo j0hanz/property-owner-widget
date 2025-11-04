@@ -1,18 +1,29 @@
 import type { TelemetryEvent, PerformanceMetric } from "../config/types";
 
+type NavigatorWithPrivacy = Navigator & {
+  globalPrivacyControl?: boolean;
+  msDoNotTrack?: string;
+};
+
+type WindowWithPrivacy = Window & {
+  doNotTrack?: string;
+};
+
 export const isAllowedToTrack = (): boolean => {
   try {
     if (typeof window === "undefined") return false;
 
     // Check Global Privacy Control (GPC) signal first - always honored
-    const gpc = (navigator as any)?.globalPrivacyControl;
-    if (gpc === true) return false;
+    const nav =
+      typeof navigator !== "undefined"
+        ? (navigator as NavigatorWithPrivacy)
+        : undefined;
+    const gpc = nav?.globalPrivacyControl;
+    if (gpc) return false;
 
     // Check Do Not Track signal - always honored
-    const dt =
-      (navigator as any)?.doNotTrack ||
-      (window as any)?.doNotTrack ||
-      (navigator as any)?.msDoNotTrack;
+    const win = window as WindowWithPrivacy;
+    const dt = nav?.doNotTrack ?? win.doNotTrack ?? nav?.msDoNotTrack;
     if (dt === "1" || dt === "yes") return false;
 
     // Check cookie opt-out with proper parsing to avoid cross-domain pollution
@@ -40,6 +51,7 @@ export const trackEvent = (event: TelemetryEvent): void => {
   if (!isAllowedToTrack()) return;
 
   try {
+    void event;
     // Event tracking implementation here (silent)
   } catch (error) {
     // Silent fail for telemetry
@@ -71,16 +83,25 @@ export const trackPerformance = (metric: PerformanceMetric): void => {
 
 export const trackError = (
   operation: string,
-  error: any,
+  error: unknown,
   details?: string
 ): void => {
   if (!isAllowedToTrack()) return;
 
   try {
-    const errorMessage =
-      typeof error === "string"
-        ? error
-        : error?.message || error?.details?.message || "Unknown error";
+    const errorMessage = (() => {
+      if (typeof error === "string") return error;
+      if (error && typeof error === "object") {
+        const withMessage = error as {
+          message?: string;
+          details?: { message?: string };
+        };
+        return (
+          withMessage.message ?? withMessage.details?.message ?? "Unknown error"
+        );
+      }
+      return "Unknown error";
+    })();
 
     trackEvent({
       category: "Error",

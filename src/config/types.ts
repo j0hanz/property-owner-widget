@@ -2,6 +2,16 @@ import type { ImmutableObject, DataSourceManager, IMState } from "jimu-core";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { WidgetStyles } from "./style";
 
+export interface AttributeMap {
+  [key: string]: unknown;
+}
+export type FnrValue = string | number;
+export type NormalizedFnr = string;
+
+export interface SerializedRecord {
+  [key: string]: unknown;
+}
+
 // =============================================================================
 // WIDGET CONFIGURATION
 // Core configuration interface for property widget settings
@@ -62,17 +72,16 @@ export const isFBWebbConfigured = (
 // Property and owner data structures from ArcGIS feature layers
 // =============================================================================
 
-export interface PropertyAttributes {
+export interface PropertyAttributes extends AttributeMap {
   OBJECTID: number;
-  FNR: string | number;
+  FNR: FnrValue;
   UUID_FASTIGHET: string;
   FASTIGHET: string;
-  [key: string]: any;
 }
 
-export interface OwnerAttributes {
+export interface OwnerAttributes extends AttributeMap {
   OBJECTID: number;
-  FNR: string | number;
+  FNR: FnrValue;
   UUID_FASTIGHET: string;
   FASTIGHET: string;
   NAMN?: string;
@@ -82,7 +91,6 @@ export interface OwnerAttributes {
   ANDEL?: string;
   ORGNR?: string;
   AGARLISTA?: string;
-  [key: string]: any;
 }
 
 // =============================================================================
@@ -92,7 +100,7 @@ export interface OwnerAttributes {
 
 export interface GridRowData {
   id: string;
-  FNR: string | number;
+  FNR: FnrValue;
   UUID_FASTIGHET: string;
   FASTIGHET: string;
   BOSTADR: string;
@@ -134,25 +142,25 @@ export interface SelectionGraphicsHelpers {
   addGraphicsToMap: (
     graphic: __esri.Graphic | null | undefined,
     view: __esri.MapView | null | undefined,
-    extractFnr: (attrs: any) => string | number | null,
-    normalizeFnrKey: (fnr: any) => string,
+    extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null,
+    normalizeFnrKey: (fnr: FnrValue | null | undefined) => NormalizedFnr,
     highlightColor: [number, number, number, number],
     outlineWidth: number
   ) => void;
   addManyGraphicsToMap?: (
-    graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>,
+    graphics: Array<{ graphic: __esri.Graphic; fnr: FnrValue }>,
     view: __esri.MapView | null | undefined,
-    extractFnr: (attrs: any) => string | number | null,
-    normalizeFnrKey: (fnr: any) => string,
+    extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null,
+    normalizeFnrKey: (fnr: FnrValue | null | undefined) => NormalizedFnr,
     highlightColor: [number, number, number, number],
     outlineWidth: number
   ) => void;
-  extractFnr: (attrs: any) => string | number | null;
-  normalizeFnrKey: (fnr: any) => string;
+  extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null;
+  normalizeFnrKey: (fnr: FnrValue | null | undefined) => NormalizedFnr;
 }
 
 export interface SelectionGraphicsParams {
-  graphicsToAdd: Array<{ graphic: __esri.Graphic; fnr: string | number }>;
+  graphicsToAdd: Array<{ graphic: __esri.Graphic; fnr: FnrValue }>;
   selectedRows: GridRowData[];
   getCurrentView: () => __esri.MapView | null | undefined;
   helpers: SelectionGraphicsHelpers;
@@ -181,7 +189,7 @@ export interface PropertyWidgetState {
   error: ErrorState | null;
   selectedProperties: GridRowData[];
   isQueryInFlight: boolean;
-  rawPropertyResults: { [key: string]: SerializedQueryResult } | null;
+  rawPropertyResults: SerializedQueryResultMap | null;
 }
 
 export interface IMPropertyGlobalState {
@@ -196,20 +204,24 @@ export interface IMStateWithProperty extends IMState {
 
 export interface QueryResult {
   features: __esri.Graphic[];
-  propertyId: string | number;
+  propertyId: FnrValue;
 }
 
 export interface SerializedQueryFeature {
-  attributes: { [key: string]: any } | null;
-  geometry: { [key: string]: any } | null;
-  aggregateGeometries?: { [key: string]: any } | null;
-  symbol?: { [key: string]: any } | null;
-  popupTemplate?: { [key: string]: any } | null;
+  attributes: SerializedRecord | null;
+  geometry: SerializedRecord | null;
+  aggregateGeometries?: SerializedRecord | null;
+  symbol?: SerializedRecord | null;
+  popupTemplate?: SerializedRecord | null;
 }
 
 export interface SerializedQueryResult {
-  propertyId: string | number;
+  propertyId: FnrValue;
   features: SerializedQueryFeature[];
+}
+
+export interface SerializedQueryResultMap {
+  [key: string]: SerializedQueryResult;
 }
 
 // =============================================================================
@@ -259,7 +271,7 @@ export interface UrlErrors {
 
 export interface ProcessPropertyResult {
   rowsToProcess: GridRowData[];
-  graphicsToAdd: Array<{ graphic: __esri.Graphic; fnr: string | number }>;
+  graphicsToAdd: Array<{ graphic: __esri.Graphic; fnr: FnrValue }>;
 }
 
 export interface TelemetryEvent {
@@ -333,22 +345,22 @@ export function isValidationFailure<T>(
 // =============================================================================
 
 export interface PropertyQueryHelpers {
-  extractFnr: (attrs: unknown) => string | number | null;
+  extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null;
   queryOwnerByFnr: (
-    fnr: string | number,
+    fnr: FnrValue,
     dataSourceId: string,
     dsManager: DataSourceManager,
     options?: { signal?: AbortSignal }
   ) => Promise<__esri.Graphic[]>;
   queryOwnersByRelationship: (
-    propertyFnrs: Array<string | number>,
+    propertyFnrs: FnrValue[],
     propertyDataSourceId: string,
     ownerDataSourceId: string,
     dsManager: DataSourceManager,
     relationshipId: number,
     options?: { signal?: AbortSignal }
   ) => Promise<Map<string, OwnerAttributes[]>>;
-  createRowId: (fnr: string | number, objectId: number) => string;
+  createRowId: (fnr: FnrValue, objectId: number) => string;
   formatPropertyWithShare: (property: string, share?: string) => string;
   formatOwnerInfo: (
     owner: OwnerAttributes,
@@ -383,26 +395,28 @@ export interface BatchQueryConfig extends StandardQueryConfig {
 }
 
 export interface PropertyIndividualQueryParams {
-  readonly propertyResults: any[];
+  readonly propertyResults: QueryResult[];
   readonly config: StandardQueryConfig;
   readonly context: PropertyProcessingContext;
 }
 
 export interface PropertyBatchQueryParams {
-  readonly propertyResults: any[];
+  readonly propertyResults: QueryResult[];
   readonly config: BatchQueryConfig;
   readonly context: PropertyProcessingContext;
 }
 
 export type FlexDirection = "row" | "column";
 
+export type StyleValue = string | number | undefined | StyleObject;
+
 export interface StyleObject {
-  [key: string]: any;
+  [key: string]: StyleValue;
 }
 
 export interface PropertyTableProps {
   data: GridRowData[];
-  columns: Array<ColumnDef<GridRowData, any>>;
+  columns: Array<ColumnDef<GridRowData>>;
   translate: (key: string) => string;
   styles: WidgetStyles;
 }
@@ -425,7 +439,7 @@ export interface CursorGraphicsState {
 }
 
 export interface ProcessPropertyQueryParams {
-  propertyResults: any[];
+  propertyResults: QueryResult[];
   config: {
     propertyDataSourceId: string;
     ownerDataSourceId: string;
@@ -433,10 +447,14 @@ export interface ProcessPropertyQueryParams {
     relationshipId?: number;
     enableBatchOwnerQuery?: boolean;
   };
-  processingContext: any;
+  processingContext: PropertyProcessingContext;
   services: {
-    processBatch: (params: any) => Promise<any>;
-    processIndividual: (params: any) => Promise<any>;
+    processBatch: (
+      params: PropertyBatchQueryParams
+    ) => Promise<ProcessPropertyResult>;
+    processIndividual: (
+      params: PropertyIndividualQueryParams
+    ) => Promise<ProcessPropertyResult>;
   };
 }
 
@@ -462,7 +480,7 @@ export type PropertySelectionPipelineResult =
       rowsToProcess: GridRowData[];
       graphicsToAdd: Array<{
         graphic: __esri.Graphic;
-        fnr: string | number;
+        fnr: FnrValue;
       }>;
       updatedRows: GridRowData[];
       toRemove: Set<string>;
@@ -475,12 +493,12 @@ export interface HoverQueryParams {
     ownerDataSourceId: string;
     allowedHosts?: readonly string[];
   };
-  dsManager: any;
+  dsManager: DataSourceManager | null;
   enablePIIMasking: boolean;
   translate: (key: string) => string;
 }
 
-export type DebouncedFn<T extends (...args: any[]) => void> = ((
+export type DebouncedFn<T extends (...args: unknown[]) => void> = ((
   ...args: Parameters<T>
 ) => void) & {
   cancel: () => void;

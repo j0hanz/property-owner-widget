@@ -40,10 +40,16 @@ import type {
   GridRowData,
   SerializedQueryResult,
   QueryResult,
+  EsriModules,
+  Config,
+  PropertyQueryHelpers,
+  PropertyQueryMessages,
+  PropertyProcessingContext,
 } from "../config/types";
 import { PropertyActionType } from "../extensions/store";
 import type { PropertyAction } from "../extensions/store";
-import { WidgetState, Immutable } from "jimu-core";
+import { WidgetState } from "jimu-core";
+import type { DataSourceManager, FeatureLayerDataSource } from "jimu-core";
 import copyLib from "copy-to-clipboard";
 import { isFBWebbConfigured } from "../config/types";
 
@@ -54,9 +60,29 @@ jest.mock("copy-to-clipboard", () => ({
 
 const copyMock = copyLib as unknown as jest.MockedFunction<typeof copyLib>;
 
+interface MockFeature {
+  attributes: { [key: string]: unknown };
+  geometry?: unknown;
+}
+
+interface MockQueryFeaturesResponse {
+  features: MockFeature[];
+}
+
+interface MockQueryParameters {
+  geometry: unknown;
+  returnGeometry: boolean;
+  outFields: string[];
+  spatialRelationship: string;
+}
+
+type EsriTestStub = (
+  modules: readonly string[]
+) => Partial<EsriModules> | Promise<Partial<EsriModules>>;
+
 const mockFeatureLayerInstances: MockFeatureLayer[] = [];
 let featureLayerCtorCount = 0;
-let mockQueryFeaturesResponse: any = {
+let mockQueryFeaturesResponse: MockQueryFeaturesResponse = {
   features: [
     {
       attributes: {
@@ -72,7 +98,7 @@ let mockQueryFeaturesResponse: any = {
 class MockFeatureLayer {
   url: string;
   destroyed = false;
-  queryFeatures = jest.fn((_query: any) =>
+  queryFeatures = jest.fn((_query: unknown) =>
     Promise.resolve(mockQueryFeaturesResponse)
   );
   destroy = jest.fn(() => {
@@ -87,17 +113,12 @@ class MockFeatureLayer {
 }
 
 class MockQuery {
-  geometry: any;
+  geometry: unknown;
   returnGeometry: boolean;
   outFields: string[];
   spatialRelationship: string;
 
-  constructor(params: {
-    geometry: any;
-    returnGeometry: boolean;
-    outFields: string[];
-    spatialRelationship: string;
-  }) {
+  constructor(params: MockQueryParameters) {
     this.geometry = params.geometry;
     this.returnGeometry = params.returnGeometry;
     this.outFields = params.outFields;
@@ -110,7 +131,7 @@ const resetMockFeatureLayerState = () => {
   mockFeatureLayerInstances.length = 0;
 };
 
-const setMockQueryFeaturesResponse = (response: any) => {
+const setMockQueryFeaturesResponse = (response: MockQueryFeaturesResponse) => {
   mockQueryFeaturesResponse = response;
 };
 
@@ -118,13 +139,183 @@ const getFeatureLayerCtorCount = () => featureLayerCtorCount;
 
 const getMockFeatureLayerInstances = () => mockFeatureLayerInstances;
 
+const createMockFeatureLayerDataSource = (
+  url: string
+): FeatureLayerDataSource =>
+  ({
+    url,
+    getLayerDefinition: () => ({ url }),
+    getDataSourceJson: () => ({ url }),
+    query: jest.fn(),
+  }) as unknown as FeatureLayerDataSource;
+
+const createMockDataSourceManager = (
+  getter: (id: string) => FeatureLayerDataSource | null
+): DataSourceManager =>
+  ({
+    getDataSource: getter,
+  }) as unknown as DataSourceManager;
+
+interface MockGraphicInput {
+  attributes: { [key: string]: unknown };
+  geometry?: unknown;
+  symbol?: unknown;
+  popupTemplate?: unknown;
+}
+
+const createMockGraphic = (input: MockGraphicInput): __esri.Graphic =>
+  ({
+    attributes: input.attributes,
+    geometry: input.geometry ?? null,
+    symbol: input.symbol ?? null,
+    popupTemplate: input.popupTemplate ?? null,
+  }) as unknown as __esri.Graphic;
+
+const createMockPoint = (
+  x: number,
+  y: number,
+  spatialReference?: { wkid: number }
+): __esri.Point =>
+  ({
+    x,
+    y,
+    spatialReference,
+  }) as unknown as __esri.Point;
+
+type GraphicsLayerMock = __esri.GraphicsLayer & {
+  add: jest.Mock;
+  remove: jest.Mock;
+};
+
+const createMockGraphicsLayer = (): GraphicsLayerMock =>
+  ({
+    add: jest.fn(),
+    remove: jest.fn(),
+  }) as unknown as GraphicsLayerMock;
+
+const createBaseConfig = (overrides: Partial<Config> = {}): Config => ({
+  propertyDataSourceId: "property",
+  ownerDataSourceId: "owner",
+  displayColumns: [],
+  maxResults: 100,
+  enableToggleRemoval: true,
+  enablePIIMasking: true,
+  enableBatchOwnerQuery: false,
+  ...overrides,
+});
+
+interface MockTextSymbolProps {
+  text?: string;
+  color?: string;
+  haloColor?: string;
+  haloSize?: number;
+  xoffset?: number;
+  yoffset?: number;
+  font?: __esri.FontProperties;
+  backgroundColor?: string;
+  horizontalAlignment?: __esri.TextSymbolProperties["horizontalAlignment"];
+  verticalAlignment?: __esri.TextSymbolProperties["verticalAlignment"];
+  lineWidth?: number;
+  lineHeight?: number;
+  kerning?: boolean;
+}
+
+class MockTextSymbol {
+  text?: string;
+  color?: string;
+  haloColor?: string;
+  haloSize?: number;
+  xoffset?: number;
+  yoffset?: number;
+  font?: __esri.FontProperties;
+  backgroundColor?: string;
+  horizontalAlignment?: __esri.TextSymbolProperties["horizontalAlignment"];
+  verticalAlignment?: __esri.TextSymbolProperties["verticalAlignment"];
+  lineWidth?: number;
+  lineHeight?: number;
+  kerning?: boolean;
+
+  constructor(props: MockTextSymbolProps) {
+    Object.assign(this, props);
+  }
+}
+
+interface MockGraphicProps {
+  geometry?: __esri.Geometry | null;
+  symbol?: unknown;
+}
+
+class MockGraphic {
+  geometry: __esri.Geometry | null;
+  symbol: unknown;
+
+  constructor(props: MockGraphicProps) {
+    this.geometry = props.geometry ?? null;
+    this.symbol = props.symbol ?? null;
+  }
+}
+
+interface MockSimpleMarkerSymbolProps {
+  style?: string;
+  size?: number;
+  color?: [number, number, number, number];
+  outline?: {
+    color?: [number, number, number, number];
+    width?: number;
+  };
+}
+
+class MockSimpleMarkerSymbol {
+  style?: string;
+  size?: number;
+  color?: [number, number, number, number];
+  outline?: {
+    color?: [number, number, number, number];
+    width?: number;
+  };
+
+  constructor(props: MockSimpleMarkerSymbolProps) {
+    this.style = props.style;
+    this.size = props.size;
+    this.color = props.color;
+    this.outline = props.outline;
+  }
+}
+
+const createMockEsriModules = (
+  overrides: Partial<EsriModules> = {}
+): EsriModules => ({
+  SimpleFillSymbol: jest.fn() as unknown as EsriModules["SimpleFillSymbol"],
+  SimpleLineSymbol: jest.fn() as unknown as EsriModules["SimpleLineSymbol"],
+  SimpleMarkerSymbol:
+    MockSimpleMarkerSymbol as unknown as EsriModules["SimpleMarkerSymbol"],
+  TextSymbol: MockTextSymbol as unknown as EsriModules["TextSymbol"],
+  Graphic: MockGraphic as unknown as EsriModules["Graphic"],
+  GraphicsLayer: jest.fn() as unknown as EsriModules["GraphicsLayer"],
+  Extent: jest.fn() as unknown as EsriModules["Extent"],
+  ...overrides,
+});
+
+interface FeatureCollectionLike {
+  type: string;
+  features: Array<{
+    geometry: { type: string; [key: string]: unknown };
+    properties: { [key: string]: unknown };
+  }>;
+}
+
+type MutableURL = typeof URL & {
+  createObjectURL?: (blob: Blob) => string;
+  revokeObjectURL?: (url: string) => void;
+};
+
 jest.mock("jimu-arcgis", () => ({
   loadArcGISJSAPIModules: jest.fn((modules: string[]) => {
     return Promise.resolve(
       modules.map((moduleId) => {
         if (moduleId === "esri/core/promiseUtils") {
           return {
-            eachAlways: (promises: Array<Promise<any>>) =>
+            eachAlways: (promises: Array<Promise<unknown>>) =>
               Promise.all(
                 promises.map((promise) =>
                   promise
@@ -146,13 +337,10 @@ jest.mock("jimu-arcgis", () => ({
   }),
 }));
 
-// Mock DOMParser for HTML stripping tests
-(globalThis as any).DOMParser = class DOMParser {
-  parseFromString(str: string) {
-    // Simple HTML tag removal and entity decoding for test purposes
+class MockDOMParser {
+  parseFromString(str: string, _type?: DOMParserSupportedType): Document {
     let text = str;
-    // Decode common HTML entities first
-    const entities: { [key: string]: string } = {
+    const entities: { [entity: string]: string } = {
       "&lt;": "<",
       "&gt;": ">",
       "&amp;": "&",
@@ -162,22 +350,33 @@ jest.mock("jimu-arcgis", () => ({
     for (const [entity, char] of Object.entries(entities)) {
       text = text.replace(new RegExp(entity, "g"), char);
     }
-    // Remove HTML tags (including malformed ones) - keep stripping until no more tags
     let prevText = "";
     while (prevText !== text) {
       prevText = text;
       text = text.replace(/<[^>]*>/g, "");
     }
-    return {
+    const documentLike = {
       body: {
         textContent: text,
       },
     };
+    return documentLike as unknown as Document;
   }
+}
+
+type DomParserConstructor = new () => {
+  parseFromString: (string: string, type?: DOMParserSupportedType) => Document;
 };
 
-// Mock globalThis for test stub
-(globalThis as any).__ESRI_TEST_STUB__ = jest.fn();
+const domParserGlobal = globalThis as typeof globalThis & {
+  DOMParser: DomParserConstructor;
+};
+domParserGlobal.DOMParser = MockDOMParser as unknown as DomParserConstructor;
+
+const esriStubGlobal = globalThis as typeof globalThis & {
+  __ESRI_TEST_STUB__?: jest.MockedFunction<EsriTestStub>;
+};
+esriStubGlobal.__ESRI_TEST_STUB__ = jest.fn();
 
 describe("Property Widget - SQL Injection Protection", () => {
   it("should sanitize apostrophes in string FNR", () => {
@@ -558,29 +757,23 @@ describe("Property Widget - URL Validation", () => {
 describe("Property Widget - Data Source Validation", () => {
   const translate = (key: string) => key;
 
-  const createMockDataSource = (url: string) => ({
-    getLayerDefinition: () => ({ url }),
-    getDataSourceJson: () => ({ url }),
-    query: jest.fn(),
-  });
-
   it("should reject data sources on disallowed hosts", () => {
-    const manager = {
-      getDataSource: jest.fn((id: string) => {
-        if (id === "property")
-          return createMockDataSource("https://evil.com/MapServer/0");
-        if (id === "owner")
-          return createMockDataSource(
-            "https://services.arcgis.com/test/arcgis/rest/services/Owners/MapServer/0"
-          );
-        return null;
-      }),
-    };
+    const manager = createMockDataSourceManager((id) => {
+      if (id === "property") {
+        return createMockFeatureLayerDataSource("https://evil.com/MapServer/0");
+      }
+      if (id === "owner") {
+        return createMockFeatureLayerDataSource(
+          "https://services.arcgis.com/test/arcgis/rest/services/Owners/MapServer/0"
+        );
+      }
+      return null;
+    });
 
     const result = validateDataSources({
       propertyDsId: "property",
       ownerDsId: "owner",
-      dsManager: manager as any,
+      dsManager: manager,
       allowedHosts: ["arcgis.com"],
       translate,
     });
@@ -598,18 +791,16 @@ describe("Property Widget - Data Source Validation", () => {
   });
 
   it("should accept data sources on allowed hosts", () => {
-    const manager = {
-      getDataSource: jest.fn(() =>
-        createMockDataSource(
-          "https://services.arcgis.com/test/arcgis/rest/services/Test/MapServer/0"
-        )
-      ),
-    };
+    const manager = createMockDataSourceManager(() =>
+      createMockFeatureLayerDataSource(
+        "https://services.arcgis.com/test/arcgis/rest/services/Test/MapServer/0"
+      )
+    );
 
     const result = validateDataSources({
       propertyDsId: "property",
       ownerDsId: "owner",
-      dsManager: manager as any,
+      dsManager: manager,
       allowedHosts: ["arcgis.com"],
       translate,
     });
@@ -618,18 +809,16 @@ describe("Property Widget - Data Source Validation", () => {
   });
 
   it("should reject non-HTTPS data sources when allowlist is empty", () => {
-    const manager = {
-      getDataSource: jest.fn(() =>
-        createMockDataSource(
-          "http://services.arcgis.com/test/arcgis/rest/services/Test/MapServer/0"
-        )
-      ),
-    };
+    const manager = createMockDataSourceManager(() =>
+      createMockFeatureLayerDataSource(
+        "http://services.arcgis.com/test/arcgis/rest/services/Test/MapServer/0"
+      )
+    );
 
     const result = validateDataSources({
       propertyDsId: "property",
       ownerDsId: "owner",
-      dsManager: manager as any,
+      dsManager: manager,
       allowedHosts: [],
       translate,
     });
@@ -740,7 +929,7 @@ describe("Property Widget - Edge Cases", () => {
       UUID_FASTIGHET: "uuid",
       FASTIGHET: "Test",
       NAMN: undefined,
-      BOSTADR: null as any,
+      BOSTADR: null as unknown as string,
     };
     const result = formatOwnerInfo(owner, true, "Unknown owner");
     expect(result).toBeDefined();
@@ -811,49 +1000,68 @@ describe("Property Widget - Owner Deduplication", () => {
     ANDEL: "1/1",
   };
 
-  it("should deduplicate owner records when querying individually", async () => {
-    const propertyGraphic = {
-      attributes: {
-        FNR: "123",
-        OBJECTID: 1,
-        UUID_FASTIGHET: "uuid-123",
-        FASTIGHET: "Property 1",
-      },
-      geometry: {},
-    } as any;
+  const extractFnrHelper: PropertyQueryHelpers["extractFnr"] = (attrs) => {
+    const value = attrs?.FNR;
+    return typeof value === "string" || typeof value === "number"
+      ? value
+      : null;
+  };
 
-    const duplicateOwnerGraphic = {
+  const createMessages = (): PropertyQueryMessages => ({
+    unknownOwner: "Unknown",
+    errorOwnerQueryFailed: "Owner query failed",
+    errorNoDataAvailable: "No data",
+  });
+
+  it("should deduplicate owner records when querying individually", async () => {
+    const propertyResult: QueryResult = {
+      propertyId: "123",
+      features: [
+        createMockGraphic({
+          attributes: {
+            FNR: "123",
+            OBJECTID: 1,
+            UUID_FASTIGHET: "uuid-123",
+            FASTIGHET: "Property 1",
+          },
+          geometry: {},
+        }),
+      ],
+    };
+
+    const duplicateOwnerGraphic = createMockGraphic({
       attributes: { ...baseOwnerAttributes },
-    } as any;
+    });
+    const additionalOwnerGraphic = createMockGraphic({
+      attributes: { ...baseOwnerAttributes, OBJECTID: 11 },
+    });
+
+    const helpers: PropertyQueryHelpers = {
+      extractFnr: extractFnrHelper,
+      queryOwnerByFnr: () =>
+        Promise.resolve([duplicateOwnerGraphic, additionalOwnerGraphic]),
+      queryOwnersByRelationship: () =>
+        Promise.resolve(new Map<string, OwnerAttributes[]>()),
+      createRowId,
+      formatPropertyWithShare,
+      formatOwnerInfo,
+      isAbortError,
+    };
+
+    const context: PropertyProcessingContext = {
+      dsManager: createMockDataSourceManager(() => null),
+      maxResults: 10,
+      helpers,
+      messages: createMessages(),
+    };
 
     const result = await propertyQueryService.processIndividual({
-      propertyResults: [{ features: [propertyGraphic] }],
+      propertyResults: [propertyResult],
       config: {
         ownerDataSourceId: "owner",
         enablePIIMasking: false,
       },
-      context: {
-        dsManager: {} as any,
-        maxResults: 10,
-        helpers: {
-          extractFnr: (attrs: any) => attrs?.FNR ?? null,
-          queryOwnerByFnr: () =>
-            Promise.resolve([
-              duplicateOwnerGraphic,
-              { attributes: { ...baseOwnerAttributes, OBJECTID: 11 } } as any,
-            ]),
-          queryOwnersByRelationship: () => Promise.resolve(new Map()),
-          createRowId,
-          formatPropertyWithShare,
-          formatOwnerInfo,
-          isAbortError,
-        },
-        messages: {
-          unknownOwner: "Unknown",
-          errorOwnerQueryFailed: "Owner query failed",
-          errorNoDataAvailable: "No data",
-        },
-      },
+      context,
     });
 
     expect(result.rowsToProcess).toHaveLength(1);
@@ -861,49 +1069,54 @@ describe("Property Widget - Owner Deduplication", () => {
   });
 
   it("should deduplicate owner records when using batch relationship queries", async () => {
-    const propertyGraphic = {
-      attributes: {
-        FNR: "123",
-        OBJECTID: 1,
-        UUID_FASTIGHET: "uuid-123",
-        FASTIGHET: "Property 1",
-      },
-      geometry: {},
-    } as any;
+    const propertyResult: QueryResult = {
+      propertyId: "123",
+      features: [
+        createMockGraphic({
+          attributes: {
+            FNR: "123",
+            OBJECTID: 1,
+            UUID_FASTIGHET: "uuid-123",
+            FASTIGHET: "Property 1",
+          },
+          geometry: {},
+        }),
+      ],
+    };
 
-    const ownersMap = new Map<string, any[]>([
+    const ownersMap = new Map<string, OwnerAttributes[]>([
       [
         "123",
         [{ ...baseOwnerAttributes }, { ...baseOwnerAttributes, OBJECTID: 11 }],
       ],
     ]);
 
+    const helpers: PropertyQueryHelpers = {
+      extractFnr: extractFnrHelper,
+      queryOwnerByFnr: () => Promise.resolve([]),
+      queryOwnersByRelationship: () => Promise.resolve(ownersMap),
+      createRowId,
+      formatPropertyWithShare,
+      formatOwnerInfo,
+      isAbortError,
+    };
+
+    const context: PropertyProcessingContext = {
+      dsManager: createMockDataSourceManager(() => null),
+      maxResults: 10,
+      helpers,
+      messages: createMessages(),
+    };
+
     const result = await propertyQueryService.processBatch({
-      propertyResults: [{ features: [propertyGraphic] }],
+      propertyResults: [propertyResult],
       config: {
         propertyDataSourceId: "property",
         ownerDataSourceId: "owner",
         enablePIIMasking: false,
         relationshipId: 0,
       },
-      context: {
-        dsManager: {} as any,
-        maxResults: 10,
-        helpers: {
-          extractFnr: (attrs: any) => attrs?.FNR ?? null,
-          queryOwnerByFnr: () => Promise.resolve([]),
-          queryOwnersByRelationship: () => Promise.resolve(ownersMap),
-          createRowId,
-          formatPropertyWithShare,
-          formatOwnerInfo,
-          isAbortError,
-        },
-        messages: {
-          unknownOwner: "Unknown",
-          errorOwnerQueryFailed: "Owner query failed",
-          errorNoDataAvailable: "No data",
-        },
-      },
+      context,
     });
 
     expect(result.rowsToProcess).toHaveLength(1);
@@ -1002,23 +1215,7 @@ describe("Property Widget - Utility Helper Functions", () => {
   });
 
   it("should sanitize tooltip content when building text symbols", () => {
-    class MockTextSymbol {
-      text: string;
-      color: string;
-      haloColor: string;
-      haloSize: number;
-      xoffset: number;
-      yoffset: number;
-      font: __esri.FontProperties;
-
-      constructor(props: any) {
-        Object.assign(this, props);
-      }
-    }
-
-    const modules = {
-      TextSymbol: MockTextSymbol,
-    } as any;
+    const modules = createMockEsriModules();
 
     const symbol = buildTooltipSymbol(
       modules,
@@ -1037,9 +1234,10 @@ describe("Property Widget - Utility Helper Functions", () => {
   });
 
   it("should map property query results to each owner row for export", () => {
-    const propertyResult = {
+    const propertyResult: QueryResult = {
+      propertyId: "123",
       features: [
-        {
+        createMockGraphic({
           attributes: {
             FNR: "123",
             OBJECTID: 42,
@@ -1047,7 +1245,7 @@ describe("Property Widget - Utility Helper Functions", () => {
             FASTIGHET: "Property 1",
           },
           geometry: {},
-        },
+        }),
       ],
     };
 
@@ -1070,14 +1268,14 @@ describe("Property Widget - Utility Helper Functions", () => {
     const updated = updateRawPropertyResults(
       new Map(),
       [ownerRowA, ownerRowB],
-      [propertyResult as unknown as QueryResult],
+      [propertyResult],
       new Set(),
       [],
       normalizeFnrKey
     );
 
     const expectedSerialized = {
-      propertyId: "",
+      propertyId: "123",
       features: [
         {
           attributes: {
@@ -1141,34 +1339,9 @@ describe("Property Widget - Utility Helper Functions", () => {
   });
 
   it("should create and clear cursor graphics through sync helper", () => {
-    class MockTextSymbol {
-      text: string;
-      constructor(props: any) {
-        this.text = props.text;
-      }
-    }
-
-    class MockGraphic {
-      geometry: any;
-      symbol: any;
-
-      constructor(props: any) {
-        this.geometry = props.geometry;
-        this.symbol = props.symbol;
-      }
-    }
-
-    const modules = {
-      Graphic: MockGraphic,
-      TextSymbol: MockTextSymbol,
-    } as any;
-
-    const layer = {
-      add: jest.fn(),
-      remove: jest.fn(),
-    } as any;
-
-    const mapPoint = { x: 1, y: 2 } as any;
+    const modules = createMockEsriModules();
+    const layer = createMockGraphicsLayer();
+    const mapPoint = createMockPoint(1, 2);
     const highlightColor: [number, number, number, number] = [0, 180, 216, 0.4];
 
     const state = syncCursorGraphics({
@@ -1190,9 +1363,9 @@ describe("Property Widget - Utility Helper Functions", () => {
     expect(state.pointGraphic).toBeInstanceOf(MockGraphic);
     expect(state.tooltipGraphic).toBeInstanceOf(MockGraphic);
     expect(state.tooltipGraphic?.symbol).toBeInstanceOf(MockTextSymbol);
-    expect((state.tooltipGraphic?.symbol as MockTextSymbol).text).toBe(
-      "FAST-1"
-    );
+    expect(
+      (state.tooltipGraphic?.symbol as unknown as MockTextSymbol).text
+    ).toBe("FAST-1");
     expect(state.lastTooltipText).toBe("<em>FAST-1</em>");
 
     const clearedState = syncCursorGraphics({
@@ -1211,34 +1384,10 @@ describe("Property Widget - Utility Helper Functions", () => {
   });
 
   it("should only update symbol when tooltip text changes (performance optimization)", () => {
-    class MockTextSymbol {
-      text: string;
-      constructor(props: any) {
-        this.text = props.text;
-      }
-    }
-
-    class MockGraphic {
-      geometry: any;
-      symbol: any;
-      constructor(props: any) {
-        this.geometry = props.geometry;
-        this.symbol = props.symbol;
-      }
-    }
-
-    const modules = {
-      Graphic: MockGraphic,
-      TextSymbol: MockTextSymbol,
-    } as any;
-
-    const layer = {
-      add: jest.fn(),
-      remove: jest.fn(),
-    } as any;
-
-    const mapPoint1 = { x: 1, y: 2 } as any;
-    const mapPoint2 = { x: 3, y: 4 } as any;
+    const modules = createMockEsriModules();
+    const layer = createMockGraphicsLayer();
+    const mapPoint1 = createMockPoint(1, 2);
+    const mapPoint2 = createMockPoint(3, 4);
     const highlightColor: [number, number, number, number] = [0, 180, 216, 0.4];
 
     // Initial render with tooltip
@@ -1286,9 +1435,9 @@ describe("Property Widget - Utility Helper Functions", () => {
 
     expect(state3?.lastTooltipText).toBe("Property B");
     expect(state3?.tooltipGraphic?.symbol).not.toBe(originalSymbol); // New symbol created
-    expect((state3?.tooltipGraphic?.symbol as MockTextSymbol).text).toBe(
-      "Property B"
-    );
+    expect(
+      (state3?.tooltipGraphic?.symbol as unknown as MockTextSymbol).text
+    ).toBe("Property B");
   });
 });
 
@@ -1509,19 +1658,19 @@ describe("FBWebb utilities", () => {
   });
 
   it("should detect configured FBWebb settings", () => {
-    const configured = Immutable({
+    const configured = createBaseConfig({
       fbwebbBaseUrl: baseUrl,
       fbwebbUser: "user",
       fbwebbPassword: "pass",
       fbwebbDatabase: "Lund",
-    }) as any;
+    });
 
-    const missing = Immutable({
+    const missing = createBaseConfig({
       fbwebbBaseUrl: baseUrl,
       fbwebbUser: "",
       fbwebbPassword: "",
       fbwebbDatabase: "",
-    }) as any;
+    });
 
     expect(isFBWebbConfigured(configured)).toBe(true);
     expect(isFBWebbConfigured(missing)).toBe(false);
@@ -1583,10 +1732,8 @@ describe("Query Controls", () => {
     ],
   });
 
-  const createMockDsManager = (url: string) =>
-    ({
-      getDataSource: jest.fn(() => ({ url })),
-    }) as any;
+  const createMockDsManager = (url: string): DataSourceManager =>
+    createMockDataSourceManager(() => createMockFeatureLayerDataSource(url));
 
   beforeEach(() => {
     resetMockFeatureLayerState();
@@ -1602,7 +1749,7 @@ describe("Query Controls", () => {
     const dsManager = createMockDsManager(
       "https://example.com/arcgis/rest/services/Parcels/MapServer/0"
     );
-    const point: any = { x: 10, y: 20, spatialReference: { wkid: 3006 } };
+    const point = createMockPoint(10, 20, { wkid: 3006 });
 
     await queryPropertyByPoint(point, "property", dsManager);
     expect(getFeatureLayerCtorCount()).toBe(1);
@@ -1621,7 +1768,7 @@ describe("Query Controls", () => {
     const dsManager = createMockDsManager(
       "https://example.com/arcgis/rest/services/Parcels/MapServer/0"
     );
-    const point: any = { x: 0, y: 0, spatialReference: { wkid: 3006 } };
+    const point = createMockPoint(0, 0, { wkid: 3006 });
 
     const firstResult = await queryPropertyByPoint(
       point,
@@ -1643,7 +1790,7 @@ describe("Query Controls", () => {
     const dsManager = createMockDsManager(
       "https://example.com/arcgis/rest/services/Parcels/MapServer/0"
     );
-    const point: any = { x: 5, y: 15, spatialReference: { wkid: 3006 } };
+    const point = createMockPoint(5, 15, { wkid: 3006 });
 
     await queryPropertyByPoint(point, "property", dsManager);
     const cachedInstancesBeforeClear = getMockFeatureLayerInstances().slice();
@@ -1760,14 +1907,16 @@ describe("Export Utilities - GeoJSON", () => {
       geometryType: "polygon",
     };
 
-    const geojson = convertToGeoJSON([polygonRow]) as any;
+    const geojson = convertToGeoJSON([
+      polygonRow,
+    ]) as unknown as FeatureCollectionLike;
     expect(geojson.features).toHaveLength(1);
     expect(geojson.features[0].geometry.type).toBe("Polygon");
   });
 
   it("should skip rows without geometry", () => {
     const rows: GridRowData[] = [{ ...baseRow }];
-    const geojson = convertToGeoJSON(rows) as any;
+    const geojson = convertToGeoJSON(rows) as unknown as FeatureCollectionLike;
     expect(geojson.features).toHaveLength(0);
   });
 
@@ -1777,7 +1926,9 @@ describe("Export Utilities - GeoJSON", () => {
       geometryType: "point",
     };
 
-    const geojson = convertToGeoJSON([rowWithHtml]) as any;
+    const geojson = convertToGeoJSON([
+      rowWithHtml,
+    ]) as unknown as FeatureCollectionLike;
     expect(geojson.features[0].properties.FASTIGHET).toBe("Geo property");
     expect(geojson.features[0].properties.BOSTADR).toBe("Geo owner");
   });
@@ -1785,7 +1936,12 @@ describe("Export Utilities - GeoJSON", () => {
 
 describe("Export Utilities - exportData", () => {
   it("should trigger download flow and revoke object URL", () => {
-    const rawData = [{ id: 1 }];
+    const rawData: SerializedQueryResult[] = [
+      {
+        propertyId: "789",
+        features: [],
+      },
+    ];
     const rows: GridRowData[] = [
       {
         id: "row-export",
@@ -1798,8 +1954,9 @@ describe("Export Utilities - exportData", () => {
 
     jest.useFakeTimers();
 
-    const originalCreateObjectURL = (global.URL as any)?.createObjectURL;
-    const originalRevokeObjectURL = (global.URL as any)?.revokeObjectURL;
+    const urlGlobal = global.URL as MutableURL;
+    const originalCreateObjectURL = urlGlobal.createObjectURL;
+    const originalRevokeObjectURL = urlGlobal.revokeObjectURL;
 
     const createObjectURL = jest.fn(() => "blob:mock");
     const revokeObjectURL = jest.fn();
@@ -1824,12 +1981,14 @@ describe("Export Utilities - exportData", () => {
 
     const createElementSpy = jest
       .spyOn(document, "createElement")
-      .mockImplementation((tagName: string, options?: any) => {
-        if (tagName.toLowerCase() === "a") {
-          return anchorElement;
+      .mockImplementation(
+        (tagName: string, options?: ElementCreationOptions) => {
+          if (tagName.toLowerCase() === "a") {
+            return anchorElement;
+          }
+          return originalCreateElement(tagName, options);
         }
-        return originalCreateElement(tagName, options);
-      });
+      );
 
     const definition = {
       id: "json" as const,
@@ -1863,7 +2022,7 @@ describe("Export Utilities - exportData", () => {
           value: originalCreateObjectURL,
         });
       } else {
-        delete (global.URL as any).createObjectURL;
+        delete urlGlobal.createObjectURL;
       }
 
       if (originalRevokeObjectURL) {
@@ -1873,7 +2032,7 @@ describe("Export Utilities - exportData", () => {
           value: originalRevokeObjectURL,
         });
       } else {
-        delete (global.URL as any).revokeObjectURL;
+        delete urlGlobal.revokeObjectURL;
       }
       appendChildSpy.mockRestore();
       removeChildSpy.mockRestore();

@@ -7,6 +7,7 @@ import type {
   IMStateWithProperty,
   PropertyWidgetState,
   SerializedQueryResult,
+  SerializedQueryResultMap,
 } from "../config/types";
 
 export enum PropertyActionType {
@@ -96,27 +97,25 @@ export const propertyActions = {
   }),
 };
 
-const resolveImmutableFactory = () => {
-  const candidate = SeamlessImmutableNs as unknown;
+type SeamlessImmutableFactory = <T>(
+  input: T
+) => SeamlessImmutableNs.Immutable<T>;
 
-  if (typeof candidate === "function") {
-    return candidate as (input: any) => any;
-  }
-
-  const candidateObj = candidate as {
-    default?: (input: any) => any;
-    Immutable?: (input: any) => any;
+const resolveImmutableFactory = (): SeamlessImmutableFactory => {
+  const candidate = SeamlessImmutableNs as {
+    default?: SeamlessImmutableFactory;
+    Immutable?: SeamlessImmutableFactory;
   };
 
-  if (candidateObj && typeof candidateObj.default === "function") {
-    return candidateObj.default;
+  if (typeof candidate.default === "function") {
+    return candidate.default;
   }
 
-  if (candidateObj && typeof candidateObj.Immutable === "function") {
-    return candidateObj.Immutable;
+  if (typeof candidate.Immutable === "function") {
+    return candidate.Immutable;
   }
 
-  return <T>(input: T): T => input;
+  return <T>(input: T) => input as SeamlessImmutableNs.Immutable<T>;
 };
 
 const Immutable = resolveImmutableFactory();
@@ -139,9 +138,7 @@ const ensureSubState = (
   global: IMPropertyGlobalState,
   widgetId: string
 ): ImmutableObject<PropertyWidgetState> => {
-  const current = (global as any).byId?.[widgetId] as
-    | ImmutableObject<PropertyWidgetState>
-    | undefined;
+  const current = global.byId?.[widgetId];
   return current ?? createImmutableState();
 };
 
@@ -150,8 +147,10 @@ const setSubState = (
   widgetId: string,
   next: ImmutableObject<PropertyWidgetState>
 ): IMPropertyGlobalState => {
-  const byId = { ...((global as any).byId || {}) };
-  byId[widgetId] = next;
+  const byId = {
+    ...global.byId,
+    [widgetId]: next,
+  };
   return Immutable({ byId }) as unknown as IMPropertyGlobalState;
 };
 
@@ -194,9 +193,7 @@ const propertyReducer = (
   if (!isPropertyAction(action)) return state;
 
   if (action.type === PropertyActionType.REMOVE_WIDGET_STATE) {
-    const currentById = (state as any)?.byId;
-    if (!currentById || typeof currentById !== "object") return state;
-    const byId = { ...currentById };
+    const byId = { ...state.byId };
     if (!(action.widgetId in byId)) return state;
     delete byId[action.widgetId];
     return Immutable({ byId }) as unknown as IMPropertyGlobalState;
@@ -212,6 +209,59 @@ const propertyReducer = (
 };
 
 export const createPropertySelectors = (widgetId: string) => {
+  interface MutableAccessor {
+    asMutable?: (options?: { deep?: boolean }) => unknown;
+  }
+
+  const hasAsMutable = (value: unknown): value is MutableAccessor => {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+    const candidate = value as { asMutable?: unknown };
+    return typeof candidate.asMutable === "function";
+  };
+
+  const toUnknownArray = (value: unknown): unknown[] => {
+    if (!value) {
+      return [];
+    }
+
+    if (Array.isArray(value)) {
+      return value.slice();
+    }
+
+    if (hasAsMutable(value)) {
+      const mutable = value.asMutable?.({ deep: true });
+      return Array.isArray(mutable) ? mutable.slice() : [];
+    }
+
+    return [];
+  };
+
+  const toGridRowArray = (value: unknown): GridRowData[] => {
+    const items = toUnknownArray(value);
+    return items.filter((item): item is GridRowData => {
+      return !!item && typeof item === "object";
+    });
+  };
+
+  const toSerializedResultMap = (
+    value: unknown
+  ): SerializedQueryResultMap | null => {
+    if (!value || typeof value !== "object") {
+      return null;
+    }
+
+    if (hasAsMutable(value)) {
+      const mutable = value.asMutable?.({ deep: true });
+      return mutable && typeof mutable === "object"
+        ? (mutable as SerializedQueryResultMap)
+        : null;
+    }
+
+    return value as SerializedQueryResultMap;
+  };
+
   const getSlice = (
     state: IMStateWithProperty
   ): ImmutableObject<PropertyWidgetState> | null => {
@@ -223,11 +273,11 @@ export const createPropertySelectors = (widgetId: string) => {
     selectSlice: getSlice,
     selectError: (state: IMStateWithProperty) => getSlice(state)?.error ?? null,
     selectSelectedProperties: (state: IMStateWithProperty) =>
-      getSlice(state)?.selectedProperties ?? [],
+      toGridRowArray(getSlice(state)?.selectedProperties),
     selectIsQueryInFlight: (state: IMStateWithProperty) =>
       getSlice(state)?.isQueryInFlight ?? false,
     selectRawResults: (state: IMStateWithProperty) =>
-      getSlice(state)?.rawPropertyResults ?? null,
+      toSerializedResultMap(getSlice(state)?.rawPropertyResults),
   };
 };
 

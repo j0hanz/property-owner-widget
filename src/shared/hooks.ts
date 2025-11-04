@@ -1,9 +1,12 @@
 import { React, hooks } from "jimu-core";
 import { loadArcGISJSAPIModules } from "jimu-arcgis";
+import type { JimuMapView } from "jimu-arcgis";
 import type {
+  AttributeMap,
   EsriModules,
   HoverQueryParams,
   DebouncedFn,
+  FnrValue,
 } from "../config/types";
 import {
   ESRI_MODULES_TO_LOAD,
@@ -16,22 +19,78 @@ import {
   logger,
 } from "./utils";
 
+interface ConfigDictionary {
+  readonly [key: string]: unknown;
+}
+
+interface ConfigWithSet<T> {
+  readonly set: (key: string, value: unknown) => T;
+}
+
+const isConfigDictionary = (value: unknown): value is ConfigDictionary => {
+  return typeof value === "object" && value !== null;
+};
+
+const hasConfigSet = <T>(value: unknown): value is ConfigWithSet<T> => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as { set?: unknown };
+  return typeof candidate.set === "function";
+};
+
+type ConfigUpdater = (key: string, value: unknown) => void;
+
+interface EsriStubGlobal {
+  __ESRI_TEST_STUB__?: (
+    modules: readonly string[]
+  ) => EsriModules | Promise<EsriModules> | Partial<EsriModules>;
+}
+
+const isConstructor = (
+  value: unknown
+): value is new (...args: never[]) => unknown => typeof value === "function";
+
+const isEsriModules = (candidate: unknown): candidate is EsriModules => {
+  if (!candidate || typeof candidate !== "object") {
+    return false;
+  }
+
+  const modules = candidate as Partial<EsriModules>;
+  return (
+    isConstructor(modules.SimpleFillSymbol) &&
+    isConstructor(modules.SimpleLineSymbol) &&
+    isConstructor(modules.SimpleMarkerSymbol) &&
+    isConstructor(modules.TextSymbol) &&
+    isConstructor(modules.Graphic) &&
+    isConstructor(modules.GraphicsLayer) &&
+    isConstructor(modules.Extent)
+  );
+};
+
+const isMapView = (
+  view: __esri.MapView | __esri.SceneView | undefined
+): view is __esri.MapView => view?.type === "2d";
+
 export const useEsriModules = () => {
   const [modules, setModules] = React.useState<EsriModules | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<Error | null>(null);
 
   hooks.useEffectOnce(() => {
-    const stubLoader = (globalThis as any)?.__ESRI_TEST_STUB__;
+    const stubLoader = (globalThis as EsriStubGlobal).__ESRI_TEST_STUB__;
     if (typeof stubLoader === "function") {
       (async () => {
         try {
           const stubModules = await Promise.resolve(
             stubLoader(ESRI_MODULES_TO_LOAD)
           );
-          setModules(stubModules as EsriModules);
+          if (!isEsriModules(stubModules)) {
+            throw new Error("Invalid Esri module stub");
+          }
+          setModules(stubModules);
         } catch (err) {
-          setError(err as Error);
+          setError(err instanceof Error ? err : new Error(String(err)));
         } finally {
           setLoading(false);
         }
@@ -52,8 +111,16 @@ export const useEsriModules = () => {
           Graphic,
           GraphicsLayer,
           Extent,
-        ] = loadedModules;
-        setModules({
+        ] = loadedModules as [
+          EsriModules["SimpleFillSymbol"],
+          EsriModules["SimpleLineSymbol"],
+          EsriModules["SimpleMarkerSymbol"],
+          EsriModules["TextSymbol"],
+          EsriModules["Graphic"],
+          EsriModules["GraphicsLayer"],
+          EsriModules["Extent"],
+        ];
+        const modulesBundle: EsriModules = {
           SimpleFillSymbol,
           SimpleLineSymbol,
           SimpleMarkerSymbol,
@@ -61,9 +128,10 @@ export const useEsriModules = () => {
           Graphic,
           GraphicsLayer,
           Extent,
-        } as EsriModules);
+        };
+        setModules(modulesBundle);
       } catch (err) {
-        setError(err as Error);
+        setError(err instanceof Error ? err : new Error(String(err)));
       } finally {
         setLoading(false);
       }
@@ -201,7 +269,10 @@ export const useGraphicsLayer = (
   });
 
   const removeGraphicsForFnr = hooks.useEventCallback(
-    (fnr: string | number, normalizeFnrKey: (fnr: any) => string) => {
+    (
+      fnr: FnrValue | null | undefined,
+      normalizeFnrKey: (fnr: FnrValue | null | undefined) => string
+    ) => {
       const layer = graphicsLayerRef.current;
       if (!layer || fnr == null) return;
       const fnrKey = normalizeFnrKey(fnr);
@@ -270,8 +341,8 @@ export const useGraphicsLayer = (
     (
       graphic: __esri.Graphic | null | undefined,
       view: __esri.MapView | null | undefined,
-      extractFnr: (attrs: any) => string | number | null,
-      normalizeFnrKey: (fnr: any) => string,
+      extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null,
+      normalizeFnrKey: (fnr: FnrValue | null | undefined) => string,
       highlightColor: [number, number, number, number],
       outlineWidth: number
     ) => {
@@ -282,7 +353,8 @@ export const useGraphicsLayer = (
       const layer = graphicsLayerRef.current;
       if (!layer) return;
 
-      const fnr = extractFnr(graphic.attributes || null);
+      const attributes = (graphic.attributes ?? null) as AttributeMap | null;
+      const fnr = extractFnr(attributes);
       const symbol = createHighlightSymbol(
         graphic,
         highlightColor,
@@ -317,10 +389,13 @@ export const useGraphicsLayer = (
 
   const addManyGraphicsToMap = hooks.useEventCallback(
     (
-      graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>,
+      graphics: Array<{
+        graphic: __esri.Graphic;
+        fnr: FnrValue | null | undefined;
+      }>,
       view: __esri.MapView | null | undefined,
-      extractFnr: (attrs: any) => string | number | null,
-      normalizeFnrKey: (fnr: any) => string,
+      extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null,
+      normalizeFnrKey: (fnr: FnrValue | null | undefined) => string,
       highlightColor: [number, number, number, number],
       outlineWidth: number
     ) => {
@@ -334,6 +409,12 @@ export const useGraphicsLayer = (
       const highlightGraphics: __esri.Graphic[] = [];
 
       graphics.forEach(({ graphic, fnr }) => {
+        const attributes = (graphic.attributes ?? null) as AttributeMap | null;
+        const resolvedFnr = fnr ?? extractFnr(attributes);
+        if (resolvedFnr === null || resolvedFnr === undefined) {
+          return;
+        }
+
         const symbol = createHighlightSymbol(
           graphic,
           highlightColor,
@@ -345,14 +426,14 @@ export const useGraphicsLayer = (
           geometry: graphic.geometry,
           symbol,
           attributes: graphic.attributes
-            ? { ...graphic.attributes, FNR: fnr }
-            : { FNR: fnr },
+            ? { ...graphic.attributes, FNR: resolvedFnr }
+            : { FNR: resolvedFnr },
         });
 
-        removeGraphicsForFnr(fnr, normalizeFnrKey);
+        removeGraphicsForFnr(resolvedFnr, normalizeFnrKey);
         highlightGraphics.push(highlightGraphic);
 
-        const fnrKey = normalizeFnrKey(fnr);
+        const fnrKey = normalizeFnrKey(resolvedFnr);
         const existing = graphicsMapRef.current.get(fnrKey);
         if (existing) {
           existing.push(highlightGraphic);
@@ -478,8 +559,13 @@ export const useMapViewLifecycle = (params: {
     onMapClick,
   } = params;
 
-  const jimuMapViewRef = React.useRef<any>(null);
+  const jimuMapViewRef = React.useRef<JimuMapView | null>(null);
   const mapClickHandleRef = React.useRef<__esri.Handle | null>(null);
+
+  const getStoredMapView = (): __esri.MapView | null => {
+    const candidateView = jimuMapViewRef.current?.view;
+    return isMapView(candidateView) ? candidateView : null;
+  };
 
   const setupMapView = hooks.useEventCallback((view: __esri.MapView) => {
     disablePopup(view);
@@ -498,7 +584,7 @@ export const useMapViewLifecycle = (params: {
   });
 
   const cleanupPreviousView = hooks.useEventCallback(() => {
-    const previousView = jimuMapViewRef.current?.view;
+    const previousView = getStoredMapView();
     if (previousView) {
       restorePopup(previousView);
       destroyGraphicsLayer(previousView);
@@ -510,27 +596,31 @@ export const useMapViewLifecycle = (params: {
     }
   });
 
-  const onActiveViewChange = hooks.useEventCallback((jimuMapView: any) => {
-    const view = jimuMapView?.view;
-    if (!view) {
-      return;
-    }
+  const onActiveViewChange = hooks.useEventCallback(
+    (jimuMapView: JimuMapView | null | undefined) => {
+      const viewCandidate = jimuMapView?.view;
+      if (!isMapView(viewCandidate)) {
+        return;
+      }
 
-    const previousView = jimuMapViewRef.current?.view;
-    if (previousView && previousView !== view) {
-      cleanupPreviousView();
-    }
+      const view = viewCandidate;
 
-    jimuMapViewRef.current = jimuMapView;
+      const previousView = getStoredMapView();
+      if (previousView && previousView !== view) {
+        cleanupPreviousView();
+      }
 
-    // If modules are ready, setup immediately. Otherwise, wait for modules.
-    if (modules) {
-      setupMapView(view);
+      jimuMapViewRef.current = jimuMapView ?? null;
+
+      // If modules are ready, setup immediately. Otherwise, wait for modules.
+      if (modules) {
+        setupMapView(view);
+      }
     }
-  });
+  );
 
   const reactivateMapView = hooks.useEventCallback(() => {
-    const currentView = jimuMapViewRef.current?.view;
+    const currentView = getStoredMapView();
     if (currentView && modules) {
       disablePopup(currentView);
       if (mapClickHandleRef.current) {
@@ -547,8 +637,8 @@ export const useMapViewLifecycle = (params: {
   });
 
   const cleanup = hooks.useEventCallback(() => {
-    const currentView = jimuMapViewRef.current?.view;
-    restorePopup(currentView);
+    const currentView = getStoredMapView();
+    restorePopup(currentView ?? undefined);
 
     if (mapClickHandleRef.current) {
       mapClickHandleRef.current.remove();
@@ -566,57 +656,74 @@ export const useMapViewLifecycle = (params: {
 
   // Setup map view when modules become ready (if map view is already available)
   hooks.useUpdateEffect(() => {
-    if (modules && jimuMapViewRef.current?.view && !mapClickHandleRef.current) {
-      setupMapView(jimuMapViewRef.current.view);
+    const storedView = getStoredMapView();
+    if (modules && storedView && !mapClickHandleRef.current) {
+      setupMapView(storedView);
     }
   }, [modules, setupMapView]);
 
   return {
     onActiveViewChange,
-    getCurrentView: () => jimuMapViewRef.current?.view,
+    getCurrentView: getStoredMapView,
     reactivateMapView,
     cleanup,
   };
 };
 
-export const useStringConfigValue = (config: { [key: string]: any }) => {
+export const useBooleanConfigValue = (config: unknown) => {
   const configRef = hooks.useLatest(config);
-  return hooks.useEventCallback((key: string, defaultValue = ""): string => {
-    const v = configRef.current?.[key];
-    return typeof v === "string" ? v : defaultValue;
+  return hooks.useEventCallback((key: string, defaultValue = false) => {
+    const current = configRef.current;
+    if (current && isConfigDictionary(current)) {
+      const value = current[key];
+      if (typeof value === "boolean") {
+        return value;
+      }
+    }
+    return defaultValue;
   });
 };
 
-export const useBooleanConfigValue = (config: { [key: string]: any }) => {
-  const configRef = hooks.useLatest(config);
-  return hooks.useEventCallback(
-    (key: string, defaultValue = false): boolean => {
-      const v = configRef.current?.[key];
-      return typeof v === "boolean" ? v : defaultValue;
-    }
-  );
-};
-
-export const useNumberConfigValue = (config: { [key: string]: any }) => {
+export const useNumberConfigValue = (config: unknown) => {
   const configRef = hooks.useLatest(config);
   return hooks.useEventCallback(
     (key: string, defaultValue?: number): number | undefined => {
-      const v = configRef.current?.[key];
-      if (typeof v === "number" && Number.isFinite(v)) return v;
+      const current = configRef.current;
+      if (current && isConfigDictionary(current)) {
+        const value = current[key];
+        if (typeof value === "number" && Number.isFinite(value)) {
+          return value;
+        }
+      }
       return defaultValue;
     }
   );
 };
 
-export const useUpdateConfig = (
+export const useUpdateConfig = <TConfig>(
   id: string,
-  config: { [key: string]: any; set?: (key: string, value: any) => any },
-  onSettingChange: (update: { id: string; config: any }) => void
+  config: TConfig,
+  onSettingChange: (update: { id: string; config: TConfig }) => void
 ) => {
-  return hooks.useEventCallback((key: string, value: any) => {
+  const configRef = hooks.useLatest(config);
+  return hooks.useEventCallback((key: string, value: unknown) => {
+    const current = configRef.current as unknown;
+    let nextConfig: TConfig;
+
+    if (hasConfigSet<TConfig>(current)) {
+      nextConfig = current.set(key, value);
+    } else if (isConfigDictionary(current)) {
+      nextConfig = {
+        ...current,
+        [key]: value,
+      } as TConfig;
+    } else {
+      nextConfig = { [key]: value } as unknown as TConfig;
+    }
+
     onSettingChange({
       id,
-      config: config.set ? config.set(key, value) : { ...config, [key]: value },
+      config: nextConfig,
     });
   });
 };
@@ -625,9 +732,9 @@ export const useNumericConfigHandler = (
   localValue: string,
   setLocalValue: (val: string) => void,
   validate: (val: string) => boolean,
-  updateConfig: (key: string, value: any) => void,
+  updateConfig: ConfigUpdater,
   configKey: string,
-  debounce: (val: string) => void
+  debounce: DebouncedFn<(val: string) => void>
 ) => {
   const handleChange = hooks.useEventCallback((value: number) => {
     setLocalValue(String(value));
@@ -635,7 +742,7 @@ export const useNumericConfigHandler = (
   });
 
   const handleBlur = hooks.useEventCallback(() => {
-    (debounce as any).cancel?.();
+    debounce.cancel();
     const isValid = validate(localValue);
     if (isValid) {
       const num = parseInt(localValue, 10);
@@ -649,11 +756,15 @@ export const useNumericConfigHandler = (
 export const useSwitchConfigHandler = (
   localValue: boolean,
   setLocalValue: (val: boolean) => void,
-  updateConfig: (key: string, value: any) => void,
+  updateConfig: ConfigUpdater,
   configKey: string
 ) => {
+  const localValueRef = hooks.useLatest(localValue);
   return hooks.useEventCallback((evt: React.ChangeEvent<HTMLInputElement>) => {
     const checked = evt.target.checked;
+    if (checked === localValueRef.current) {
+      return;
+    }
     setLocalValue(checked);
     updateConfig(configKey, checked);
   });
@@ -662,7 +773,7 @@ export const useSwitchConfigHandler = (
 export const useSliderConfigHandler = <T extends number>(
   localValue: T,
   setLocalValue: (val: T) => void,
-  updateConfig: (key: string, value: any) => void,
+  updateConfig: ConfigUpdater,
   configKey: string,
   normalizer: (rawValue: number) => T
 ) => {
@@ -748,7 +859,7 @@ export const useNumericValidator = (
   });
 };
 
-export const useThrottle = <T extends (...args: any[]) => void>(
+export const useThrottle = <T extends (...args: unknown[]) => void>(
   callback: T,
   delay: number
 ): ((...args: Parameters<T>) => void) => {
@@ -807,7 +918,7 @@ export const useThrottle = <T extends (...args: any[]) => void>(
   return throttled;
 };
 
-export const useDebounce = <T extends (...args: any[]) => void>(
+export const useDebounce = <T extends (...args: unknown[]) => void>(
   callback: T,
   delay: number,
   options?: { onPendingChange?: (pending: boolean) => void }

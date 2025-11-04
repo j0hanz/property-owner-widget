@@ -71,7 +71,9 @@ export const PropertyTable = (props: PropertyTableProps) => {
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      header.column.getToggleSortingHandler()?.(e as any);
+                      const toggleHandler =
+                        header.column.getToggleSortingHandler();
+                      if (toggleHandler) toggleHandler(e.nativeEvent);
                     }
                   }}
                 >
