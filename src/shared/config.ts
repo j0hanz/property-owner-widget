@@ -3,23 +3,23 @@ import {
   getCoreRowModel,
   getSortedRowModel,
   getFilteredRowModel,
-} from "@tanstack/react-table"
+} from "@tanstack/react-table";
 import type {
   ColumnDef,
   SortingState,
   ColumnFiltersState,
   Table,
   Row,
-} from "@tanstack/react-table"
-import type { GridRowData } from "../config/types"
-import { GRID_COLUMN_KEYS } from "../config/constants"
+} from "@tanstack/react-table";
+import type { GridRowData } from "../config/types";
+import { GRID_COLUMN_KEYS } from "../config/constants";
 
-const columnHelper = createColumnHelper<GridRowData>()
+const columnHelper = createColumnHelper<GridRowData>();
 
 export const createPropertyTableColumns = (params: {
-  translate: (key: string) => string
-}): Array<ColumnDef<GridRowData, any>> => {
-  const { translate } = params
+  translate: (key: string) => string;
+}): Array<ColumnDef<GridRowData>> => {
+  const { translate } = params;
 
   return [
     columnHelper.accessor("FASTIGHET", {
@@ -30,16 +30,16 @@ export const createPropertyTableColumns = (params: {
       enableColumnFilter: true,
       filterFn: "includesString",
     }),
-    columnHelper.accessor("BOSTADR", {
-      id: GRID_COLUMN_KEYS.BOSTADR,
+    columnHelper.accessor("ADDRESS", {
+      id: GRID_COLUMN_KEYS.ADDRESS,
       header: () => translate("columnAddress"),
       cell: (info) => info.getValue(),
       enableSorting: true,
       enableColumnFilter: true,
       filterFn: "includesString",
     }),
-  ]
-}
+  ];
+};
 
 export const createTableConfig = () => ({
   enableSorting: true,
@@ -49,16 +49,16 @@ export const createTableConfig = () => ({
   getCoreRowModel: getCoreRowModel(),
   getSortedRowModel: getSortedRowModel(),
   getFilteredRowModel: getFilteredRowModel(),
-})
+});
 
-export const getDefaultSorting = (): SortingState => []
+export const getDefaultSorting = (): SortingState => [];
 
-export const getDefaultColumnFilters = (): ColumnFiltersState => []
+export const getDefaultColumnFilters = (): ColumnFiltersState => [];
 
-export const getRowId = (row: GridRowData): string => row.id
+export const getRowId = (row: GridRowData): string => row.id;
 
 export const getVisibleRows = (
   table: Table<GridRowData>
 ): Array<Row<GridRowData>> => {
-  return table.getRowModel().rows
-}
+  return table.getRowModel().rows;
+};

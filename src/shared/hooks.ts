@@ -1,48 +1,96 @@
-import { React, hooks } from "jimu-core"
-import { loadArcGISJSAPIModules } from "jimu-arcgis"
+import { React, hooks } from "jimu-core";
+import { loadArcGISJSAPIModules } from "jimu-arcgis";
+import type { JimuMapView } from "jimu-arcgis";
 import type {
+  AttributeMap,
   EsriModules,
   HoverQueryParams,
   DebouncedFn,
-} from "../config/types"
+  FnrValue,
+  ConfigDictionary,
+  ConfigWithSet,
+  ConfigUpdater,
+  EsriStubGlobal,
+} from "../config/types";
 import {
   ESRI_MODULES_TO_LOAD,
   ABORT_CONTROLLER_POOL_SIZE,
-} from "../config/constants"
+} from "../config/constants";
 import {
   popupSuppressionManager,
   buildHighlightSymbolJSON,
   isAbortError,
-} from "./utils"
+  logger,
+} from "./utils";
+
+const isConfigDictionary = (value: unknown): value is ConfigDictionary => {
+  return typeof value === "object" && value !== null;
+};
+
+const hasConfigSet = <T>(value: unknown): value is ConfigWithSet<T> => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as { set?: unknown };
+  return typeof candidate.set === "function";
+};
+
+const isConstructor = (
+  value: unknown
+): value is new (...args: never[]) => unknown => typeof value === "function";
+
+const isEsriModules = (candidate: unknown): candidate is EsriModules => {
+  if (!candidate || typeof candidate !== "object") {
+    return false;
+  }
+
+  const modules = candidate as Partial<EsriModules>;
+  return (
+    isConstructor(modules.SimpleFillSymbol) &&
+    isConstructor(modules.SimpleLineSymbol) &&
+    isConstructor(modules.SimpleMarkerSymbol) &&
+    isConstructor(modules.TextSymbol) &&
+    isConstructor(modules.Graphic) &&
+    isConstructor(modules.GraphicsLayer) &&
+    isConstructor(modules.Extent)
+  );
+};
+
+const isMapView = (
+  view: __esri.MapView | __esri.SceneView | undefined
+): view is __esri.MapView => view?.type === "2d";
 
 export const useEsriModules = () => {
-  const [modules, setModules] = React.useState<EsriModules | null>(null)
-  const [loading, setLoading] = React.useState(true)
-  const [error, setError] = React.useState<Error | null>(null)
+  const [modules, setModules] = React.useState<EsriModules | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<Error | null>(null);
 
   hooks.useEffectOnce(() => {
-    const stubLoader = (globalThis as any)?.__ESRI_TEST_STUB__
+    const stubLoader = (globalThis as EsriStubGlobal).__ESRI_TEST_STUB__;
     if (typeof stubLoader === "function") {
-      ;(async () => {
+      (async () => {
         try {
           const stubModules = await Promise.resolve(
             stubLoader(ESRI_MODULES_TO_LOAD)
-          )
-          setModules(stubModules as EsriModules)
+          );
+          if (!isEsriModules(stubModules)) {
+            throw new Error("Invalid Esri module stub");
+          }
+          setModules(stubModules);
         } catch (err) {
-          setError(err as Error)
+          setError(err instanceof Error ? err : new Error(String(err)));
         } finally {
-          setLoading(false)
+          setLoading(false);
         }
-      })()
-      return
+      })();
+      return;
     }
 
-    ;(async () => {
+    (async () => {
       try {
         const loadedModules = await loadArcGISJSAPIModules(
           ESRI_MODULES_TO_LOAD.slice()
-        )
+        );
         const [
           SimpleFillSymbol,
           SimpleLineSymbol,
@@ -51,8 +99,16 @@ export const useEsriModules = () => {
           Graphic,
           GraphicsLayer,
           Extent,
-        ] = loadedModules
-        setModules({
+        ] = loadedModules as [
+          EsriModules["SimpleFillSymbol"],
+          EsriModules["SimpleLineSymbol"],
+          EsriModules["SimpleMarkerSymbol"],
+          EsriModules["TextSymbol"],
+          EsriModules["Graphic"],
+          EsriModules["GraphicsLayer"],
+          EsriModules["Extent"],
+        ];
+        const modulesBundle: EsriModules = {
           SimpleFillSymbol,
           SimpleLineSymbol,
           SimpleMarkerSymbol,
@@ -60,157 +116,161 @@ export const useEsriModules = () => {
           Graphic,
           GraphicsLayer,
           Extent,
-        } as EsriModules)
+        };
+        setModules(modulesBundle);
       } catch (err) {
-        setError(err as Error)
+        setError(err instanceof Error ? err : new Error(String(err)));
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
-    })()
-  })
+    })();
+  });
 
-  return { modules, loading, error }
-}
+  return { modules, loading, error };
+};
 
 export const useDebouncedValue = <T>(value: T, delay: number) => {
-  const [debouncedValue, setDebouncedValue] = React.useState(value)
+  const [debouncedValue, setDebouncedValue] = React.useState(value);
 
   hooks.useEffectWithPreviousValues(() => {
     const handler = setTimeout(() => {
-      setDebouncedValue(value)
-    }, delay)
+      setDebouncedValue(value);
+    }, delay);
 
     return () => {
-      clearTimeout(handler)
-    }
-  }, [value, delay])
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
 
-  return debouncedValue
-}
+  return debouncedValue;
+};
 
 export const useAbortControllerPool = () => {
-  const poolRef = React.useRef<AbortController[]>([])
-  const activeControllersRef = React.useRef<Set<AbortController>>(new Set())
+  const poolRef = React.useRef<AbortController[]>([]);
+  const activeControllersRef = React.useRef<Set<AbortController>>(new Set());
 
   const getController = hooks.useEventCallback(() => {
-    let controller = poolRef.current.pop()
+    let controller = poolRef.current.pop();
     while (controller && controller.signal.aborted) {
-      controller = poolRef.current.pop()
+      controller = poolRef.current.pop();
     }
 
-    const finalController = controller || new AbortController()
+    const finalController = controller || new AbortController();
 
-    activeControllersRef.current.add(finalController)
-    return finalController
-  })
+    activeControllersRef.current.add(finalController);
+    return finalController;
+  });
 
   const releaseController = hooks.useEventCallback(
     (controller: AbortController) => {
-      activeControllersRef.current.delete(controller)
+      activeControllersRef.current.delete(controller);
       if (!controller.signal.aborted) {
         if (poolRef.current.length < ABORT_CONTROLLER_POOL_SIZE) {
-          poolRef.current.push(controller)
+          poolRef.current.push(controller);
         }
       }
     }
-  )
+  );
 
   const abortAll = hooks.useEventCallback(() => {
     activeControllersRef.current.forEach((controller) => {
       if (!controller.signal.aborted) {
-        controller.abort()
+        controller.abort();
       }
-    })
-    activeControllersRef.current.clear()
-    poolRef.current = []
-  })
+    });
+    activeControllersRef.current.clear();
+    poolRef.current = [];
+  });
 
   hooks.useUnmount(() => {
-    abortAll()
-  })
+    abortAll();
+  });
 
-  return { getController, releaseController, abortAll }
-}
+  return { getController, releaseController, abortAll };
+};
 
 export const useGraphicsLayer = (
   modules: EsriModules | null,
   widgetId: string
 ) => {
-  const modulesRef = hooks.useLatest(modules)
-  const widgetIdRef = hooks.useLatest(widgetId)
-  const graphicsLayerRef = React.useRef<__esri.GraphicsLayer | null>(null)
+  const modulesRef = hooks.useLatest(modules);
+  const widgetIdRef = hooks.useLatest(widgetId);
+  const graphicsLayerRef = React.useRef<__esri.GraphicsLayer | null>(null);
   const graphicsMapRef = React.useRef<Map<string | number, __esri.Graphic[]>>(
     new Map()
-  )
+  );
 
   const ensureGraphicsLayer = hooks.useEventCallback(
     (view: __esri.MapView | null | undefined): boolean => {
-      const currentModules = modulesRef.current
-      const currentWidgetId = widgetIdRef.current
-      if (!currentModules || !view || !currentWidgetId) return false
+      const currentModules = modulesRef.current;
+      const currentWidgetId = widgetIdRef.current;
+      if (!currentModules || !view || !currentWidgetId) return false;
 
-      const desiredLayerId = `property-${currentWidgetId}-highlight-layer`
-      const existingLayer = graphicsLayerRef.current
+      const desiredLayerId = `property-${currentWidgetId}-highlight-layer`;
+      const existingLayer = graphicsLayerRef.current;
 
       if (existingLayer && existingLayer.id !== desiredLayerId) {
-        view.map?.remove(existingLayer)
-        existingLayer.destroy()
-        graphicsLayerRef.current = null
+        view.map?.remove(existingLayer);
+        existingLayer.destroy();
+        graphicsLayerRef.current = null;
       }
 
       if (!graphicsLayerRef.current) {
         // Check if layer already exists in map (from previous widget instance)
         const existingLayerInMap = view.map.findLayerById(
           desiredLayerId
-        ) as __esri.GraphicsLayer | null
+        ) as __esri.GraphicsLayer | null;
         if (existingLayerInMap) {
-          graphicsLayerRef.current = existingLayerInMap
-          return true
+          graphicsLayerRef.current = existingLayerInMap;
+          return true;
         }
 
         // Only create if truly missing
         const shortId =
           currentWidgetId.length > 16
             ? `${currentWidgetId.substring(0, 16)}...`
-            : currentWidgetId
+            : currentWidgetId;
         const layer = new currentModules.GraphicsLayer({
           id: desiredLayerId,
           listMode: "hide",
           title: `Property Highlights (${shortId})`,
-        })
-        view.map.add(layer)
-        graphicsLayerRef.current = layer
-        return true
+        });
+        view.map.add(layer);
+        graphicsLayerRef.current = layer;
+        return true;
       }
 
       if (!view.map.findLayerById(graphicsLayerRef.current.id)) {
-        view.map.add(graphicsLayerRef.current)
-        return true
+        view.map.add(graphicsLayerRef.current);
+        return true;
       }
 
-      return false
+      return false;
     }
-  )
+  );
 
   const clearGraphics = hooks.useEventCallback(() => {
     if (graphicsLayerRef.current) {
-      graphicsLayerRef.current.removeAll()
+      graphicsLayerRef.current.removeAll();
     }
-    graphicsMapRef.current.clear()
-  })
+    graphicsMapRef.current.clear();
+  });
 
   const removeGraphicsForFnr = hooks.useEventCallback(
-    (fnr: string | number, normalizeFnrKey: (fnr: any) => string) => {
-      const layer = graphicsLayerRef.current
-      if (!layer || fnr == null) return
-      const fnrKey = normalizeFnrKey(fnr)
-      const graphics = graphicsMapRef.current.get(fnrKey)
+    (
+      fnr: FnrValue | null | undefined,
+      normalizeFnrKey: (fnr: FnrValue | null | undefined) => string
+    ) => {
+      const layer = graphicsLayerRef.current;
+      if (!layer || fnr == null) return;
+      const fnrKey = normalizeFnrKey(fnr);
+      const graphics = graphicsMapRef.current.get(fnrKey);
       if (graphics && graphics.length > 0) {
-        layer.removeMany(graphics)
-        graphicsMapRef.current.delete(fnrKey)
+        layer.removeMany(graphics);
+        graphicsMapRef.current.delete(fnrKey);
       }
     }
-  )
+  );
 
   const createHighlightSymbol = (
     graphic: __esri.Graphic | null | undefined,
@@ -221,23 +281,23 @@ export const useGraphicsLayer = (
     | __esri.SimpleLineSymbol
     | __esri.SimpleMarkerSymbol
     | null => {
-    const currentModules = modulesRef.current
-    if (!currentModules || !graphic) return null
+    const currentModules = modulesRef.current;
+    if (!currentModules || !graphic) return null;
 
-    const geometry = graphic.geometry
-    if (!geometry) return null
+    const geometry = graphic.geometry;
+    if (!geometry) return null;
 
-    const geometryType = geometry.type
+    const geometryType = geometry.type;
 
     if (geometryType === "polygon" || geometryType === "extent") {
       const symbolJSON = buildHighlightSymbolJSON(
         highlightColor,
         outlineWidth,
         "polygon"
-      )
+      );
       return new currentModules.SimpleFillSymbol(
         symbolJSON as __esri.SimpleFillSymbolProperties
-      )
+      );
     }
 
     if (geometryType === "polyline") {
@@ -245,10 +305,10 @@ export const useGraphicsLayer = (
         highlightColor,
         outlineWidth,
         "polyline"
-      )
+      );
       return new currentModules.SimpleLineSymbol(
         symbolJSON as __esri.SimpleLineSymbolProperties
-      )
+      );
     }
 
     if (geometryType === "point" || geometryType === "multipoint") {
@@ -256,38 +316,39 @@ export const useGraphicsLayer = (
         highlightColor,
         outlineWidth,
         "point"
-      )
+      );
       return new currentModules.SimpleMarkerSymbol(
         symbolJSON as __esri.SimpleMarkerSymbolProperties
-      )
+      );
     }
     // Unsupported geometry type
-    return null
-  }
+    return null;
+  };
 
   const addGraphicsToMap = hooks.useEventCallback(
     (
       graphic: __esri.Graphic | null | undefined,
       view: __esri.MapView | null | undefined,
-      extractFnr: (attrs: any) => string | number | null,
-      normalizeFnrKey: (fnr: any) => string,
+      extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null,
+      normalizeFnrKey: (fnr: FnrValue | null | undefined) => string,
       highlightColor: [number, number, number, number],
       outlineWidth: number
     ) => {
-      const currentModules = modulesRef.current
-      if (!currentModules || !graphic || !view) return
-      ensureGraphicsLayer(view)
+      const currentModules = modulesRef.current;
+      if (!currentModules || !graphic || !view) return;
+      ensureGraphicsLayer(view);
 
-      const layer = graphicsLayerRef.current
-      if (!layer) return
+      const layer = graphicsLayerRef.current;
+      if (!layer) return;
 
-      const fnr = extractFnr(graphic.attributes || null)
+      const attributes = (graphic.attributes ?? null) as AttributeMap | null;
+      const fnr = extractFnr(attributes);
       const symbol = createHighlightSymbol(
         graphic,
         highlightColor,
         outlineWidth
-      )
-      if (!symbol) return
+      );
+      if (!symbol) return;
 
       // Create a new graphic with the highlight symbol
       const highlightGraphic = new currentModules.Graphic({
@@ -296,101 +357,110 @@ export const useGraphicsLayer = (
         attributes: graphic.attributes
           ? { ...graphic.attributes, FNR: fnr }
           : { FNR: fnr },
-      })
+      });
 
-      removeGraphicsForFnr(fnr, normalizeFnrKey)
-      layer.add(highlightGraphic)
+      removeGraphicsForFnr(fnr, normalizeFnrKey);
+      layer.add(highlightGraphic);
 
-      if (!fnr) return
+      if (!fnr) return;
 
-      const fnrKey = normalizeFnrKey(fnr)
+      const fnrKey = normalizeFnrKey(fnr);
       // Store reference for future removal
-      const existing = graphicsMapRef.current.get(fnrKey)
+      const existing = graphicsMapRef.current.get(fnrKey);
       if (existing) {
-        existing.push(highlightGraphic)
+        existing.push(highlightGraphic);
       } else {
-        graphicsMapRef.current.set(fnrKey, [highlightGraphic])
+        graphicsMapRef.current.set(fnrKey, [highlightGraphic]);
       }
     }
-  )
+  );
 
   const addManyGraphicsToMap = hooks.useEventCallback(
     (
-      graphics: Array<{ graphic: __esri.Graphic; fnr: string | number }>,
+      graphics: Array<{
+        graphic: __esri.Graphic;
+        fnr: FnrValue | null | undefined;
+      }>,
       view: __esri.MapView | null | undefined,
-      extractFnr: (attrs: any) => string | number | null,
-      normalizeFnrKey: (fnr: any) => string,
+      extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null,
+      normalizeFnrKey: (fnr: FnrValue | null | undefined) => string,
       highlightColor: [number, number, number, number],
       outlineWidth: number
     ) => {
-      const currentModules = modulesRef.current
-      if (!currentModules || !graphics.length || !view) return
-      ensureGraphicsLayer(view)
+      const currentModules = modulesRef.current;
+      if (!currentModules || !graphics.length || !view) return;
+      ensureGraphicsLayer(view);
 
-      const layer = graphicsLayerRef.current
-      if (!layer) return
+      const layer = graphicsLayerRef.current;
+      if (!layer) return;
 
-      const highlightGraphics: __esri.Graphic[] = []
+      const highlightGraphics: __esri.Graphic[] = [];
 
       graphics.forEach(({ graphic, fnr }) => {
+        const attributes = (graphic.attributes ?? null) as AttributeMap | null;
+        const resolvedFnr = fnr ?? extractFnr(attributes);
+        if (resolvedFnr === null || resolvedFnr === undefined) {
+          return;
+        }
+
         const symbol = createHighlightSymbol(
           graphic,
           highlightColor,
           outlineWidth
-        )
-        if (!symbol) return
+        );
+        if (!symbol) return;
 
         const highlightGraphic = new currentModules.Graphic({
           geometry: graphic.geometry,
           symbol,
           attributes: graphic.attributes
-            ? { ...graphic.attributes, FNR: fnr }
-            : { FNR: fnr },
-        })
+            ? { ...graphic.attributes, FNR: resolvedFnr }
+            : { FNR: resolvedFnr },
+        });
 
-        removeGraphicsForFnr(fnr, normalizeFnrKey)
-        highlightGraphics.push(highlightGraphic)
+        removeGraphicsForFnr(resolvedFnr, normalizeFnrKey);
+        highlightGraphics.push(highlightGraphic);
 
-        const fnrKey = normalizeFnrKey(fnr)
-        const existing = graphicsMapRef.current.get(fnrKey)
+        const fnrKey = normalizeFnrKey(resolvedFnr);
+        const existing = graphicsMapRef.current.get(fnrKey);
         if (existing) {
-          existing.push(highlightGraphic)
+          existing.push(highlightGraphic);
         } else {
-          graphicsMapRef.current.set(fnrKey, [highlightGraphic])
+          graphicsMapRef.current.set(fnrKey, [highlightGraphic]);
         }
-      })
+      });
 
       // Use layer.addMany() for batch addition (single DOM update)
       if (highlightGraphics.length > 0) {
         requestAnimationFrame(() => {
           if (layer && !layer.destroyed) {
-            layer.addMany(highlightGraphics)
+            layer.addMany(highlightGraphics);
           }
-        })
+        });
       }
     }
-  )
+  );
 
   const destroyGraphicsLayer = hooks.useEventCallback(
     (view: __esri.MapView | null | undefined) => {
-      if (!graphicsLayerRef.current) return
-      const layer = graphicsLayerRef.current
-      graphicsLayerRef.current = null
-      graphicsMapRef.current.clear()
+      if (!graphicsLayerRef.current) return;
+      const layer = graphicsLayerRef.current;
+      graphicsLayerRef.current = null;
+      graphicsMapRef.current.clear();
       if (view) {
-        view.map?.remove(layer)
+        view.map?.remove(layer);
       }
-      layer.destroy()
+      layer.destroy();
     }
-  )
+  );
 
   hooks.useUnmount(() => {
     if (graphicsLayerRef.current) {
-      graphicsLayerRef.current.destroy?.()
-      graphicsLayerRef.current = null
+      graphicsLayerRef.current.destroy?.();
+      graphicsLayerRef.current = null;
     }
-    graphicsMapRef.current.clear()
-  })
+    graphicsMapRef.current.clear();
+  });
 
   return {
     graphicsLayerRef,
@@ -401,72 +471,72 @@ export const useGraphicsLayer = (
     addGraphicsToMap,
     addManyGraphicsToMap,
     destroyGraphicsLayer,
-  }
-}
+  };
+};
 
 export const usePopupManager = (widgetId: string) => {
   const [initialOwner] = React.useState(() =>
     Symbol(`property-popup-${widgetId}`)
-  )
-  const ownerIdRef = React.useRef(initialOwner)
-  const lastViewRef = React.useRef<__esri.MapView | undefined>(undefined)
-  const previousWidgetId = hooks.usePrevious(widgetId)
+  );
+  const ownerIdRef = React.useRef(initialOwner);
+  const lastViewRef = React.useRef<__esri.MapView | undefined>(undefined);
+  const previousWidgetId = hooks.usePrevious(widgetId);
 
   hooks.useUpdateEffect(() => {
     if (previousWidgetId && previousWidgetId !== widgetId) {
-      const lastView = lastViewRef.current
+      const lastView = lastViewRef.current;
       if (lastView) {
-        popupSuppressionManager.release(ownerIdRef.current, lastView)
+        popupSuppressionManager.release(ownerIdRef.current, lastView);
       }
-      ownerIdRef.current = Symbol(`property-popup-${widgetId}`)
+      ownerIdRef.current = Symbol(`property-popup-${widgetId}`);
     }
-  }, [widgetId, previousWidgetId])
+  }, [widgetId, previousWidgetId]);
 
   const restorePopup = hooks.useEventCallback(
     (view: __esri.MapView | undefined) => {
-      const targetView = view ?? lastViewRef.current
-      if (!targetView) return
-      popupSuppressionManager.release(ownerIdRef.current, targetView)
+      const targetView = view ?? lastViewRef.current;
+      if (!targetView) return;
+      popupSuppressionManager.release(ownerIdRef.current, targetView);
       if (targetView === lastViewRef.current) {
-        lastViewRef.current = undefined
+        lastViewRef.current = undefined;
       }
     }
-  )
+  );
 
   const disablePopup = hooks.useEventCallback(
     (view: __esri.MapView | undefined) => {
-      if (!view) return
-      lastViewRef.current = view
-      popupSuppressionManager.acquire(ownerIdRef.current, view)
+      if (!view) return;
+      lastViewRef.current = view;
+      popupSuppressionManager.acquire(ownerIdRef.current, view);
     }
-  )
+  );
 
   const cleanup = hooks.useEventCallback((view: __esri.MapView | undefined) => {
-    restorePopup(view)
-  })
+    restorePopup(view);
+  });
 
   hooks.useUnmount(() => {
-    const lastView = lastViewRef.current
+    const lastView = lastViewRef.current;
     if (lastView) {
-      popupSuppressionManager.release(ownerIdRef.current, lastView)
-      lastViewRef.current = undefined
+      popupSuppressionManager.release(ownerIdRef.current, lastView);
+      lastViewRef.current = undefined;
     }
-  })
+  });
 
   return {
     disablePopup,
     restorePopup,
     cleanup,
-  }
-}
+  };
+};
 
 export const useMapViewLifecycle = (params: {
-  modules: EsriModules | null
-  ensureGraphicsLayer: (view: __esri.MapView) => void
-  destroyGraphicsLayer: (view: __esri.MapView) => void
-  disablePopup: (view: __esri.MapView | undefined) => void
-  restorePopup: (view: __esri.MapView | undefined) => void
-  onMapClick: (event: __esri.ViewClickEvent) => void
+  modules: EsriModules | null;
+  ensureGraphicsLayer: (view: __esri.MapView) => void;
+  destroyGraphicsLayer: (view: __esri.MapView) => void;
+  disablePopup: (view: __esri.MapView | undefined) => void;
+  restorePopup: (view: __esri.MapView | undefined) => void;
+  onMapClick: (event: __esri.ViewClickEvent) => void;
 }) => {
   const {
     modules,
@@ -475,218 +545,248 @@ export const useMapViewLifecycle = (params: {
     disablePopup,
     restorePopup,
     onMapClick,
-  } = params
+  } = params;
 
-  const jimuMapViewRef = React.useRef<any>(null)
-  const mapClickHandleRef = React.useRef<__esri.Handle | null>(null)
+  const jimuMapViewRef = React.useRef<JimuMapView | null>(null);
+  const mapClickHandleRef = React.useRef<__esri.Handle | null>(null);
+
+  const getStoredMapView = (): __esri.MapView | null => {
+    const candidateView = jimuMapViewRef.current?.view;
+    return isMapView(candidateView) ? candidateView : null;
+  };
 
   const setupMapView = hooks.useEventCallback((view: __esri.MapView) => {
-    disablePopup(view)
-    ensureGraphicsLayer(view)
+    disablePopup(view);
+    ensureGraphicsLayer(view);
 
     if (mapClickHandleRef.current) {
-      mapClickHandleRef.current.remove()
-      mapClickHandleRef.current = null
+      mapClickHandleRef.current.remove();
+      mapClickHandleRef.current = null;
     }
     try {
-      mapClickHandleRef.current = view.on("click", onMapClick)
+      mapClickHandleRef.current = view.on("click", onMapClick);
     } catch (error) {
-      console.error("Failed to register map click handler", error)
-      mapClickHandleRef.current = null
+      console.error("Failed to register map click handler", error);
+      mapClickHandleRef.current = null;
     }
-  })
+  });
 
   const cleanupPreviousView = hooks.useEventCallback(() => {
-    const previousView = jimuMapViewRef.current?.view
+    const previousView = getStoredMapView();
     if (previousView) {
-      restorePopup(previousView)
-      destroyGraphicsLayer(previousView)
+      restorePopup(previousView);
+      destroyGraphicsLayer(previousView);
 
       if (mapClickHandleRef.current) {
-        mapClickHandleRef.current.remove()
-        mapClickHandleRef.current = null
+        mapClickHandleRef.current.remove();
+        mapClickHandleRef.current = null;
       }
     }
-  })
+  });
 
-  const onActiveViewChange = hooks.useEventCallback((jimuMapView: any) => {
-    const view = jimuMapView?.view
-    if (!view) {
-      return
+  const onActiveViewChange = hooks.useEventCallback(
+    (jimuMapView: JimuMapView | null | undefined) => {
+      const viewCandidate = jimuMapView?.view;
+      if (!isMapView(viewCandidate)) {
+        return;
+      }
+
+      const view = viewCandidate;
+
+      const previousView = getStoredMapView();
+      if (previousView && previousView !== view) {
+        cleanupPreviousView();
+      }
+
+      jimuMapViewRef.current = jimuMapView ?? null;
+
+      // If modules are ready, setup immediately. Otherwise, wait for modules.
+      if (modules) {
+        setupMapView(view);
+      }
     }
-
-    const previousView = jimuMapViewRef.current?.view
-    if (previousView && previousView !== view) {
-      cleanupPreviousView()
-    }
-
-    jimuMapViewRef.current = jimuMapView
-
-    // If modules are ready, setup immediately. Otherwise, wait for modules.
-    if (modules) {
-      setupMapView(view)
-    }
-  })
+  );
 
   const reactivateMapView = hooks.useEventCallback(() => {
-    const currentView = jimuMapViewRef.current?.view
+    const currentView = getStoredMapView();
     if (currentView && modules) {
-      disablePopup(currentView)
+      disablePopup(currentView);
       if (mapClickHandleRef.current) {
-        mapClickHandleRef.current.remove()
-        mapClickHandleRef.current = null
+        mapClickHandleRef.current.remove();
+        mapClickHandleRef.current = null;
       }
       try {
-        mapClickHandleRef.current = currentView.on("click", onMapClick)
+        mapClickHandleRef.current = currentView.on("click", onMapClick);
       } catch (error) {
-        console.error("Failed to reactivate map click handler", error)
-        mapClickHandleRef.current = null
+        console.error("Failed to reactivate map click handler", error);
+        mapClickHandleRef.current = null;
       }
     }
-  })
+  });
 
   const cleanup = hooks.useEventCallback(() => {
-    const currentView = jimuMapViewRef.current?.view
-    restorePopup(currentView)
+    const currentView = getStoredMapView();
+    restorePopup(currentView ?? undefined);
 
     if (mapClickHandleRef.current) {
-      mapClickHandleRef.current.remove()
-      mapClickHandleRef.current = null
+      mapClickHandleRef.current.remove();
+      mapClickHandleRef.current = null;
     }
 
     if (currentView) {
-      destroyGraphicsLayer(currentView)
+      destroyGraphicsLayer(currentView);
     }
-  })
+  });
 
   hooks.useUnmount(() => {
-    cleanup()
-  })
+    cleanup();
+  });
 
   // Setup map view when modules become ready (if map view is already available)
   hooks.useUpdateEffect(() => {
-    if (modules && jimuMapViewRef.current?.view && !mapClickHandleRef.current) {
-      setupMapView(jimuMapViewRef.current.view)
+    const storedView = getStoredMapView();
+    if (modules && storedView && !mapClickHandleRef.current) {
+      setupMapView(storedView);
     }
-  }, [modules, setupMapView])
+  }, [modules, setupMapView]);
 
   return {
     onActiveViewChange,
-    getCurrentView: () => jimuMapViewRef.current?.view,
+    getCurrentView: getStoredMapView,
     reactivateMapView,
     cleanup,
-  }
-}
+  };
+};
 
-export const useStringConfigValue = (config: { [key: string]: any }) => {
-  const configRef = hooks.useLatest(config)
-  return hooks.useEventCallback((key: string, defaultValue = ""): string => {
-    const v = configRef.current?.[key]
-    return typeof v === "string" ? v : defaultValue
-  })
-}
-
-export const useBooleanConfigValue = (config: { [key: string]: any }) => {
-  const configRef = hooks.useLatest(config)
-  return hooks.useEventCallback(
-    (key: string, defaultValue = false): boolean => {
-      const v = configRef.current?.[key]
-      return typeof v === "boolean" ? v : defaultValue
+export const useBooleanConfigValue = (config: unknown) => {
+  const configRef = hooks.useLatest(config);
+  return hooks.useEventCallback((key: string, defaultValue = false) => {
+    const current = configRef.current;
+    if (current && isConfigDictionary(current)) {
+      const value = current[key];
+      if (typeof value === "boolean") {
+        return value;
+      }
     }
-  )
-}
+    return defaultValue;
+  });
+};
 
-export const useNumberConfigValue = (config: { [key: string]: any }) => {
-  const configRef = hooks.useLatest(config)
+export const useNumberConfigValue = (config: unknown) => {
+  const configRef = hooks.useLatest(config);
   return hooks.useEventCallback(
     (key: string, defaultValue?: number): number | undefined => {
-      const v = configRef.current?.[key]
-      if (typeof v === "number" && Number.isFinite(v)) return v
-      return defaultValue
+      const current = configRef.current;
+      if (current && isConfigDictionary(current)) {
+        const value = current[key];
+        if (typeof value === "number" && Number.isFinite(value)) {
+          return value;
+        }
+      }
+      return defaultValue;
     }
-  )
-}
+  );
+};
 
-export const useUpdateConfig = (
+export const useUpdateConfig = <TConfig>(
   id: string,
-  config: { [key: string]: any; set?: (key: string, value: any) => any },
-  onSettingChange: (update: { id: string; config: any }) => void
+  config: TConfig,
+  onSettingChange: (update: { id: string; config: TConfig }) => void
 ) => {
-  return hooks.useEventCallback((key: string, value: any) => {
+  const configRef = hooks.useLatest(config);
+  return hooks.useEventCallback((key: string, value: unknown) => {
+    const current = configRef.current as unknown;
+    let nextConfig: TConfig;
+
+    if (hasConfigSet<TConfig>(current)) {
+      nextConfig = current.set(key, value);
+    } else if (isConfigDictionary(current)) {
+      nextConfig = {
+        ...current,
+        [key]: value,
+      } as TConfig;
+    } else {
+      nextConfig = { [key]: value } as unknown as TConfig;
+    }
+
     onSettingChange({
       id,
-      config: config.set ? config.set(key, value) : { ...config, [key]: value },
-    })
-  })
-}
+      config: nextConfig,
+    });
+  });
+};
 
 export const useNumericConfigHandler = (
   localValue: string,
   setLocalValue: (val: string) => void,
   validate: (val: string) => boolean,
-  updateConfig: (key: string, value: any) => void,
+  updateConfig: ConfigUpdater,
   configKey: string,
-  debounce: (val: string) => void
+  debounce: DebouncedFn<(val: string) => void>
 ) => {
   const handleChange = hooks.useEventCallback((value: number) => {
-    setLocalValue(String(value))
-    debounce(String(value))
-  })
+    setLocalValue(String(value));
+    debounce(String(value));
+  });
 
   const handleBlur = hooks.useEventCallback(() => {
-    ;(debounce as any).cancel?.()
-    const isValid = validate(localValue)
+    debounce.cancel();
+    const isValid = validate(localValue);
     if (isValid) {
-      const num = parseInt(localValue, 10)
-      updateConfig(configKey, num)
+      const num = parseInt(localValue, 10);
+      updateConfig(configKey, num);
     }
-  })
+  });
 
-  return { handleChange, handleBlur }
-}
+  return { handleChange, handleBlur };
+};
 
 export const useSwitchConfigHandler = (
   localValue: boolean,
   setLocalValue: (val: boolean) => void,
-  updateConfig: (key: string, value: any) => void,
+  updateConfig: ConfigUpdater,
   configKey: string
 ) => {
+  const localValueRef = hooks.useLatest(localValue);
   return hooks.useEventCallback((evt: React.ChangeEvent<HTMLInputElement>) => {
-    const checked = evt.target.checked
-    setLocalValue(checked)
-    updateConfig(configKey, checked)
-  })
-}
+    const checked = evt.target.checked;
+    if (checked === localValueRef.current) {
+      return;
+    }
+    setLocalValue(checked);
+    updateConfig(configKey, checked);
+  });
+};
 
 export const useSliderConfigHandler = <T extends number>(
   localValue: T,
   setLocalValue: (val: T) => void,
-  updateConfig: (key: string, value: any) => void,
+  updateConfig: ConfigUpdater,
   configKey: string,
   normalizer: (rawValue: number) => T
 ) => {
   return hooks.useEventCallback((evt: React.ChangeEvent<HTMLInputElement>) => {
-    const rawValue = Number.parseFloat(evt?.target?.value ?? "")
+    const rawValue = Number.parseFloat(evt?.target?.value ?? "");
     if (!Number.isFinite(rawValue)) {
-      return
+      return;
     }
-    const nextValue = normalizer(rawValue)
+    const nextValue = normalizer(rawValue);
     if (Math.abs(localValue - nextValue) < 0.0001) {
-      return
+      return;
     }
-    setLocalValue(nextValue)
-    updateConfig(configKey, nextValue)
-  })
-}
+    setLocalValue(nextValue);
+    updateConfig(configKey, nextValue);
+  });
+};
 
 export const useValidatedNumericHandler = (params: {
-  localValue: string
-  setLocalValue: (value: string) => void
-  validate: (value: string) => boolean
-  updateConfig: (field: string, value: number) => void
-  configField: string
-  clamp?: { min: number; max: number }
-  debounce?: number
+  localValue: string;
+  setLocalValue: (value: string) => void;
+  validate: (value: string) => boolean;
+  updateConfig: (field: string, value: number) => void;
+  configField: string;
+  clamp?: { min: number; max: number };
+  debounce?: number;
 }) => {
   const {
     localValue,
@@ -696,34 +796,34 @@ export const useValidatedNumericHandler = (params: {
     configField,
     clamp,
     debounce: debounceMs,
-  } = params
+  } = params;
 
-  const debouncedValidation = useDebounce(validate, debounceMs ?? 0)
-  const updateConfigLatest = hooks.useLatest(updateConfig)
+  const debouncedValidation = useDebounce(validate, debounceMs ?? 0);
+  const updateConfigLatest = hooks.useLatest(updateConfig);
 
   const handleChange = hooks.useEventCallback((value: number) => {
     const normalized = clamp
       ? Math.max(clamp.min, Math.min(clamp.max, Math.round(value)))
-      : Math.round(value)
-    setLocalValue(String(normalized))
+      : Math.round(value);
+    setLocalValue(String(normalized));
     if (debounceMs) {
-      debouncedValidation(String(normalized))
+      debouncedValidation(String(normalized));
     }
-  })
+  });
 
   const handleBlur = hooks.useEventCallback(() => {
     if (debounceMs) {
-      debouncedValidation.cancel()
+      debouncedValidation.cancel();
     }
-    const isValid = validate(localValue)
+    const isValid = validate(localValue);
     if (isValid) {
-      const num = parseInt(localValue, 10)
-      updateConfigLatest.current(configField, num)
+      const num = parseInt(localValue, 10);
+      updateConfigLatest.current(configField, num);
     }
-  })
+  });
 
-  return { handleChange, handleBlur }
-}
+  return { handleChange, handleBlur };
+};
 
 export const useNumericValidator = (
   fieldKey: string,
@@ -732,176 +832,179 @@ export const useNumericValidator = (
   errorMessage: string,
   setFieldErrors: (
     fn: (prev: { [key: string]: string | undefined }) => {
-      [key: string]: string | undefined
+      [key: string]: string | undefined;
     }
   ) => void
 ) => {
   return hooks.useEventCallback((value: string): boolean => {
-    const { validateNumericRange } = require("./utils")
-    const result = validateNumericRange({ value, min, max, errorMessage })
+    const { validateNumericRange } = require("./utils");
+    const result = validateNumericRange({ value, min, max, errorMessage });
     setFieldErrors((prev) => ({
       ...prev,
       [fieldKey]: result.valid ? undefined : result.error,
-    }))
-    return result.valid
-  })
-}
+    }));
+    return result.valid;
+  });
+};
 
-export const useThrottle = <T extends (...args: any[]) => void>(
+export const useThrottle = <T extends (...args: unknown[]) => void>(
   callback: T,
   delay: number
 ): ((...args: Parameters<T>) => void) => {
-  const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0
-  const lastCallTimeRef = React.useRef<number>(0)
-  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingArgsRef = React.useRef<Parameters<T> | null>(null)
-  const mountedRef = React.useRef(true)
-  const callbackRef = hooks.useLatest(callback)
+  const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0;
+  const lastCallTimeRef = React.useRef<number>(0);
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingArgsRef = React.useRef<Parameters<T> | null>(null);
+  const mountedRef = React.useRef(true);
+  const callbackRef = hooks.useLatest(callback);
 
   const execute = hooks.useEventCallback((args: Parameters<T>) => {
-    if (!mountedRef.current) return
-    lastCallTimeRef.current = Date.now()
-    pendingArgsRef.current = null
+    if (!mountedRef.current) return;
+    lastCallTimeRef.current = Date.now();
+    pendingArgsRef.current = null;
     try {
-      callbackRef.current(...args)
+      callbackRef.current(...args);
     } catch (error) {
       if (!isAbortError(error)) {
-        console.error("Throttled function error:", error)
+        console.error("Throttled function error:", error);
       }
     }
-  })
+  });
 
   const throttled = hooks.useEventCallback((...args: Parameters<T>) => {
-    const now = Date.now()
-    const timeSinceLastCall = now - lastCallTimeRef.current
+    const now = Date.now();
+    const timeSinceLastCall = now - lastCallTimeRef.current;
 
     if (timeSinceLastCall >= safeDelay) {
       // Execute immediately if enough time has passed
-      execute(args)
+      execute(args);
     } else {
       // Schedule execution for remaining time
-      pendingArgsRef.current = args
+      pendingArgsRef.current = args;
       if (!timeoutRef.current) {
-        const remainingTime = safeDelay - timeSinceLastCall
+        const remainingTime = safeDelay - timeSinceLastCall;
         timeoutRef.current = setTimeout(() => {
-          timeoutRef.current = null
+          timeoutRef.current = null;
           if (pendingArgsRef.current && mountedRef.current) {
-            execute(pendingArgsRef.current)
+            execute(pendingArgsRef.current);
           }
-        }, remainingTime)
+        }, remainingTime);
       }
     }
-  })
+  });
 
   hooks.useEffectOnce(() => {
     return () => {
-      mountedRef.current = false
+      mountedRef.current = false;
       if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current)
-        timeoutRef.current = null
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
       }
-    }
-  })
+    };
+  });
 
-  return throttled
-}
+  return throttled;
+};
 
-export const useDebounce = <T extends (...args: any[]) => void>(
+export const useDebounce = <T extends (...args: unknown[]) => void>(
   callback: T,
   delay: number,
   options?: { onPendingChange?: (pending: boolean) => void }
 ): DebouncedFn<T> => {
-  const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0
-  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingRef = React.useRef(false)
-  const mountedRef = React.useRef(true)
-  const callbackRef = hooks.useLatest(callback)
-  const optionsRef = hooks.useLatest(options)
+  const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0;
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRef = React.useRef(false);
+  const mountedRef = React.useRef(true);
+  const callbackRef = hooks.useLatest(callback);
+  const optionsRef = hooks.useLatest(options);
 
   const notifyPending = hooks.useEventCallback((next: boolean) => {
-    if (pendingRef.current === next) return
-    pendingRef.current = next
-    const handler = optionsRef.current?.onPendingChange
+    if (pendingRef.current === next) return;
+    pendingRef.current = next;
+    const handler = optionsRef.current?.onPendingChange;
     if (typeof handler === "function") {
       try {
-        handler(next)
-      } catch {}
+        handler(next);
+      } catch (error) {
+        // Silently ignore callback errors to prevent breaking debounce mechanism
+        logger.debug("onPendingChange callback failed", { error });
+      }
     }
-  })
+  });
 
   const cancel = hooks.useEventCallback(() => {
     if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current)
-      timeoutRef.current = null
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
     }
     if (pendingRef.current) {
-      notifyPending(false)
+      notifyPending(false);
     }
-  })
+  });
 
   const run = hooks.useEventCallback((...args: Parameters<T>) => {
     if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current)
+      clearTimeout(timeoutRef.current);
     }
-    notifyPending(true)
+    notifyPending(true);
     timeoutRef.current = setTimeout(() => {
-      timeoutRef.current = null
-      if (!mountedRef.current) return
+      timeoutRef.current = null;
+      if (!mountedRef.current) return;
       try {
-        callbackRef.current(...args)
+        callbackRef.current(...args);
       } finally {
-        notifyPending(false)
+        notifyPending(false);
       }
-    }, safeDelay)
-  })
+    }, safeDelay);
+  });
 
-  const debouncedRef = React.useRef<DebouncedFn<T> | null>(null)
-  const runRef = hooks.useLatest(run)
-  const cancelRef = hooks.useLatest(cancel)
+  const debouncedRef = React.useRef<DebouncedFn<T> | null>(null);
+  const runRef = hooks.useLatest(run);
+  const cancelRef = hooks.useLatest(cancel);
 
   if (!debouncedRef.current) {
     const runner = ((...args: Parameters<T>) => {
-      runRef.current(...args)
-    }) as DebouncedFn<T>
-    runner.cancel = () => cancelRef.current()
-    debouncedRef.current = runner
+      runRef.current(...args);
+    }) as DebouncedFn<T>;
+    runner.cancel = () => cancelRef.current();
+    debouncedRef.current = runner;
   }
 
   hooks.useEffectOnce(() => {
     return () => {
-      mountedRef.current = false
-      cancelRef.current()
-    }
-  })
+      mountedRef.current = false;
+      cancelRef.current();
+    };
+  });
 
-  return debouncedRef.current
-}
+  return debouncedRef.current;
+};
 
 export const useHoverQuery = (params: HoverQueryParams) => {
-  const { config, dsManager, enablePIIMasking, translate } = params
+  const { config, dsManager, enablePIIMasking, translate } = params;
   const [hoverTooltipData, setHoverTooltipData] = React.useState<{
-    fastighet: string
-    bostadr: string
-  } | null>(null)
-  const [isHoverQueryActive, setIsHoverQueryActive] = React.useState(false)
-  const hoverQueryAbortRef = React.useRef<AbortController | null>(null)
+    fastighet: string;
+    bostadr: string;
+  } | null>(null);
+  const [isHoverQueryActive, setIsHoverQueryActive] = React.useState(false);
+  const hoverQueryAbortRef = React.useRef<AbortController | null>(null);
   const lastHoverQueryPointRef = React.useRef<{ x: number; y: number } | null>(
     null
-  )
+  );
 
   const queryPropertyAtPoint = hooks.useEventCallback(
     async (mapPoint: __esri.Point) => {
       if (hoverQueryAbortRef.current) {
-        hoverQueryAbortRef.current.abort()
-        hoverQueryAbortRef.current = null
+        hoverQueryAbortRef.current.abort();
+        hoverQueryAbortRef.current = null;
       }
 
-      const controller = new AbortController()
-      hoverQueryAbortRef.current = controller
+      const controller = new AbortController();
+      hoverQueryAbortRef.current = controller;
 
-      setIsHoverQueryActive(true)
+      setIsHoverQueryActive(true);
       try {
-        const { executeHoverQuery } = require("./utils")
+        const { executeHoverQuery } = require("./utils");
         const result = await executeHoverQuery({
           mapPoint,
           config: {
@@ -913,37 +1016,37 @@ export const useHoverQuery = (params: HoverQueryParams) => {
           signal: controller.signal,
           enablePIIMasking,
           translate,
-        })
+        });
 
-        if (controller.signal.aborted) return
+        if (controller.signal.aborted) return;
 
-        setHoverTooltipData(result)
-        setIsHoverQueryActive(false)
+        setHoverTooltipData(result);
+        setIsHoverQueryActive(false);
       } catch (error) {
-        if (isAbortError(error)) return
-        setHoverTooltipData(null)
-        setIsHoverQueryActive(false)
+        if (isAbortError(error)) return;
+        setHoverTooltipData(null);
+        setIsHoverQueryActive(false);
       } finally {
         if (hoverQueryAbortRef.current === controller) {
-          hoverQueryAbortRef.current = null
+          hoverQueryAbortRef.current = null;
         }
       }
     }
-  )
+  );
 
   const cleanup = hooks.useEventCallback(() => {
     if (hoverQueryAbortRef.current) {
-      hoverQueryAbortRef.current.abort()
-      hoverQueryAbortRef.current = null
+      hoverQueryAbortRef.current.abort();
+      hoverQueryAbortRef.current = null;
     }
-    setHoverTooltipData(null)
-    setIsHoverQueryActive(false)
-    lastHoverQueryPointRef.current = null
-  })
+    setHoverTooltipData(null);
+    setIsHoverQueryActive(false);
+    lastHoverQueryPointRef.current = null;
+  });
 
   hooks.useUnmount(() => {
-    cleanup()
-  })
+    cleanup();
+  });
 
   return {
     hoverTooltipData,
@@ -951,5 +1054,5 @@ export const useHoverQuery = (params: HoverQueryParams) => {
     queryPropertyAtPoint,
     lastHoverQueryPointRef,
     cleanup,
-  }
-}
+  };
+};

@@ -1,24 +1,24 @@
 /** @jsx jsx */
-import { React, jsx } from "jimu-core"
-import { useReactTable, flexRender } from "@tanstack/react-table"
-import type { SortingState, ColumnFiltersState } from "@tanstack/react-table"
-import type { PropertyTableProps } from "../../config/types"
+import { React, jsx } from "jimu-core";
+import { useReactTable, flexRender } from "@tanstack/react-table";
+import type { SortingState, ColumnFiltersState } from "@tanstack/react-table";
+import type { PropertyTableProps } from "../../config/types";
 import {
   createTableConfig,
   getDefaultSorting,
   getDefaultColumnFilters,
   getRowId,
   getVisibleRows,
-} from "../../shared/config"
+} from "../../shared/config";
 
 export const PropertyTable = (props: PropertyTableProps) => {
-  const { data, columns, translate, styles } = props
+  const { data, columns, translate, styles } = props;
 
   const [sorting, setSorting] =
-    React.useState<SortingState>(getDefaultSorting())
+    React.useState<SortingState>(getDefaultSorting());
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
     getDefaultColumnFilters()
-  )
+  );
 
   const table = useReactTable({
     data,
@@ -31,18 +31,18 @@ export const PropertyTable = (props: PropertyTableProps) => {
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     ...createTableConfig(),
-  })
+  });
 
-  const visibleRows = getVisibleRows(table)
+  const visibleRows = getVisibleRows(table);
 
   const renderSortIndicator = (isSorted: false | "asc" | "desc") => {
-    if (!isSorted) return null
+    if (!isSorted) return null;
     return (
       <span css={styles.sortIndicator} aria-hidden="true">
         {isSorted === "asc" ? "↑" : "↓"}
       </span>
-    )
-  }
+    );
+  };
 
   return (
     <div
@@ -70,8 +70,10 @@ export const PropertyTable = (props: PropertyTableProps) => {
                   tabIndex={0}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault()
-                      header.column.getToggleSortingHandler()?.(e as any)
+                      e.preventDefault();
+                      const toggleHandler =
+                        header.column.getToggleSortingHandler();
+                      if (toggleHandler) toggleHandler(e.nativeEvent);
                     }
                   }}
                 >
@@ -98,5 +100,5 @@ export const PropertyTable = (props: PropertyTableProps) => {
         </tbody>
       </table>
     </div>
-  )
-}
+  );
+};

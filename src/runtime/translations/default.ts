@@ -70,4 +70,4 @@ export default {
   errorNoPropertiesSelected: "No properties selected.",
   urlGeneratedFor: "URL generated for {count} properties.",
   urlManualCopyLabel: "FBWebb report URL",
-}
+};

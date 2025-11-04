@@ -73,7 +73,7 @@ System.register([], function (e) {
         errorNoPropertiesSelected: "Inga fastigheter valda.",
         urlGeneratedFor: "URL genererad för {count} fastigheter.",
         urlManualCopyLabel: "FBWebb rapport-URL",
-      })
+      });
     },
-  }
-})
+  };
+});
