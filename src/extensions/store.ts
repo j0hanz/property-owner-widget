@@ -93,12 +93,20 @@ const ensureSubState = (
   global: IMPropertyGlobalState,
   widgetId: string
 ): ImmutableObject<PropertyWidgetState> => {
-  const current = global.byId?.[widgetId];
+  const current = (global as { byId?: { [key: string]: unknown } }).byId?.[
+    widgetId
+  ];
   if (!current) return createImmutableState();
+
+  // Check if already immutable
   if (typeof (current as { set?: unknown }).set === "function") {
-    return current;
+    return current as ImmutableObject<PropertyWidgetState>;
   }
-  return Immutable(current);
+
+  // Wrap plain object as immutable
+  return Immutable(
+    current as PropertyWidgetState
+  ) as ImmutableObject<PropertyWidgetState>;
 };
 
 const setSubState = (
@@ -107,9 +115,9 @@ const setSubState = (
   next: ImmutableObject<PropertyWidgetState>
 ): IMPropertyGlobalState => {
   const byId = {
-    ...global.byId,
-    [widgetId]: next,
+    ...((global as { byId?: { [key: string]: unknown } }).byId || {}),
   };
+  byId[widgetId] = next;
   return Immutable({ byId }) as unknown as IMPropertyGlobalState;
 };
 
@@ -118,18 +126,44 @@ const reduceOne = (
   action: PropertyAction
 ): ImmutableObject<PropertyWidgetState> => {
   switch (action.type) {
-    case PropertyActionType.SET_ERROR:
-      return state.set("error", action.error).set("isQueryInFlight", false);
-    case PropertyActionType.CLEAR_ERROR:
-      return state.set("error", null);
-    case PropertyActionType.SET_SELECTED_PROPERTIES:
-      return state.set("selectedProperties", action.properties);
+    case PropertyActionType.SET_ERROR: {
+      const plain = state as unknown as PropertyWidgetState;
+      return Immutable({
+        ...plain,
+        error: action.error,
+        isQueryInFlight: false,
+      }) as ImmutableObject<PropertyWidgetState>;
+    }
+    case PropertyActionType.CLEAR_ERROR: {
+      const plain = state as unknown as PropertyWidgetState;
+      return Immutable({
+        ...plain,
+        error: null,
+      }) as ImmutableObject<PropertyWidgetState>;
+    }
+    case PropertyActionType.SET_SELECTED_PROPERTIES: {
+      const plain = state as unknown as PropertyWidgetState;
+      return Immutable({
+        ...plain,
+        selectedProperties: action.properties,
+      }) as ImmutableObject<PropertyWidgetState>;
+    }
     case PropertyActionType.CLEAR_ALL:
       return createImmutableState();
-    case PropertyActionType.SET_QUERY_IN_FLIGHT:
-      return state.set("isQueryInFlight", action.inFlight);
-    case PropertyActionType.SET_RAW_RESULTS:
-      return state.set("rawPropertyResults", action.results);
+    case PropertyActionType.SET_QUERY_IN_FLIGHT: {
+      const plain = state as unknown as PropertyWidgetState;
+      return Immutable({
+        ...plain,
+        isQueryInFlight: action.inFlight,
+      }) as ImmutableObject<PropertyWidgetState>;
+    }
+    case PropertyActionType.SET_RAW_RESULTS: {
+      const plain = state as unknown as PropertyWidgetState;
+      return Immutable({
+        ...plain,
+        rawPropertyResults: action.results,
+      }) as ImmutableObject<PropertyWidgetState>;
+    }
     default:
       return state;
   }
@@ -152,7 +186,9 @@ const propertyReducer = (
   if (!isPropertyAction(action)) return state;
 
   if (action.type === PropertyActionType.REMOVE_WIDGET_STATE) {
-    const byId = { ...state.byId };
+    const currentById = (state as { byId?: { [key: string]: unknown } }).byId;
+    if (!currentById || typeof currentById !== "object") return state;
+    const byId = { ...currentById };
     if (!(action.widgetId in byId)) return state;
     delete byId[action.widgetId];
     return Immutable({ byId }) as unknown as IMPropertyGlobalState;
