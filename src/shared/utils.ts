@@ -761,9 +761,8 @@ export const calculatePropertyUpdates = <
   toggleEnabled: boolean,
   maxResults: number
 ): { toRemove: Set<string>; toAdd: T[]; updatedRows: T[] } => {
-  // Build optimized Map structures for O(1) lookups
   const existingByFnr = new Map<string, T[]>();
-  const existingById = new Map<string, T>();
+  const seenIds = new Set<string>();
 
   existingProperties.forEach((row) => {
     const fnrKey = normalizeFnrKey(row.FNR);
@@ -773,14 +772,12 @@ export const calculatePropertyUpdates = <
     } else {
       existingByFnr.set(fnrKey, [row]);
     }
-    existingById.set(row.id, row);
+    seenIds.add(row.id);
   });
 
   const toRemove = new Set<string>();
   const toAdd: T[] = [];
-  const addedIds = new Set<string>();
 
-  // Single-pass processing with Map lookups
   rowsToProcess.forEach((row) => {
     const fnrKey = normalizeFnrKey(row.FNR);
 
@@ -792,12 +789,12 @@ export const calculatePropertyUpdates = <
       }
     }
 
-    if (existingById.has(row.id) || addedIds.has(row.id)) {
+    if (seenIds.has(row.id)) {
       return;
     }
 
     toAdd.push(row);
-    addedIds.add(row.id);
+    seenIds.add(row.id);
   });
 
   // Efficient filtering using Set lookup
@@ -1010,16 +1007,37 @@ export const updateRawPropertyResults = (
   toRemove: Set<string>,
   selectedProperties: Array<{ FNR: string | number; id: string }>,
   normalizeFnrKey: (fnr: FnrValue | null | undefined) => string
-): { [key: string]: SerializedQueryResult } => {
-  // Convert input to Map for efficient processing
+): Map<string, SerializedQueryResult> => {
   const prevMap =
     prev instanceof Map
       ? prev
-      : new Map(Object.entries(prev || {}).map(([k, v]) => [k, v]));
+      : new Map(Object.entries(prev || {}).map(([key, value]) => [key, value]));
+
+  const structuredCloneFn = (
+    globalThis as unknown as {
+      structuredClone?: (value: unknown) => unknown;
+    }
+  ).structuredClone;
 
   const clonePlainValue = (value: unknown): unknown => {
     if (value == null) {
       return null;
+    }
+
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      return value;
+    }
+
+    if (typeof structuredCloneFn === "function") {
+      try {
+        return structuredCloneFn(value);
+      } catch (_error) {
+        // Fall back to manual cloning when structuredClone is unavailable
+      }
     }
 
     if (Array.isArray(value)) {
@@ -1043,14 +1061,6 @@ export const updateRawPropertyResults = (
         });
         return result;
       }
-    }
-
-    if (
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "boolean"
-    ) {
-      return value;
     }
 
     return null;
@@ -1160,13 +1170,7 @@ export const updateRawPropertyResults = (
     }
   });
 
-  // Convert to plain object ONCE for Redux storage (eliminates O(n) overhead on every dispatch)
-  const plainResults: { [key: string]: SerializedQueryResult } = {};
-  updated.forEach((value, key) => {
-    plainResults[key] = value;
-  });
-
-  return plainResults;
+  return updated;
 };
 
 export const createPropertyDispatcher = (

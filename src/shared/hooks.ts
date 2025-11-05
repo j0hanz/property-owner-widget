@@ -199,6 +199,7 @@ export const useGraphicsLayer = (
   const graphicsMapRef = React.useRef<Map<string | number, __esri.Graphic[]>>(
     new Map()
   );
+  const symbolCacheRef = React.useRef<Map<string, __esri.Symbol>>(new Map());
 
   const ensureGraphicsLayer = hooks.useEventCallback(
     (view: __esri.MapView | null | undefined): boolean => {
@@ -254,6 +255,7 @@ export const useGraphicsLayer = (
       graphicsLayerRef.current.removeAll();
     }
     graphicsMapRef.current.clear();
+    symbolCacheRef.current.clear();
   });
 
   const removeGraphicsForFnr = hooks.useEventCallback(
@@ -289,15 +291,31 @@ export const useGraphicsLayer = (
 
     const geometryType = geometry.type;
 
+    const cacheKey = `${geometryType}-${highlightColor.join(",")}-${outlineWidth}`;
+    const cachedSymbol = symbolCacheRef.current.get(cacheKey);
+    if (cachedSymbol) {
+      if (geometryType === "polygon" || geometryType === "extent") {
+        return cachedSymbol as __esri.SimpleFillSymbol;
+      }
+      if (geometryType === "polyline") {
+        return cachedSymbol as __esri.SimpleLineSymbol;
+      }
+      if (geometryType === "point" || geometryType === "multipoint") {
+        return cachedSymbol as __esri.SimpleMarkerSymbol;
+      }
+    }
+
     if (geometryType === "polygon" || geometryType === "extent") {
       const symbolJSON = buildHighlightSymbolJSON(
         highlightColor,
         outlineWidth,
         "polygon"
       );
-      return new currentModules.SimpleFillSymbol(
+      const symbol = new currentModules.SimpleFillSymbol(
         symbolJSON as __esri.SimpleFillSymbolProperties
       );
+      symbolCacheRef.current.set(cacheKey, symbol);
+      return symbol;
     }
 
     if (geometryType === "polyline") {
@@ -306,9 +324,11 @@ export const useGraphicsLayer = (
         outlineWidth,
         "polyline"
       );
-      return new currentModules.SimpleLineSymbol(
+      const symbol = new currentModules.SimpleLineSymbol(
         symbolJSON as __esri.SimpleLineSymbolProperties
       );
+      symbolCacheRef.current.set(cacheKey, symbol);
+      return symbol;
     }
 
     if (geometryType === "point" || geometryType === "multipoint") {
@@ -317,9 +337,11 @@ export const useGraphicsLayer = (
         outlineWidth,
         "point"
       );
-      return new currentModules.SimpleMarkerSymbol(
+      const symbol = new currentModules.SimpleMarkerSymbol(
         symbolJSON as __esri.SimpleMarkerSymbolProperties
       );
+      symbolCacheRef.current.set(cacheKey, symbol);
+      return symbol;
     }
     // Unsupported geometry type
     return null;
@@ -430,12 +452,30 @@ export const useGraphicsLayer = (
         }
       });
 
-      // Use layer.addMany() for batch addition (single DOM update)
       if (highlightGraphics.length > 0) {
-        requestAnimationFrame(() => {
-          if (layer && !layer.destroyed) {
-            layer.addMany(highlightGraphics);
+        const GRAPHICS_PER_FRAME = 10;
+        const chunks: __esri.Graphic[][] = [];
+
+        for (let i = 0; i < highlightGraphics.length; i += GRAPHICS_PER_FRAME) {
+          chunks.push(highlightGraphics.slice(i, i + GRAPHICS_PER_FRAME));
+        }
+
+        const addChunk = (index: number) => {
+          if (!layer || layer.destroyed || index >= chunks.length) {
+            return;
           }
+
+          layer.addMany(chunks[index]);
+
+          if (index + 1 < chunks.length) {
+            requestAnimationFrame(() => {
+              addChunk(index + 1);
+            });
+          }
+        };
+
+        requestAnimationFrame(() => {
+          addChunk(0);
         });
       }
     }
@@ -460,6 +500,7 @@ export const useGraphicsLayer = (
       graphicsLayerRef.current = null;
     }
     graphicsMapRef.current.clear();
+    symbolCacheRef.current.clear();
   });
 
   return {

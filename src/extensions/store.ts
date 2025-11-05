@@ -264,15 +264,70 @@ export const createPropertySelectors = (widgetId: string) => {
     return slice ?? null;
   };
 
+  let lastErrorSlice: ImmutableObject<PropertyWidgetState> | null = null;
+  let lastErrorValue: ErrorState | null = null;
+
+  let lastSelectedSlice: ImmutableObject<PropertyWidgetState> | null = null;
+  let lastSelectedSource: unknown = null;
+  let lastSelectedValue: GridRowData[] = [];
+
+  let lastInFlightSlice: ImmutableObject<PropertyWidgetState> | null = null;
+  let lastInFlightValue = false;
+
+  let lastRawResultsSlice: ImmutableObject<PropertyWidgetState> | null = null;
+  let lastRawResultsSource: unknown = null;
+  let lastRawResultsValue: SerializedQueryResultMap | null = null;
+
   return {
     selectSlice: getSlice,
-    selectError: (state: IMStateWithProperty) => getSlice(state)?.error ?? null,
-    selectSelectedProperties: (state: IMStateWithProperty) =>
-      toGridRowArray(getSlice(state)?.selectedProperties),
-    selectIsQueryInFlight: (state: IMStateWithProperty) =>
-      getSlice(state)?.isQueryInFlight ?? false,
-    selectRawResults: (state: IMStateWithProperty) =>
-      toSerializedResultMap(getSlice(state)?.rawPropertyResults),
+    selectError: (state: IMStateWithProperty) => {
+      const slice = getSlice(state);
+      if (slice === lastErrorSlice) {
+        return lastErrorValue;
+      }
+
+      const error = slice?.error ?? null;
+      lastErrorSlice = slice;
+      lastErrorValue = error;
+      return error;
+    },
+    selectSelectedProperties: (state: IMStateWithProperty) => {
+      const slice = getSlice(state);
+      const source = slice?.selectedProperties;
+      if (slice === lastSelectedSlice && source === lastSelectedSource) {
+        return lastSelectedValue;
+      }
+
+      const properties = toGridRowArray(source);
+      lastSelectedSlice = slice;
+      lastSelectedSource = source;
+      lastSelectedValue = properties;
+      return properties;
+    },
+    selectIsQueryInFlight: (state: IMStateWithProperty) => {
+      const slice = getSlice(state);
+      if (slice === lastInFlightSlice) {
+        return lastInFlightValue;
+      }
+
+      const inFlight = slice?.isQueryInFlight ?? false;
+      lastInFlightSlice = slice;
+      lastInFlightValue = inFlight;
+      return inFlight;
+    },
+    selectRawResults: (state: IMStateWithProperty) => {
+      const slice = getSlice(state);
+      const source = slice?.rawPropertyResults;
+      if (slice === lastRawResultsSlice && source === lastRawResultsSource) {
+        return lastRawResultsValue;
+      }
+
+      const results = toSerializedResultMap(source);
+      lastRawResultsSlice = slice;
+      lastRawResultsSource = source;
+      lastRawResultsValue = results;
+      return results;
+    },
   };
 };
 

@@ -893,12 +893,17 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             normalizeFnrKey
           );
 
-          // Store results but don't update UI yet
+          // Prepare Redux payloads
           const dispatch = propertyDispatchRef.current;
-          const resultsToStore = updatedRawResults;
           const rowsToStore = pipelineResult.updatedRows;
+          const resultsToStore: SerializedQueryResultMap =
+            updatedRawResults instanceof Map
+              ? (Object.fromEntries(
+                  updatedRawResults
+                ) as SerializedQueryResultMap)
+              : updatedRawResults;
 
-          // Clean up removed graphics first
+          // Clean up removed graphics before scheduling new ones
           cleanupRemovedGraphics({
             toRemove: pipelineResult.toRemove,
             removeGraphicsForFnr,
@@ -911,7 +916,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           );
           const outlineWidth = getValidatedOutlineWidth(outlineWidthConfig);
 
-          // Add graphics to map first (batch addition for better performance)
           const graphicsHelpers = {
             addGraphicsToMap,
             addManyGraphicsToMap,
@@ -919,22 +923,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             normalizeFnrKey,
           } satisfies SelectionGraphicsHelpers;
 
-          syncSelectionGraphics({
-            graphicsToAdd: pipelineResult.graphicsToAdd,
-            selectedRows: pipelineResult.updatedRows,
-            getCurrentView,
-            helpers: graphicsHelpers,
-            highlightColor,
-            outlineWidth,
-          });
-          const graphicsStart = performance.now();
-          console.log(
-            "[PERF] Graphics sync started at",
-            graphicsStart - perfStart,
-            "ms"
-          );
-
-          // Now update Redux state AFTER graphics are visible
+          // Update Redux state first so UI reflects changes immediately
           const reduxStart = performance.now();
           console.log(
             "[PERF] Redux update started at",
@@ -953,7 +942,52 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             reduxEnd - reduxStart,
             "ms)"
           );
-          console.log("[PERF] TOTAL TIME:", reduxEnd - perfStart, "ms");
+          console.log("[PERF] UI VISIBLE TIME:", reduxEnd - perfStart, "ms");
+
+          const renderGraphics = () => {
+            if (isStaleRequest()) {
+              return;
+            }
+
+            const graphicsStart = performance.now();
+            console.log(
+              "[PERF] Graphics rendering started at",
+              graphicsStart - perfStart,
+              "ms"
+            );
+
+            syncSelectionGraphics({
+              graphicsToAdd: pipelineResult.graphicsToAdd,
+              selectedRows: pipelineResult.updatedRows,
+              getCurrentView,
+              helpers: graphicsHelpers,
+              highlightColor,
+              outlineWidth,
+            });
+
+            const graphicsEnd = performance.now();
+            console.log(
+              "[PERF] Graphics rendering completed at",
+              graphicsEnd - perfStart,
+              "ms",
+              "(took",
+              graphicsEnd - graphicsStart,
+              "ms)"
+            );
+            console.log(
+              "[PERF] TOTAL TIME (with async graphics):",
+              graphicsEnd - perfStart,
+              "ms"
+            );
+          };
+
+          if (typeof requestAnimationFrame === "function") {
+            requestAnimationFrame(() => {
+              renderGraphics();
+            });
+          } else {
+            renderGraphics();
+          }
         }
 
         tracker.success();

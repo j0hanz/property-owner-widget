@@ -1348,9 +1348,9 @@ describe("Property Widget - Utility Helper Functions", () => {
       ],
     };
 
-    expect(Object.keys(updated).length).toBe(2);
-    expect(updated[ownerRowA.id]).toEqual(expectedSerialized);
-    expect(updated[ownerRowB.id]).toEqual(expectedSerialized);
+    expect(updated.size).toBe(2);
+    expect(updated.get(ownerRowA.id)).toEqual(expectedSerialized);
+    expect(updated.get(ownerRowB.id)).toEqual(expectedSerialized);
   });
 
   it("should remove raw property results for deselected properties", () => {
@@ -1391,8 +1391,8 @@ describe("Property Widget - Utility Helper Functions", () => {
       normalizeFnrKey
     );
     expect(ownerRow.id in prev).toBe(true);
-    expect(ownerRow.id in updated).toBe(false);
-    expect(Object.keys(updated).length).toBe(0);
+    expect(updated.has(ownerRow.id)).toBe(false);
+    expect(updated.size).toBe(0);
   });
 
   it("should create and clear cursor graphics through sync helper", () => {
