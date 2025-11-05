@@ -23,6 +23,7 @@ import {
   computeWidgetsToClose,
   copyToClipboard,
   formatPropertiesForClipboard,
+  applySortingToProperties,
 } from "../shared/utils";
 import {
   isValidArcGISUrl,
@@ -2688,5 +2689,628 @@ describe("Export Utilities - exportData", () => {
       createElementSpy.mockRestore();
       jest.useRealTimers();
     }
+  });
+});
+
+describe("Property Widget - Sort-Aware Copy", () => {
+  it("should copy properties in display order when sorted ascending by FASTIGHET", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "3",
+        UUID_FASTIGHET: "uuid-3",
+        FASTIGHET: "Zeta 1:1",
+        BOSTADR: "Owner Z",
+        ADDRESS: "Owner Z",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Alpha 1:1",
+        BOSTADR: "Owner A",
+        ADDRESS: "Owner A",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "3",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "Beta 1:1",
+        BOSTADR: "Owner B",
+        ADDRESS: "Owner B",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted).toHaveLength(3);
+    expect(sorted[0].FASTIGHET).toBe("Alpha 1:1");
+    expect(sorted[1].FASTIGHET).toBe("Beta 1:1");
+    expect(sorted[2].FASTIGHET).toBe("Zeta 1:1");
+  });
+
+  it("should copy properties in display order when sorted descending by FASTIGHET", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Alpha 1:1",
+        BOSTADR: "Owner A",
+        ADDRESS: "Owner A",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "3",
+        UUID_FASTIGHET: "uuid-3",
+        FASTIGHET: "Zeta 1:1",
+        BOSTADR: "Owner Z",
+        ADDRESS: "Owner Z",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting = [{ id: "FASTIGHET", desc: true }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted).toHaveLength(2);
+    expect(sorted[0].FASTIGHET).toBe("Zeta 1:1");
+    expect(sorted[1].FASTIGHET).toBe("Alpha 1:1");
+  });
+
+  it("should copy properties in display order when sorted ascending by ADDRESS", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Property 1",
+        BOSTADR: "Örngatan 5",
+        ADDRESS: "Örngatan 5",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "Property 2",
+        BOSTADR: "Åsgatan 10",
+        ADDRESS: "Åsgatan 10",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "3",
+        FNR: "3",
+        UUID_FASTIGHET: "uuid-3",
+        FASTIGHET: "Property 3",
+        BOSTADR: "Bergvägen 3",
+        ADDRESS: "Bergvägen 3",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting = [{ id: "ADDRESS", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted).toHaveLength(3);
+    // Swedish alphabetical order: B < Å < Ö
+    expect(sorted[0].ADDRESS).toBe("Bergvägen 3");
+    expect(sorted[1].ADDRESS).toBe("Åsgatan 10");
+    expect(sorted[2].ADDRESS).toBe("Örngatan 5");
+  });
+
+  it("should return original order when no sorting applied", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "3",
+        UUID_FASTIGHET: "uuid-3",
+        FASTIGHET: "Zeta 1:1",
+        BOSTADR: "Owner Z",
+        ADDRESS: "Owner Z",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Alpha 1:1",
+        BOSTADR: "Owner A",
+        ADDRESS: "Owner A",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting: Array<{ id: string; desc: boolean }> = [];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted).toHaveLength(2);
+    expect(sorted[0].FASTIGHET).toBe("Zeta 1:1");
+    expect(sorted[1].FASTIGHET).toBe("Alpha 1:1");
+    expect(sorted).not.toBe(properties);
+  });
+
+  it("should handle empty properties array", () => {
+    const properties: GridRowData[] = [];
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted).toHaveLength(0);
+    expect(sorted).toEqual([]);
+  });
+
+  it("should handle numeric sorting in property names", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Property 10:1",
+        BOSTADR: "Owner 1",
+        ADDRESS: "Owner 1",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "Property 2:1",
+        BOSTADR: "Owner 2",
+        ADDRESS: "Owner 2",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "3",
+        FNR: "3",
+        UUID_FASTIGHET: "uuid-3",
+        FASTIGHET: "Property 100:1",
+        BOSTADR: "Owner 3",
+        ADDRESS: "Owner 3",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted).toHaveLength(3);
+    expect(sorted[0].FASTIGHET).toBe("Property 2:1");
+    expect(sorted[1].FASTIGHET).toBe("Property 10:1");
+    expect(sorted[2].FASTIGHET).toBe("Property 100:1");
+  });
+
+  it("should handle null and undefined values when sorting", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Property A",
+        BOSTADR: "Owner A",
+        ADDRESS: "Owner A",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "",
+        BOSTADR: "",
+        ADDRESS: "",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "3",
+        FNR: "3",
+        UUID_FASTIGHET: "uuid-3",
+        FASTIGHET: "Property B",
+        BOSTADR: "Owner B",
+        ADDRESS: "Owner B",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted).toHaveLength(3);
+    expect(sorted[0].FASTIGHET).toBe("");
+    expect(sorted[1].FASTIGHET).toBe("Property A");
+    expect(sorted[2].FASTIGHET).toBe("Property B");
+  });
+
+  it("should not mutate original properties array", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "Zeta 1:1",
+        BOSTADR: "Owner Z",
+        ADDRESS: "Owner Z",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Alpha 1:1",
+        BOSTADR: "Owner A",
+        ADDRESS: "Owner A",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const originalOrder = [...properties];
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(properties[0].FASTIGHET).toBe("Zeta 1:1");
+    expect(properties[1].FASTIGHET).toBe("Alpha 1:1");
+    expect(sorted[0].FASTIGHET).toBe("Alpha 1:1");
+    expect(sorted[1].FASTIGHET).toBe("Zeta 1:1");
+    expect(properties).toEqual(originalOrder);
+  });
+
+  it("should integrate with formatPropertiesForClipboard correctly", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "Zeta 1:1",
+        BOSTADR: "Zeta Owner",
+        ADDRESS: "Zeta Owner",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Alpha 1:1",
+        BOSTADR: "Alpha Owner",
+        ADDRESS: "Alpha Owner",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+    const formatted = formatPropertiesForClipboard(
+      sorted,
+      false,
+      "Unknown owner"
+    );
+
+    const lines = formatted.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("Alpha 1:1");
+    expect(lines[1]).toContain("Zeta 1:1");
+  });
+});
+
+describe("Property Widget - Sort-Aware Export", () => {
+  const createMockProperties = (): GridRowData[] => [
+    {
+      id: "1_1",
+      FNR: "1",
+      UUID_FASTIGHET: "uuid-1",
+      FASTIGHET: "Gamma 1:1",
+      BOSTADR: "",
+      ADDRESS: "C Street",
+      rawOwner: undefined,
+      geometryType: "polygon",
+      geometry: null,
+    },
+    {
+      id: "2_2",
+      FNR: "2",
+      UUID_FASTIGHET: "uuid-2",
+      FASTIGHET: "Alpha 1:1",
+      BOSTADR: "",
+      ADDRESS: "A Street",
+      rawOwner: undefined,
+      geometryType: "polygon",
+      geometry: null,
+    },
+    {
+      id: "3_3",
+      FNR: "3",
+      UUID_FASTIGHET: "uuid-3",
+      FASTIGHET: "Beta 1:1",
+      BOSTADR: "",
+      ADDRESS: "B Street",
+      rawOwner: undefined,
+      geometryType: "polygon",
+      geometry: null,
+    },
+  ];
+
+  it("should export JSON with ascending FASTIGHET sort", () => {
+    const properties = createMockProperties();
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+
+    const sorted = applySortingToProperties(properties, sorting);
+    const exported = convertToJSON(sorted, false, "Unknown");
+
+    expect(exported).toHaveLength(3);
+    expect(exported[0].FASTIGHET).toBe("Alpha 1:1");
+    expect(exported[1].FASTIGHET).toBe("Beta 1:1");
+    expect(exported[2].FASTIGHET).toBe("Gamma 1:1");
+  });
+
+  it("should export JSON with descending FASTIGHET sort", () => {
+    const properties = createMockProperties();
+    const sorting = [{ id: "FASTIGHET", desc: true }];
+
+    const sorted = applySortingToProperties(properties, sorting);
+    const exported = convertToJSON(sorted, false, "Unknown");
+
+    expect(exported).toHaveLength(3);
+    expect(exported[0].FASTIGHET).toBe("Gamma 1:1");
+    expect(exported[1].FASTIGHET).toBe("Beta 1:1");
+    expect(exported[2].FASTIGHET).toBe("Alpha 1:1");
+  });
+
+  it("should export CSV with ascending ADDRESS sort", () => {
+    const properties = createMockProperties();
+    const sorting = [{ id: "ADDRESS", desc: false }];
+
+    const sorted = applySortingToProperties(properties, sorting);
+    const csv = convertToCSV(sorted);
+
+    const lines = csv.split("\n");
+    expect(lines).toHaveLength(4); // header + 3 rows
+    expect(lines[0]).toBe("FNR,UUID_FASTIGHET,FASTIGHET,BOSTADR,ADDRESS");
+    expect(lines[1]).toContain("Alpha 1:1"); // A Street
+    expect(lines[2]).toContain("Beta 1:1"); // B Street
+    expect(lines[3]).toContain("Gamma 1:1"); // C Street
+  });
+
+  it("should export CSV with descending ADDRESS sort", () => {
+    const properties = createMockProperties();
+    const sorting = [{ id: "ADDRESS", desc: true }];
+
+    const sorted = applySortingToProperties(properties, sorting);
+    const csv = convertToCSV(sorted);
+
+    const lines = csv.split("\n");
+    expect(lines).toHaveLength(4);
+    expect(lines[1]).toContain("Gamma 1:1"); // C Street
+    expect(lines[2]).toContain("Beta 1:1"); // B Street
+    expect(lines[3]).toContain("Alpha 1:1"); // A Street
+  });
+
+  it("should export GeoJSON with sorting preserved", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1_1",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Zeta 1:1",
+        BOSTADR: "Z Address",
+        ADDRESS: "Z Address",
+        rawOwner: undefined,
+        geometryType: "polygon",
+        geometry: {
+          rings: [
+            [
+              [0, 0],
+              [1, 0],
+              [1, 1],
+              [0, 1],
+              [0, 0],
+            ],
+          ],
+        },
+      },
+      {
+        id: "2_2",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "Alpha 1:1",
+        BOSTADR: "A Address",
+        ADDRESS: "A Address",
+        rawOwner: undefined,
+        geometryType: "polygon",
+        geometry: {
+          rings: [
+            [
+              [2, 2],
+              [3, 2],
+              [3, 3],
+              [2, 3],
+              [2, 2],
+            ],
+          ],
+        },
+      },
+    ];
+
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+    const geojson = convertToGeoJSON(sorted);
+
+    expect(geojson.type).toBe("FeatureCollection");
+    expect(geojson.features).toHaveLength(2);
+    expect(geojson.features[0].properties.FASTIGHET).toBe("Alpha 1:1");
+    expect(geojson.features[1].properties.FASTIGHET).toBe("Zeta 1:1");
+  });
+
+  it("should export without sorting when sorting state is empty", () => {
+    const properties = createMockProperties();
+    const sorting: Array<{ id: string; desc: boolean }> = [];
+
+    const sorted = applySortingToProperties(properties, sorting);
+    const exported = convertToJSON(sorted, false, "Unknown");
+
+    // Original order preserved (Gamma, Alpha, Beta)
+    expect(exported).toHaveLength(3);
+    expect(exported[0].FASTIGHET).toBe("Gamma 1:1");
+    expect(exported[1].FASTIGHET).toBe("Alpha 1:1");
+    expect(exported[2].FASTIGHET).toBe("Beta 1:1");
+  });
+
+  it("should maintain sort stability for multi-row exports", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1_1",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Property A",
+        BOSTADR: "",
+        ADDRESS: "Same Address",
+        rawOwner: undefined,
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2_2",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "Property B",
+        BOSTADR: "",
+        ADDRESS: "Same Address",
+        rawOwner: undefined,
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "3_3",
+        FNR: "3",
+        UUID_FASTIGHET: "uuid-3",
+        FASTIGHET: "Property C",
+        BOSTADR: "",
+        ADDRESS: "Same Address",
+        rawOwner: undefined,
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    // Sort by ADDRESS (all same) - should preserve original order
+    const sorting = [{ id: "ADDRESS", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted[0].FASTIGHET).toBe("Property A");
+    expect(sorted[1].FASTIGHET).toBe("Property B");
+    expect(sorted[2].FASTIGHET).toBe("Property C");
+  });
+
+  it("should handle CSV export with special characters in sorted data", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1_1",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: 'Property "Z"',
+        BOSTADR: "",
+        ADDRESS: "Z, Street",
+        rawOwner: undefined,
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2_2",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: 'Property "A"',
+        BOSTADR: "",
+        ADDRESS: "A, Street",
+        rawOwner: undefined,
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+    const csv = convertToCSV(sorted);
+
+    const lines = csv.split("\n");
+    expect(lines[1]).toContain('"Property ""A"""'); // CSV escaped quotes
+    expect(lines[2]).toContain('"Property ""Z"""');
+  });
+
+  it("should export JSON with PII masking respecting sort order", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1_1",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Zeta 1:1",
+        BOSTADR: "",
+        ADDRESS: "",
+        rawOwner: {
+          FNR: "1",
+          OBJECTID: 1,
+          UUID_FASTIGHET: "uuid-1",
+          FASTIGHET: "Zeta 1:1",
+          NAMN: "John Doe",
+          BOSTADR: "123 Main St",
+          POSTNR: "12345",
+          POSTADR: "City",
+          ORGNR: "",
+        },
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2_2",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "Alpha 1:1",
+        BOSTADR: "",
+        ADDRESS: "",
+        rawOwner: {
+          FNR: "2",
+          OBJECTID: 2,
+          UUID_FASTIGHET: "uuid-2",
+          FASTIGHET: "Alpha 1:1",
+          NAMN: "Jane Smith",
+          BOSTADR: "456 Oak Ave",
+          POSTNR: "67890",
+          POSTADR: "Town",
+          ORGNR: "",
+        },
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+    const exported = convertToJSON(sorted, true, "Unknown");
+
+    expect(exported).toHaveLength(2);
+    expect(exported[0].FASTIGHET).toBe("Alpha 1:1");
+    expect(exported[0].ADDRESS).toContain("***"); // Masked
+    expect(exported[1].FASTIGHET).toBe("Zeta 1:1");
+    expect(exported[1].ADDRESS).toContain("***"); // Masked
   });
 });

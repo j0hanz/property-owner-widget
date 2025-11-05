@@ -29,9 +29,12 @@ import {
   defaultMessages as jimuUIMessages,
 } from "jimu-ui";
 import { PropertyTable } from "./components/table";
-import { createPropertyTableColumns } from "../shared/config";
+import {
+  createPropertyTableColumns,
+  getDefaultSorting,
+} from "../shared/config";
 import defaultMessages from "./translations/default";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { ColumnDef, SortingState } from "@tanstack/react-table";
 import type {
   IMConfig,
   ErrorBoundaryProps,
@@ -69,6 +72,7 @@ import {
   isValidationFailure,
   buildHighlightColor,
   computeWidgetsToClose,
+  applySortingToProperties,
   dataSourceHelpers,
   getValidatedOutlineWidth,
   updateRawPropertyResults,
@@ -366,6 +370,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           columns={tableColumns}
           translate={translate}
           styles={styles}
+          sorting={tableSorting}
+          onSortingChange={setTableSorting}
         />
       );
     }
@@ -511,6 +517,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   );
   const tableColumns = tableColumnsRef.current;
 
+  const [tableSorting, setTableSorting] =
+    React.useState<SortingState>(getDefaultSorting());
+
   const closeOtherWidgets = hooks.useEventCallback(() => {
     if (!config?.autoCloseOtherWidgets) return;
     if (!widgetId) return;
@@ -655,21 +664,33 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
     const selectedRows = Array.from(selectedProperties);
 
+    // Apply current table sorting to selected rows
+    const sortedRows = applySortingToProperties(selectedRows, tableSorting);
+
     try {
       exportData(
         selectedRawData,
-        selectedRows,
+        sortedRows,
         {
           format,
           filename: "property-export",
-          rowCount: selectedRows.length,
+          rowCount: sortedRows.length,
           definition: EXPORT_FORMATS.find((item) => item.id === format),
         },
         config.enablePIIMasking,
         translate("unknownOwner")
       );
+
+      // Track sorted vs unsorted exports
+      trackEvent({
+        category: "Export",
+        action: `export_${format}`,
+        label: tableSorting.length > 0 ? "sorted" : "unsorted",
+        value: sortedRows.length,
+      });
     } catch (error) {
       console.error("Export failed", error);
+      trackError(`export_${format}`, error);
     }
   });
 
@@ -691,8 +712,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
 
     try {
-      const formattedText = formatPropertiesForClipboard(
+      const sortedSelection = applySortingToProperties(
         currentSelection,
+        tableSorting
+      );
+
+      const formattedText = formatPropertiesForClipboard(
+        sortedSelection,
         piiMaskingEnabled,
         translate("unknownOwner")
       );
@@ -717,7 +743,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         trackEvent({
           category: "Copy",
           action: "copy_properties",
-          label: "success",
+          label: tableSorting.length > 0 ? "sorted" : "unsorted",
           value: selectionCount,
         });
       } else {
