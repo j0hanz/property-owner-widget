@@ -37,7 +37,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       flex: "1 1 auto",
       overflowY: "auto",
       blockSize: "100%",
-      gap: spacing?.(2),
+      gap: spacing?.(1),
       backgroundColor: color?.surface?.paper,
     }),
     alert: css({
@@ -50,13 +50,11 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     }),
     header: createFlex("column", {
       alignItems: "stretch",
-      gap: spacing?.(2),
       paddingInline: spacing?.(1),
     }),
     headerActions: createFlexAuto("row", {
       alignItems: "center",
       justifyContent: "end",
-      gap: spacing?.(2),
     }),
     cols: createFlexAuto("row", {
       borderBlockStart: border,
@@ -92,7 +90,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       zIndex: 1,
     }),
     th: css({
-      padding: spacing?.(1),
+      padding: spacing?.(0.5),
       textAlign: "left",
       borderBlockEnd: border,
       borderInlineEnd: border,
@@ -105,18 +103,23 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     }),
     tbody: css({}),
     tr: css({
+      borderBlockEnd: border,
+      "&:last-child": {
+        borderBlockEnd: "none",
+      },
       "&:hover": {
         backgroundColor: color?.surface?.background,
       },
     }),
     td: css({
-      padding: spacing?.(1),
+      padding: spacing?.(0.5),
       borderInlineEnd: border,
       overflow: "hidden",
       whiteSpace: "nowrap",
       "&:last-child": {
         borderInlineEnd: "none",
-        whiteSpace: "normal",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
       },
       fontFamily: typography?.label2?.fontFamily,
       fontSize: typography?.label2?.fontSize,
@@ -161,7 +164,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       padding: spacing?.(2),
     }),
     errorHint: css({ color: borderColor }),
-    buttons: createFlexAuto("row", { gap: spacing?.(1) }),
+    buttons: createFlexAuto("row", { gap: spacing?.(3) }),
     feedback: css({
       inlineSize: "100%",
     }),
