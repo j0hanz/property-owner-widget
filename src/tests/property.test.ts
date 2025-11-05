@@ -24,6 +24,7 @@ import {
   generateFBWebbUrl,
   copyToClipboard,
   maskPassword,
+  formatPropertiesForClipboard,
   isValidFbwebbBaseUrl,
 } from "../shared/utils";
 import {
@@ -1852,6 +1853,98 @@ describe("Property Widget - Telemetry", () => {
     expect(mockError.category).toBe("Error");
     expect(mockError.action).toBe("property_query");
     expect(mockError.label).toContain("Network error");
+  });
+});
+
+describe("Clipboard Formatting", () => {
+  const baseOwner: OwnerAttributes = {
+    OBJECTID: 1,
+    FNR: "1001",
+    UUID_FASTIGHET: "uuid-1001",
+    FASTIGHET: "Lund 1:1",
+    NAMN: "John Doe",
+    BOSTADR: "Testgatan 1",
+    POSTNR: "12345",
+    POSTADR: "Lund",
+    ORGNR: "556677-8899",
+  };
+
+  const baseRow: GridRowData = {
+    id: "row-1",
+    FNR: "1001",
+    UUID_FASTIGHET: "uuid-1001",
+    FASTIGHET: "Lund 1:1",
+    BOSTADR: "Testgatan 1",
+    ADDRESS: "Testgatan 1",
+    rawOwner: baseOwner,
+  };
+
+  it("should format rows with tab separation and header", () => {
+    const result = formatPropertiesForClipboard(
+      [baseRow],
+      false,
+      "Unknown owner"
+    );
+
+    expect(result).toContain("FASTIGHET\tBOSTADR");
+    expect(result.split("\n")).toHaveLength(2);
+    expect(result.split("\n")[1]).toBe(
+      "Lund 1:1\tJohn Doe, Testgatan 1, 12345 Lund (556677-8899)"
+    );
+  });
+
+  it("should mask owner data when masking is enabled", () => {
+    const result = formatPropertiesForClipboard(
+      [baseRow],
+      true,
+      "Unknown owner"
+    );
+
+    expect(result).toContain("Lund 1:1\tJ*** D**");
+    expect(result).not.toContain("John Doe");
+  });
+
+  it("should sanitize HTML content in cells", () => {
+    const htmlRow: GridRowData = {
+      ...baseRow,
+      FASTIGHET: "<strong>Lund 2:5</strong>",
+      BOSTADR: "<em>Example</em>",
+      rawOwner: undefined,
+    };
+
+    const result = formatPropertiesForClipboard(
+      [htmlRow],
+      false,
+      "Unknown owner"
+    );
+
+    expect(result).toContain("Lund 2:5\tExample");
+    expect(result).not.toContain("<strong>");
+    expect(result).not.toContain("<em>");
+  });
+
+  it("should fall back to unknown owner text when owner data missing", () => {
+    const rowWithoutOwner: GridRowData = {
+      id: "row-2",
+      FNR: "1002",
+      UUID_FASTIGHET: "uuid-1002",
+      FASTIGHET: "Lund 3:7",
+      BOSTADR: "",
+      ADDRESS: "",
+    };
+
+    const result = formatPropertiesForClipboard(
+      [rowWithoutOwner],
+      true,
+      "Unknown owner"
+    );
+
+    expect(result.split("\n")[1]).toBe("Lund 3:7\tUnknown owner");
+  });
+
+  it("should return only header when no properties provided", () => {
+    const result = formatPropertiesForClipboard([], false, "Unknown owner");
+    expect(result).toBe("FASTIGHET\tBOSTADR");
   });
 });
 

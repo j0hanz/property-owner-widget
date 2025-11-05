@@ -61,6 +61,7 @@ import {
 import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api";
 import {
   formatOwnerInfo,
+  formatPropertiesForClipboard,
   extractFnr,
   isAbortError,
   normalizeFnrKey,
@@ -101,6 +102,7 @@ import clearIcon from "../assets/clear-selection-general.svg";
 import setupIcon from "../assets/config-missing.svg";
 import mapSelect from "../assets/map-select.svg";
 import exportIcon from "../assets/export.svg";
+import copyButton from "../assets/copy.svg";
 import linkAddIcon from "../assets/link-add.svg";
 import { exportData } from "../shared/export";
 
@@ -679,6 +681,67 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       handleExport(format);
     }
   );
+
+  const handleCopyToClipboard = hooks.useEventCallback(() => {
+    setUrlFeedback(null);
+
+    const currentSelection = selectedPropertiesRef.current ?? [];
+    if (!currentSelection || currentSelection.length === 0) {
+      return;
+    }
+
+    try {
+      const formattedText = formatPropertiesForClipboard(
+        currentSelection,
+        piiMaskingEnabled,
+        translate("unknownOwner")
+      );
+
+      const copySucceeded = copyToClipboard(formattedText);
+      const selectionCount = currentSelection.length;
+
+      if (copySucceeded) {
+        const successTemplate = translate("copiedSuccess");
+        const successMessage =
+          typeof successTemplate === "string"
+            ? successTemplate.replace("{count}", String(selectionCount))
+            : "";
+
+        setUrlFeedback({
+          type: "success",
+          text:
+            successMessage ||
+            (typeof successTemplate === "string" ? successTemplate : ""),
+        });
+
+        trackEvent({
+          category: "Copy",
+          action: "copy_properties",
+          label: "success",
+          value: selectionCount,
+        });
+      } else {
+        setUrlFeedback({
+          type: "error",
+          text: translate("copyFailed"),
+        });
+
+        trackEvent({
+          category: "Copy",
+          action: "copy_properties",
+          label: "failed",
+          value: selectionCount,
+        });
+      }
+    } catch (error) {
+      console.error("Copy failed:", error);
+      setUrlFeedback({
+        type: "error",
+        text: translate("copyFailed"),
+      });
+      trackError("copy_properties", error);
+    }
+  });
 
   const handleGenerateUrl = hooks.useEventCallback(() => {
     setUrlFeedback(null);
@@ -1406,6 +1469,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
                 <SVG src={linkAddIcon} size={20} />
               </Button>
             ) : null}
+            <Button
+              type="tertiary"
+              icon
+              onClick={handleCopyToClipboard}
+              title={translate("copyToClipboard")}
+              aria-label={translate("copyToClipboard")}
+              disabled={!hasSelectedProperties}
+            >
+              <SVG src={copyButton} size={20} />
+            </Button>
             <Dropdown
               activeIcon
               menuRole="listbox"

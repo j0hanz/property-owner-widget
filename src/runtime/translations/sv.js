@@ -73,6 +73,10 @@ System.register([], function (e) {
         errorNoPropertiesSelected: "Inga fastigheter valda.",
         urlGeneratedFor: "URL genererad för {count} fastigheter.",
         urlManualCopyLabel: "FBWebb rapport-URL",
+        copyToClipboard: "Kopiera till urklipp",
+        copiedSuccess: "Kopierade {count} fastigheter till urklipp.",
+        copyFailed:
+          "Kopiering misslyckades. Försök igen eller använd Ctrl+C för att kopiera manuellt.",
       });
     },
   };

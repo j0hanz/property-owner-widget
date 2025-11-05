@@ -70,4 +70,7 @@ export default {
   errorNoPropertiesSelected: "No properties selected.",
   urlGeneratedFor: "URL generated for {count} properties.",
   urlManualCopyLabel: "FBWebb report URL",
+  copyToClipboard: "Copy to clipboard",
+  copiedSuccess: "Copied {count} properties to clipboard.",
+  copyFailed: "Copy failed. Please try again or use Ctrl+C to copy manually.",
 };

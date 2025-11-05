@@ -384,6 +384,58 @@ export const formatOwnerInfo = (
   return formatIndividualOwner(owner, maskPII, unknownOwnerText);
 };
 
+const sanitizeClipboardCell = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  const raw =
+    typeof value === "string" || typeof value === "number" ? String(value) : "";
+
+  const sanitized = stripHtml(raw);
+  if (!sanitized) {
+    return "";
+  }
+
+  return sanitized.replace(/[\t\r\n]+/g, " ").trim();
+};
+
+export const formatPropertiesForClipboard = (
+  properties: GridRowData[] | null | undefined,
+  maskingEnabled: boolean,
+  unknownOwnerText: string
+): string => {
+  const header = "FASTIGHET\tBOSTADR";
+  if (!properties || properties.length === 0) {
+    return header;
+  }
+
+  const rows = properties.map((property) => {
+    const propertyLabel = sanitizeClipboardCell(
+      property.FASTIGHET || property.FNR || ""
+    );
+
+    const ownerText = (() => {
+      if (property.rawOwner) {
+        const formattedOwner = formatOwnerInfo(
+          property.rawOwner,
+          maskingEnabled,
+          unknownOwnerText
+        );
+        const sanitizedOwner = sanitizeClipboardCell(formattedOwner);
+        return sanitizedOwner || sanitizeClipboardCell(unknownOwnerText);
+      }
+
+      const fallbackSanitized = sanitizeClipboardCell(property.BOSTADR);
+      return fallbackSanitized || sanitizeClipboardCell(unknownOwnerText);
+    })();
+
+    return `${propertyLabel}\t${ownerText}`;
+  });
+
+  return [header, ...rows].join("\n");
+};
+
 export const formatPropertyWithShare = (
   property: string,
   share?: string
