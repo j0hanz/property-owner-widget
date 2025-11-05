@@ -50,7 +50,6 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
     }),
     header: createFlex("column", {
       alignItems: "stretch",
-      paddingInline: spacing?.(1),
     }),
     headerActions: createFlexAuto("row", {
       alignItems: "center",
@@ -90,7 +89,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       zIndex: 1,
     }),
     th: css({
-      padding: spacing?.(0.5),
+      padding: spacing?.(1),
       textAlign: "left",
       borderBlockEnd: border,
       borderInlineEnd: border,
@@ -112,7 +111,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       },
     }),
     td: css({
-      padding: spacing?.(0.5),
+      padding: spacing?.(1),
       borderInlineEnd: border,
       overflow: "hidden",
       whiteSpace: "nowrap",
@@ -126,7 +125,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       fontWeight: typography?.label2?.fontWeight,
     }),
     sortIndicator: css({
-      marginInlineStart: spacing?.(1),
+      marginInlineStart: spacing?.(4),
       display: "inline-block",
     }),
     emptyState: css({
