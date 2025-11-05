@@ -23,6 +23,7 @@ import {
   computeWidgetsToClose,
   copyToClipboard,
   formatPropertiesForClipboard,
+  applySortingToProperties,
 } from "../shared/utils";
 import {
   isValidArcGISUrl,
@@ -2688,5 +2689,327 @@ describe("Export Utilities - exportData", () => {
       createElementSpy.mockRestore();
       jest.useRealTimers();
     }
+  });
+});
+
+describe("Property Widget - Sort-Aware Copy", () => {
+  it("should copy properties in display order when sorted ascending by FASTIGHET", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "3",
+        UUID_FASTIGHET: "uuid-3",
+        FASTIGHET: "Zeta 1:1",
+        BOSTADR: "Owner Z",
+        ADDRESS: "Owner Z",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Alpha 1:1",
+        BOSTADR: "Owner A",
+        ADDRESS: "Owner A",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "3",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "Beta 1:1",
+        BOSTADR: "Owner B",
+        ADDRESS: "Owner B",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted).toHaveLength(3);
+    expect(sorted[0].FASTIGHET).toBe("Alpha 1:1");
+    expect(sorted[1].FASTIGHET).toBe("Beta 1:1");
+    expect(sorted[2].FASTIGHET).toBe("Zeta 1:1");
+  });
+
+  it("should copy properties in display order when sorted descending by FASTIGHET", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Alpha 1:1",
+        BOSTADR: "Owner A",
+        ADDRESS: "Owner A",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "3",
+        UUID_FASTIGHET: "uuid-3",
+        FASTIGHET: "Zeta 1:1",
+        BOSTADR: "Owner Z",
+        ADDRESS: "Owner Z",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting = [{ id: "FASTIGHET", desc: true }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted).toHaveLength(2);
+    expect(sorted[0].FASTIGHET).toBe("Zeta 1:1");
+    expect(sorted[1].FASTIGHET).toBe("Alpha 1:1");
+  });
+
+  it("should copy properties in display order when sorted ascending by ADDRESS", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Property 1",
+        BOSTADR: "Örngatan 5",
+        ADDRESS: "Örngatan 5",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "Property 2",
+        BOSTADR: "Åsgatan 10",
+        ADDRESS: "Åsgatan 10",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "3",
+        FNR: "3",
+        UUID_FASTIGHET: "uuid-3",
+        FASTIGHET: "Property 3",
+        BOSTADR: "Bergvägen 3",
+        ADDRESS: "Bergvägen 3",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting = [{ id: "ADDRESS", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted).toHaveLength(3);
+    // Swedish alphabetical order: B < Å < Ö
+    expect(sorted[0].ADDRESS).toBe("Bergvägen 3");
+    expect(sorted[1].ADDRESS).toBe("Åsgatan 10");
+    expect(sorted[2].ADDRESS).toBe("Örngatan 5");
+  });
+
+  it("should return original order when no sorting applied", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "3",
+        UUID_FASTIGHET: "uuid-3",
+        FASTIGHET: "Zeta 1:1",
+        BOSTADR: "Owner Z",
+        ADDRESS: "Owner Z",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Alpha 1:1",
+        BOSTADR: "Owner A",
+        ADDRESS: "Owner A",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting: Array<{ id: string; desc: boolean }> = [];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted).toHaveLength(2);
+    expect(sorted[0].FASTIGHET).toBe("Zeta 1:1");
+    expect(sorted[1].FASTIGHET).toBe("Alpha 1:1");
+    expect(sorted).not.toBe(properties);
+  });
+
+  it("should handle empty properties array", () => {
+    const properties: GridRowData[] = [];
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted).toHaveLength(0);
+    expect(sorted).toEqual([]);
+  });
+
+  it("should handle numeric sorting in property names", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Property 10:1",
+        BOSTADR: "Owner 1",
+        ADDRESS: "Owner 1",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "Property 2:1",
+        BOSTADR: "Owner 2",
+        ADDRESS: "Owner 2",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "3",
+        FNR: "3",
+        UUID_FASTIGHET: "uuid-3",
+        FASTIGHET: "Property 100:1",
+        BOSTADR: "Owner 3",
+        ADDRESS: "Owner 3",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted).toHaveLength(3);
+    expect(sorted[0].FASTIGHET).toBe("Property 2:1");
+    expect(sorted[1].FASTIGHET).toBe("Property 10:1");
+    expect(sorted[2].FASTIGHET).toBe("Property 100:1");
+  });
+
+  it("should handle null and undefined values when sorting", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Property A",
+        BOSTADR: "Owner A",
+        ADDRESS: "Owner A",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "",
+        BOSTADR: "",
+        ADDRESS: "",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "3",
+        FNR: "3",
+        UUID_FASTIGHET: "uuid-3",
+        FASTIGHET: "Property B",
+        BOSTADR: "Owner B",
+        ADDRESS: "Owner B",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(sorted).toHaveLength(3);
+    expect(sorted[0].FASTIGHET).toBe("");
+    expect(sorted[1].FASTIGHET).toBe("Property A");
+    expect(sorted[2].FASTIGHET).toBe("Property B");
+  });
+
+  it("should not mutate original properties array", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "Zeta 1:1",
+        BOSTADR: "Owner Z",
+        ADDRESS: "Owner Z",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Alpha 1:1",
+        BOSTADR: "Owner A",
+        ADDRESS: "Owner A",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const originalOrder = [...properties];
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+
+    expect(properties[0].FASTIGHET).toBe("Zeta 1:1");
+    expect(properties[1].FASTIGHET).toBe("Alpha 1:1");
+    expect(sorted[0].FASTIGHET).toBe("Alpha 1:1");
+    expect(sorted[1].FASTIGHET).toBe("Zeta 1:1");
+    expect(properties).toEqual(originalOrder);
+  });
+
+  it("should integrate with formatPropertiesForClipboard correctly", () => {
+    const properties: GridRowData[] = [
+      {
+        id: "1",
+        FNR: "2",
+        UUID_FASTIGHET: "uuid-2",
+        FASTIGHET: "Zeta 1:1",
+        BOSTADR: "Zeta Owner",
+        ADDRESS: "Zeta Owner",
+        geometryType: "polygon",
+        geometry: null,
+      },
+      {
+        id: "2",
+        FNR: "1",
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Alpha 1:1",
+        BOSTADR: "Alpha Owner",
+        ADDRESS: "Alpha Owner",
+        geometryType: "polygon",
+        geometry: null,
+      },
+    ];
+
+    const sorting = [{ id: "FASTIGHET", desc: false }];
+    const sorted = applySortingToProperties(properties, sorting);
+    const formatted = formatPropertiesForClipboard(
+      sorted,
+      false,
+      "Unknown owner"
+    );
+
+    const lines = formatted.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("Alpha 1:1");
+    expect(lines[1]).toContain("Zeta 1:1");
   });
 });

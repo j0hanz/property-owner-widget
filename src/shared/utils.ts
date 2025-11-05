@@ -400,6 +400,46 @@ const sanitizeClipboardCell = (value: unknown): string => {
   return sanitized.replace(/[\t\r\n]+/g, " ").trim();
 };
 
+export const applySortingToProperties = (
+  properties: GridRowData[],
+  sorting: Array<{ id: string; desc: boolean }>
+): GridRowData[] => {
+  if (!sorting || sorting.length === 0) {
+    return [...properties];
+  }
+
+  const sorted = [...properties];
+
+  sorting.forEach((sortItem) => {
+    const { id, desc } = sortItem;
+
+    sorted.sort((a, b) => {
+      const aValue = a[id as keyof GridRowData];
+      const bValue = b[id as keyof GridRowData];
+
+      const toSortableString = (value: unknown): string => {
+        if (value === null || value === undefined) return "";
+        if (typeof value === "string") return value;
+        if (typeof value === "number") return String(value);
+        if (typeof value === "boolean") return String(value);
+        return "";
+      };
+
+      const aStr = toSortableString(aValue);
+      const bStr = toSortableString(bValue);
+
+      const comparison = aStr.localeCompare(bStr, "sv", {
+        numeric: true,
+        sensitivity: "base",
+      });
+
+      return desc ? -comparison : comparison;
+    });
+  });
+
+  return sorted;
+};
+
 export const formatPropertiesForClipboard = (
   properties: GridRowData[] | null | undefined,
   maskingEnabled: boolean,

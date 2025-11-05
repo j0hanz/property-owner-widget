@@ -5,7 +5,7 @@ import type {
   UseDataSource,
   ImmutableArray,
 } from "jimu-core";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { ColumnDef, SortingState } from "@tanstack/react-table";
 import type { WidgetStyles } from "./style";
 import type { Immutable } from "seamless-immutable";
 
@@ -401,6 +401,8 @@ export interface PropertyTableProps {
   columns: Array<ColumnDef<GridRowData>>;
   translate: (key: string) => string;
   styles: WidgetStyles;
+  sorting: SortingState;
+  onSortingChange: (sorting: SortingState) => void;
 }
 
 export interface LoadingBlockProps {

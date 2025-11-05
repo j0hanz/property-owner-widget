@@ -2,21 +2,18 @@
 import { React, jsx } from "jimu-core";
 import { Scrollable } from "jimu-ui";
 import { useReactTable, flexRender } from "@tanstack/react-table";
-import type { SortingState, ColumnFiltersState } from "@tanstack/react-table";
+import type { ColumnFiltersState } from "@tanstack/react-table";
 import type { PropertyTableProps } from "../../config/types";
 import {
   createTableConfig,
-  getDefaultSorting,
   getDefaultColumnFilters,
   getRowId,
   getVisibleRows,
 } from "../../shared/config";
 
 export const PropertyTable = (props: PropertyTableProps) => {
-  const { data, columns, translate, styles } = props;
+  const { data, columns, translate, styles, sorting, onSortingChange } = props;
 
-  const [sorting, setSorting] =
-    React.useState<SortingState>(getDefaultSorting());
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
     getDefaultColumnFilters()
   );
@@ -29,7 +26,7 @@ export const PropertyTable = (props: PropertyTableProps) => {
       sorting,
       columnFilters,
     },
-    onSortingChange: setSorting,
+    onSortingChange,
     onColumnFiltersChange: setColumnFilters,
     ...createTableConfig(),
   });
