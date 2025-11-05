@@ -63,19 +63,6 @@ System.register([], function (e) {
         runtimeStateQuerying: "Fråga pågår...",
         runtimeStateError: "Frågefel uppstod. Kontrollera widget för detaljer.",
         runtimeStateSelected: "{count} fastigheter valda för närvarande",
-        fbwebbSettings: "FBWebb rapport-URL-inställningar",
-        fbwebbBaseUrlLabel: "FBWebb bas-URL",
-        fbwebbBaseUrlDescription:
-          "HTTPS-endpoint för FBWebb fastighetsrapporter.",
-        fbwebbUserLabel: "Användare",
-        fbwebbUserDescription: "FBWebb-användarnamn för rapportåtkomst.",
-        fbwebbPasswordLabel: "Lösenord",
-        fbwebbPasswordDescription:
-          "FBWebb-lösenord som lagras i widgetkonfigurationen.",
-        fbwebbDatabaseLabel: "Databas",
-        fbwebbDatabaseDescription: "FBWebb-databasnamn (t.ex. Lund).",
-        fbwebbConfiguredMessage: "FBWebb URL-generering är aktiverad.",
-        errorUrlMustBeHttps: "Ange en giltig HTTPS-URL.",
       });
     },
   };

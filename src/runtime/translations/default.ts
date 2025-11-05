@@ -60,16 +60,6 @@ export default {
   exportCSVDesc: "Spreadsheet format (attributes only)",
   exportGeoJSON: "GeoJSON",
   exportGeoJSONDesc: "Geographic data format",
-  generateUrl: "Generate URL",
-  urlCopiedSuccess: "Report URL copied to clipboard.",
-  urlCopyManualFallback:
-    "Copy failed. Use Ctrl+C to copy the highlighted URL manually.",
-  errorUrlGenerationFailed: "Failed to generate report URL.",
-  errorFBWebbNotConfigured:
-    "Configure FBWebb settings in the widget settings panel.",
-  errorNoPropertiesSelected: "No properties selected.",
-  urlGeneratedFor: "URL generated for {count} properties.",
-  urlManualCopyLabel: "FBWebb report URL",
   copyToClipboard: "Copy to clipboard",
   copiedSuccess: "Copied {count} properties to clipboard.",
   copyFailed: "Copy failed. Please try again or use Ctrl+C to copy manually.",

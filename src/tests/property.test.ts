@@ -21,11 +21,8 @@ import {
   updateRawPropertyResults,
   createPropertyDispatcher,
   computeWidgetsToClose,
-  generateFBWebbUrl,
   copyToClipboard,
-  maskPassword,
   formatPropertiesForClipboard,
-  isValidFbwebbBaseUrl,
 } from "../shared/utils";
 import {
   isValidArcGISUrl,
@@ -44,7 +41,6 @@ import type {
   SerializedQueryResult,
   QueryResult,
   EsriModules,
-  Config,
   PropertyAction,
   PropertyQueryHelpers,
   PropertyQueryMessages,
@@ -59,7 +55,6 @@ import type {
   FeatureDataRecord,
 } from "jimu-core";
 import copyLib from "copy-to-clipboard";
-import { isFBWebbConfigured } from "../config/types";
 import * as apiModule from "../shared/api";
 import * as utilsModule from "../shared/utils";
 
@@ -202,17 +197,6 @@ const createMockGraphicsLayer = (): GraphicsLayerMock =>
     add: jest.fn(),
     remove: jest.fn(),
   }) as unknown as GraphicsLayerMock;
-
-const createBaseConfig = (overrides: Partial<Config> = {}): Config => ({
-  propertyDataSourceId: "property",
-  ownerDataSourceId: "owner",
-  displayColumns: [],
-  maxResults: 100,
-  enableToggleRemoval: true,
-  enablePIIMasking: true,
-  enableBatchOwnerQuery: false,
-  ...overrides,
-});
 
 interface MockTextSymbolProps {
   text?: string;
@@ -1720,47 +1704,9 @@ describe("Property Widget - Undo Functionality", () => {
   });
 });
 
-describe("FBWebb utilities", () => {
-  const baseUrl =
-    "https://fbwebb.lund.se/FBWebb/WebbRapporter/Fastighetsforteckning";
-  const params = { user: "fblasa", password: "fblasa", database: "Lund" };
-
+describe("Clipboard utilities", () => {
   beforeEach(() => {
     copyMock.mockReset();
-  });
-
-  it("should validate HTTPS FBWebb base URLs", () => {
-    expect(isValidFbwebbBaseUrl(baseUrl)).toBe(true);
-    expect(isValidFbwebbBaseUrl("http://fbwebb.lund.se")).toBe(false);
-    expect(isValidFbwebbBaseUrl("https://127.0.0.1/fbwebb")).toBe(false);
-  });
-
-  it("should generate URLs with deduplicated FNR values", () => {
-    const url = generateFBWebbUrl(
-      [120086316, 120086316, 121049900],
-      baseUrl,
-      params
-    );
-
-    expect(url).toContain("fnr=120086316,121049900");
-    expect(url).toContain("User=fblasa");
-    expect(url).toContain("Database=Lund");
-  });
-
-  it("should throw for missing configuration", () => {
-    expect(() =>
-      generateFBWebbUrl([120086316], baseUrl, {
-        user: "",
-        password: "",
-        database: "",
-      })
-    ).toThrow("Missing FBWebb configuration");
-  });
-
-  it("should throw when no FNR values are provided", () => {
-    expect(() => generateFBWebbUrl([], baseUrl, params)).toThrow(
-      "No FNRs provided"
-    );
   });
 
   it("should copy to clipboard when library succeeds", () => {
@@ -1787,31 +1733,6 @@ describe("FBWebb utilities", () => {
     });
 
     expect(copyToClipboard("test-url")).toBe(false);
-  });
-
-  it("should mask passwords for logging", () => {
-    expect(maskPassword("fblasa")).toBe("fb****");
-    expect(maskPassword("ab")).toBe("ab");
-    expect(maskPassword("")).toBe("****");
-  });
-
-  it("should detect configured FBWebb settings", () => {
-    const configured = createBaseConfig({
-      fbwebbBaseUrl: baseUrl,
-      fbwebbUser: "user",
-      fbwebbPassword: "pass",
-      fbwebbDatabase: "Lund",
-    });
-
-    const missing = createBaseConfig({
-      fbwebbBaseUrl: baseUrl,
-      fbwebbUser: "",
-      fbwebbPassword: "",
-      fbwebbDatabase: "",
-    });
-
-    expect(isFBWebbConfigured(configured)).toBe(true);
-    expect(isFBWebbConfigured(missing)).toBe(false);
   });
 });
 

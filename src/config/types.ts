@@ -42,37 +42,9 @@ export interface Config {
   highlightOpacity?: number;
   outlineWidth?: number;
   autoCloseOtherWidgets?: boolean;
-  fbwebbBaseUrl?: string;
-  fbwebbUser?: string;
-  fbwebbPassword?: string;
-  fbwebbDatabase?: string;
 }
 
 export type IMConfig = ImmutableObject<Config>;
-
-export interface FBWebbConfig {
-  baseUrl: string;
-  user: string;
-  password: string;
-  database: string;
-}
-
-export const isFBWebbConfigured = (
-  config: IMConfig | Config
-): config is IMConfig &
-  Required<
-    Pick<
-      Config,
-      "fbwebbBaseUrl" | "fbwebbUser" | "fbwebbPassword" | "fbwebbDatabase"
-    >
-  > => {
-  const baseUrl = (config as Config).fbwebbBaseUrl;
-  const user = (config as Config).fbwebbUser;
-  const password = (config as Config).fbwebbPassword;
-  const database = (config as Config).fbwebbDatabase;
-
-  return Boolean(baseUrl && user && password && database);
-};
 
 // =============================================================================
 // DATA ATTRIBUTES
