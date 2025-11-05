@@ -664,21 +664,33 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
     const selectedRows = Array.from(selectedProperties);
 
+    // Apply current table sorting to selected rows
+    const sortedRows = applySortingToProperties(selectedRows, tableSorting);
+
     try {
       exportData(
         selectedRawData,
-        selectedRows,
+        sortedRows,
         {
           format,
           filename: "property-export",
-          rowCount: selectedRows.length,
+          rowCount: sortedRows.length,
           definition: EXPORT_FORMATS.find((item) => item.id === format),
         },
         config.enablePIIMasking,
         translate("unknownOwner")
       );
+
+      // Track sorted vs unsorted exports
+      trackEvent({
+        category: "Export",
+        action: `export_${format}`,
+        label: tableSorting.length > 0 ? "sorted" : "unsorted",
+        value: sortedRows.length,
+      });
     } catch (error) {
       console.error("Export failed", error);
+      trackError(`export_${format}`, error);
     }
   });
 
