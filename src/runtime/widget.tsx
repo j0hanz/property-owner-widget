@@ -26,7 +26,6 @@ import {
   Loading,
   LoadingType,
   SVG,
-  TextInput,
   defaultMessages as jimuUIMessages,
 } from "jimu-ui";
 import { PropertyTable } from "./components/table";
@@ -45,7 +44,6 @@ import type {
   ErrorState,
   IMStateWithProperty,
 } from "../config/types";
-import { isFBWebbConfigured } from "../config/types";
 import { ErrorType } from "../config/enums";
 import { useWidgetStyles } from "../config/style";
 import {
@@ -61,6 +59,7 @@ import {
 import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api";
 import {
   formatOwnerInfo,
+  formatPropertiesForClipboard,
   extractFnr,
   isAbortError,
   normalizeFnrKey,
@@ -80,9 +79,7 @@ import {
   updateGraphicSymbol,
   createPropertyDispatcher,
   cursorLifecycleHelpers,
-  generateFBWebbUrl,
   copyToClipboard,
-  maskPassword,
 } from "../shared/utils";
 import { createPropertySelectors } from "../extensions/store";
 import type { CursorGraphicsState } from "../shared/utils";
@@ -101,7 +98,7 @@ import clearIcon from "../assets/clear-selection-general.svg";
 import setupIcon from "../assets/config-missing.svg";
 import mapSelect from "../assets/map-select.svg";
 import exportIcon from "../assets/export.svg";
-import linkAddIcon from "../assets/link-add.svg";
+import copyButton from "../assets/copy.svg";
 import { exportData } from "../shared/export";
 
 const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
@@ -242,13 +239,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const hasSelectedProperties = selectedCount > 0;
 
   const [urlFeedback, setUrlFeedback] = React.useState<{
-    type: "success" | "warning" | "error";
+    type: "success" | "error";
     text: string;
-    url?: string;
   } | null>(null);
 
   hooks.useUpdateEffect(() => {
-    if (!urlFeedback || urlFeedback.url || typeof window === "undefined") {
+    if (!urlFeedback || typeof window === "undefined") {
       return undefined;
     }
 
@@ -660,12 +656,18 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     const selectedRows = Array.from(selectedProperties);
 
     try {
-      exportData(selectedRawData, selectedRows, {
-        format,
-        filename: "property-export",
-        rowCount: selectedRows.length,
-        definition: EXPORT_FORMATS.find((item) => item.id === format),
-      });
+      exportData(
+        selectedRawData,
+        selectedRows,
+        {
+          format,
+          filename: "property-export",
+          rowCount: selectedRows.length,
+          definition: EXPORT_FORMATS.find((item) => item.id === format),
+        },
+        config.enablePIIMasking,
+        translate("unknownOwner")
+      );
     } catch (error) {
       console.error("Export failed", error);
     }
@@ -680,104 +682,64 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
   );
 
-  const handleGenerateUrl = hooks.useEventCallback(() => {
+  const handleCopyToClipboard = hooks.useEventCallback(() => {
     setUrlFeedback(null);
-    const tracker = createPerformanceTracker("generate_fbwebb_url");
-
-    if (!isFBWebbConfigured(config)) {
-      setError(
-        ErrorType.VALIDATION_ERROR,
-        translate("errorFBWebbNotConfigured")
-      );
-      tracker.failure("config_missing");
-      return;
-    }
 
     const currentSelection = selectedPropertiesRef.current ?? [];
-    if (currentSelection.length === 0) {
-      setError(
-        ErrorType.VALIDATION_ERROR,
-        translate("errorNoPropertiesSelected")
-      );
-      tracker.failure("no_selection");
+    if (!currentSelection || currentSelection.length === 0) {
       return;
     }
 
     try {
-      const selectionArray = Array.from(currentSelection);
-      const fnrs = selectionArray
-        .map((row) => row.FNR)
-        .filter(
-          (fnr): fnr is string | number => fnr !== null && fnr !== undefined
-        );
-
-      console.log("[URL Generation] FBWebb request", {
-        propertyCount: selectionArray.length,
-        baseUrl: config.fbwebbBaseUrl,
-        user: config.fbwebbUser,
-        database: config.fbwebbDatabase,
-        password: maskPassword(config.fbwebbPassword),
-      });
-
-      const url = generateFBWebbUrl(fnrs, config.fbwebbBaseUrl, {
-        user: config.fbwebbUser,
-        password: config.fbwebbPassword,
-        database: config.fbwebbDatabase,
-      });
-
-      const copySucceeded = copyToClipboard(url);
-      const countMessage = translate("urlGeneratedFor").replace(
-        "{count}",
-        String(fnrs.length)
+      const formattedText = formatPropertiesForClipboard(
+        currentSelection,
+        piiMaskingEnabled,
+        translate("unknownOwner")
       );
+
+      const copySucceeded = copyToClipboard(formattedText);
+      const selectionCount = currentSelection.length;
 
       if (copySucceeded) {
+        const successTemplate = translate("copiedSuccess");
         const successMessage =
-          `${translate("urlCopiedSuccess")} ${countMessage}`.trim();
-        setUrlFeedback({ type: "success", text: successMessage });
-        trackEvent({
-          category: "Property",
-          action: "generate_url",
-          label: "fbwebb",
-          value: fnrs.length,
+          typeof successTemplate === "string"
+            ? successTemplate.replace("{count}", String(selectionCount))
+            : "";
+
+        setUrlFeedback({
+          type: "success",
+          text:
+            successMessage ||
+            (typeof successTemplate === "string" ? successTemplate : ""),
         });
-        tracker.success();
+
+        trackEvent({
+          category: "Copy",
+          action: "copy_properties",
+          label: "success",
+          value: selectionCount,
+        });
       } else {
-        const warningMessage =
-          `${translate("urlCopyManualFallback")} ${countMessage}`.trim();
-        setUrlFeedback({ type: "warning", text: warningMessage, url });
-        trackEvent({
-          category: "Property",
-          action: "generate_url_manual_copy",
-          label: "fbwebb",
-          value: fnrs.length,
+        setUrlFeedback({
+          type: "error",
+          text: translate("copyFailed"),
         });
-        tracker.failure("clipboard_fallback");
+
+        trackEvent({
+          category: "Copy",
+          action: "copy_properties",
+          label: "failed",
+          value: selectionCount,
+        });
       }
-
-      console.log("[URL Generation] FBWebb URL ready", {
-        length: url.length,
-        password: maskPassword(config.fbwebbPassword),
-      });
     } catch (error) {
-      const errorMessage =
-        error instanceof Error && error.message
-          ? error.message
-          : "unknown_error";
-
+      console.error("Copy failed:", error);
       setUrlFeedback({
         type: "error",
-        text: translate("errorUrlGenerationFailed"),
+        text: translate("copyFailed"),
       });
-
-      setError(
-        ErrorType.VALIDATION_ERROR,
-        translate("errorUrlGenerationFailed"),
-        errorMessage
-      );
-
-      trackError("generate_fbwebb_url", error, errorMessage);
-      tracker.failure(errorMessage);
+      trackError("copy_properties", error);
     }
   });
 
@@ -1394,18 +1356,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       <div css={styles.header}>
         <div css={styles.headerActions}>
           <div css={styles.buttons}>
-            {isFBWebbConfigured(config) ? (
-              <Button
-                type="tertiary"
-                icon
-                onClick={handleGenerateUrl}
-                title={translate("generateUrl")}
-                aria-label={translate("generateUrl")}
-                disabled={!hasSelectedProperties}
-              >
-                <SVG src={linkAddIcon} size={20} />
-              </Button>
-            ) : null}
+            <Button
+              type="tertiary"
+              icon
+              onClick={handleCopyToClipboard}
+              title={translate("copyToClipboard")}
+              aria-label={translate("copyToClipboard")}
+              disabled={!hasSelectedProperties}
+            >
+              <SVG src={copyButton} size={20} />
+            </Button>
             <Dropdown
               activeIcon
               menuRole="listbox"
@@ -1482,30 +1442,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             {urlFeedback ? (
               <>
                 <Alert
-                  type={
-                    urlFeedback.type === "success"
-                      ? "success"
-                      : urlFeedback.type === "warning"
-                        ? "warning"
-                        : "error"
-                  }
+                  type={urlFeedback.type}
                   fullWidth
                   css={styles.alert}
                   text={urlFeedback.text}
                   role="status"
                 />
-                {urlFeedback.url ? (
-                  <TextInput
-                    value={urlFeedback.url}
-                    readOnly
-                    aria-label={translate("urlManualCopyLabel")}
-                    css={styles.feedbackInput}
-                    spellCheck={false}
-                    onFocus={(event: React.FocusEvent<HTMLInputElement>) => {
-                      event.target.select();
-                    }}
-                  />
-                ) : null}
               </>
             ) : null}
           </div>

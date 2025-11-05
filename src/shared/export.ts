@@ -1,11 +1,10 @@
-import { stripHtml } from "./utils";
+import { stripHtml, formatOwnerInfo } from "./utils";
 import { trackEvent, trackError } from "./telemetry";
 import type {
   GridRowData,
   CsvHeaderValues,
   ExportOptions,
   SerializedQueryResult,
-  SerializedQueryFeature,
   SerializedRecord,
   GeoJsonGeometry,
 } from "../config/types";
@@ -47,8 +46,44 @@ const sanitizeValue = (value: unknown): string => {
   return "";
 };
 
+export const convertToJSON = (
+  rows: GridRowData[],
+  maskingEnabled: boolean,
+  unknownOwnerText: string
+): Array<{ FASTIGHET: string; ADDRESS: string }> => {
+  if (!rows || rows.length === 0) {
+    return [];
+  }
+
+  return rows.map((row) => {
+    const propertyLabel = sanitizeValue(row.FASTIGHET || row.FNR || "");
+
+    const ownerText = (() => {
+      if (row.rawOwner) {
+        const formattedOwner = formatOwnerInfo(
+          row.rawOwner,
+          maskingEnabled,
+          unknownOwnerText
+        );
+        return sanitizeValue(formattedOwner);
+      }
+
+      const fallback = row.BOSTADR || row.ADDRESS || unknownOwnerText;
+      return sanitizeValue(fallback);
+    })();
+
+    return {
+      FASTIGHET: propertyLabel,
+      ADDRESS: ownerText,
+    };
+  });
+};
+
 const escapeCsvValue = (value: unknown): string => {
   const sanitized = sanitizeValue(value);
+  if (sanitized === "") {
+    return '""';
+  }
   if (
     sanitized.includes(",") ||
     sanitized.includes('"') ||
@@ -72,6 +107,7 @@ export const convertToCSV = (rows: GridRowData[]): string => {
       UUID_FASTIGHET: escapeCsvValue(row.UUID_FASTIGHET),
       FASTIGHET: escapeCsvValue(row.FASTIGHET),
       BOSTADR: escapeCsvValue(row.BOSTADR),
+      ADDRESS: escapeCsvValue(row.ADDRESS),
     };
 
     return CSV_HEADERS.map((header) => values[header]).join(",");
@@ -80,81 +116,140 @@ export const convertToCSV = (rows: GridRowData[]): string => {
   return [csvHeaders, ...csvRows].join("\n");
 };
 
-const cloneRecord = (
-  record: SerializedRecord | null
-): SerializedRecord | null => {
-  if (!record) {
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+const isCoordinateTuple = (value: unknown): value is number[] =>
+  Array.isArray(value) && value.length >= 2 && value.every(isFiniteNumber);
+
+const isCoordinateMatrix = (value: unknown): value is number[][] =>
+  Array.isArray(value) && value.length > 0 && value.every(isCoordinateTuple);
+
+const isCoordinateTensor = (value: unknown): value is number[][][] =>
+  Array.isArray(value) && value.length > 0 && value.every(isCoordinateMatrix);
+
+const cloneTensor = (value: number[][][]): number[][][] =>
+  value.map((matrix) => matrix.map((tuple) => tuple.slice()));
+
+const cloneMatrix = (value: number[][]): number[][] =>
+  value.map((tuple) => tuple.slice());
+
+const buildExtentCoordinates = (value: {
+  xmin?: unknown;
+  ymin?: unknown;
+  xmax?: unknown;
+  ymax?: unknown;
+}): number[][][] | null => {
+  if (
+    !isFiniteNumber(value.xmin) ||
+    !isFiniteNumber(value.ymin) ||
+    !isFiniteNumber(value.xmax) ||
+    !isFiniteNumber(value.ymax)
+  ) {
     return null;
   }
-  return { ...record };
+
+  const xmin = value.xmin;
+  const ymin = value.ymin;
+  const xmax = value.xmax;
+  const ymax = value.ymax;
+
+  if (xmin >= xmax || ymin >= ymax) {
+    return null;
+  }
+
+  return [
+    [
+      [xmin, ymin],
+      [xmax, ymin],
+      [xmax, ymax],
+      [xmin, ymax],
+      [xmin, ymin],
+    ],
+  ];
 };
 
-const stripRingsFromGeometry = (
-  data: readonly SerializedQueryResult[]
-): SerializedQueryResult[] => {
-  return data.map((result) => {
-    if (!result?.features) {
-      return result;
-    }
+const buildPointCoordinates = (value: {
+  x?: unknown;
+  y?: unknown;
+  z?: unknown;
+}): number[] | null => {
+  if (!isFiniteNumber(value.x) || !isFiniteNumber(value.y)) {
+    return null;
+  }
 
-    const sanitizedFeatures = result.features.map(
-      (feature): SerializedQueryFeature => {
-        if (!feature) {
-          return {
-            attributes: null,
-            geometry: null,
-            aggregateGeometries: null,
-            symbol: null,
-            popupTemplate: null,
-          };
-        }
+  const coordinates: number[] = [value.x, value.y];
+  if (isFiniteNumber(value.z)) {
+    coordinates.push(value.z);
+  }
 
-        const sanitized: SerializedQueryFeature = {
-          attributes: cloneRecord(feature.attributes),
-          geometry: null,
-          aggregateGeometries: cloneRecord(feature.aggregateGeometries ?? null),
-          symbol: cloneRecord(feature.symbol ?? null),
-          popupTemplate: cloneRecord(feature.popupTemplate ?? null),
-        };
-
-        if (feature.geometry) {
-          const { rings, ...other } = feature.geometry as {
-            [key: string]: unknown;
-            rings?: unknown;
-          };
-          sanitized.geometry = { ...other };
-          void rings;
-        }
-
-        return sanitized;
-      }
-    );
-
-    return {
-      ...result,
-      features: sanitizedFeatures,
-    };
-  });
+  return coordinates;
 };
 
 export const convertToGeoJSON = (rows: GridRowData[]): SerializedRecord => {
   const features = (rows || [])
-    .filter((row) => Boolean(row.geometryType))
+    .filter((row) => Boolean(row.geometryType) && row.geometry)
     .map((row) => {
-      let geojsonGeometry: GeoJsonGeometry = null;
+      const geometry = row.geometry as {
+        rings?: unknown;
+        paths?: unknown;
+        points?: unknown;
+        xmin?: unknown;
+        ymin?: unknown;
+        xmax?: unknown;
+        ymax?: unknown;
+        x?: unknown;
+        y?: unknown;
+        z?: unknown;
+      };
+
       const geometryType = (row.geometryType || "").toLowerCase();
-      if (geometryType === "polygon" || geometryType === "extent") {
-        geojsonGeometry = {
-          type: "Polygon",
-        };
+      let geojsonGeometry: GeoJsonGeometry = null;
+
+      if (geometryType === "polygon") {
+        const rings = geometry.rings;
+        if (isCoordinateTensor(rings)) {
+          geojsonGeometry = {
+            type: "Polygon",
+            coordinates: cloneTensor(rings),
+          };
+        }
+      } else if (geometryType === "extent") {
+        const coordinates = buildExtentCoordinates(geometry);
+        if (coordinates) {
+          geojsonGeometry = {
+            type: "Polygon",
+            coordinates,
+          };
+        }
       } else if (geometryType === "polyline") {
-        geojsonGeometry = {
-          type: "MultiLineString",
-        };
-      } else if (geometryType === "point" || geometryType === "multipoint") {
-        geojsonGeometry = {
-          type: "Point",
-        };
+        const paths = geometry.paths;
+        if (isCoordinateTensor(paths)) {
+          geojsonGeometry = {
+            type: "MultiLineString",
+            coordinates: cloneTensor(paths),
+          };
+        }
+      } else if (geometryType === "point") {
+        const coordinates = buildPointCoordinates(geometry);
+        if (coordinates) {
+          geojsonGeometry = {
+            type: "Point",
+            coordinates,
+          };
+        }
+      } else if (geometryType === "multipoint") {
+        const points = geometry.points;
+        if (isCoordinateMatrix(points)) {
+          geojsonGeometry = {
+            type: "MultiPoint",
+            coordinates: cloneMatrix(points),
+          };
+        }
+      }
+
+      if (!geojsonGeometry) {
+        return null;
       }
 
       return {
@@ -167,8 +262,9 @@ export const convertToGeoJSON = (rows: GridRowData[]): SerializedRecord => {
           BOSTADR: sanitizeValue(row.BOSTADR),
         },
         geometry: geojsonGeometry,
-      };
-    });
+      } as SerializedRecord;
+    })
+    .filter((feature): feature is SerializedRecord => feature !== null);
 
   return {
     type: "FeatureCollection",
@@ -190,18 +286,25 @@ const buildFilename = (
 export const exportData = (
   rawData: readonly SerializedQueryResult[] | null | undefined,
   selectedProperties: GridRowData[],
-  options: ExportOptions
+  options: ExportOptions,
+  maskingEnabled: boolean,
+  unknownOwnerText: string
 ): void => {
   const { format, filename, rowCount, definition } = options;
 
   try {
+    void rawData;
     let content = "";
     let mimeType = "application/json;charset=utf-8";
     let extension = definition?.extension || "json";
 
     if (format === "json") {
-      const cleanedData = stripRingsFromGeometry(rawData ?? []);
-      content = JSON.stringify(cleanedData, null, 2);
+      const jsonData = convertToJSON(
+        selectedProperties,
+        maskingEnabled,
+        unknownOwnerText
+      );
+      content = JSON.stringify(jsonData, null, 2);
       mimeType = definition?.mimeType || "application/json;charset=utf-8";
     } else if (format === "csv") {
       content = convertToCSV(selectedProperties);

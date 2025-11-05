@@ -58,7 +58,7 @@ export const EXPORT_FORMATS: ExportFormatDefinition[] = [
   {
     id: "json",
     label: "JSON",
-    description: "Raw query results with full metadata",
+    description: "Property designations with owner information",
     extension: "json",
     mimeType: "application/json",
   },
@@ -86,6 +86,7 @@ export const QUERY_CACHE_MAX_SIZE = 100;
 export const QUERY_CACHE_EVICTION_PERCENTAGE = 0.2;
 
 // CSV export settings
+// Header order: FNR, UUID_FASTIGHET, FASTIGHET, BOSTADR, ADDRESS
 export const CSV_HEADERS = [
   "FNR",
   "UUID_FASTIGHET",

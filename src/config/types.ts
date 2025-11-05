@@ -42,37 +42,9 @@ export interface Config {
   highlightOpacity?: number;
   outlineWidth?: number;
   autoCloseOtherWidgets?: boolean;
-  fbwebbBaseUrl?: string;
-  fbwebbUser?: string;
-  fbwebbPassword?: string;
-  fbwebbDatabase?: string;
 }
 
 export type IMConfig = ImmutableObject<Config>;
-
-export interface FBWebbConfig {
-  baseUrl: string;
-  user: string;
-  password: string;
-  database: string;
-}
-
-export const isFBWebbConfigured = (
-  config: IMConfig | Config
-): config is IMConfig &
-  Required<
-    Pick<
-      Config,
-      "fbwebbBaseUrl" | "fbwebbUser" | "fbwebbPassword" | "fbwebbDatabase"
-    >
-  > => {
-  const baseUrl = (config as Config).fbwebbBaseUrl;
-  const user = (config as Config).fbwebbUser;
-  const password = (config as Config).fbwebbPassword;
-  const database = (config as Config).fbwebbDatabase;
-
-  return Boolean(baseUrl && user && password && database);
-};
 
 // =============================================================================
 // DATA ATTRIBUTES
@@ -113,6 +85,7 @@ export interface GridRowData {
   BOSTADR: string;
   ADDRESS: string;
   geometryType?: string | null;
+  geometry?: SerializedRecord | null;
   rawOwner?: OwnerAttributes;
 }
 
@@ -132,6 +105,7 @@ export interface CsvHeaderValues {
   UUID_FASTIGHET: string;
   FASTIGHET: string;
   BOSTADR: string;
+  ADDRESS: string;
 }
 
 export interface ExportOptions {
@@ -572,9 +546,10 @@ export interface EsriStubGlobal {
 // =============================================================================
 
 export type GeoJsonGeometry =
-  | { type: "Polygon" }
-  | { type: "MultiLineString" }
-  | { type: "Point" }
+  | { type: "Polygon"; coordinates: number[][][] }
+  | { type: "MultiLineString"; coordinates: number[][][] }
+  | { type: "Point"; coordinates: number[] }
+  | { type: "MultiPoint"; coordinates: number[][] }
   | null;
 
 // =============================================================================
@@ -681,6 +656,7 @@ export interface CreateGridRowParams {
   bostadr: string;
   address: string;
   geometryType: string | null;
+  geometry?: SerializedRecord | null;
   createRowId: (fnr: FnrValue, objectId: number) => string;
   rawOwner?: OwnerAttributes;
 }

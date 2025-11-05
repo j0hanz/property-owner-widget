@@ -21,10 +21,8 @@ import {
   updateRawPropertyResults,
   createPropertyDispatcher,
   computeWidgetsToClose,
-  generateFBWebbUrl,
   copyToClipboard,
-  maskPassword,
-  isValidFbwebbBaseUrl,
+  formatPropertiesForClipboard,
 } from "../shared/utils";
 import {
   isValidArcGISUrl,
@@ -35,7 +33,12 @@ import {
   runPropertySelectionPipeline,
   queryOwnersByRelationship,
 } from "../shared/api";
-import { convertToCSV, convertToGeoJSON, exportData } from "../shared/export";
+import {
+  convertToCSV,
+  convertToGeoJSON,
+  convertToJSON,
+  exportData,
+} from "../shared/export";
 import { CURSOR_TOOLTIP_STYLE } from "../config/constants";
 import type {
   OwnerAttributes,
@@ -43,7 +46,6 @@ import type {
   SerializedQueryResult,
   QueryResult,
   EsriModules,
-  Config,
   PropertyAction,
   PropertyQueryHelpers,
   PropertyQueryMessages,
@@ -58,7 +60,6 @@ import type {
   FeatureDataRecord,
 } from "jimu-core";
 import copyLib from "copy-to-clipboard";
-import { isFBWebbConfigured } from "../config/types";
 import * as apiModule from "../shared/api";
 import * as utilsModule from "../shared/utils";
 
@@ -201,17 +202,6 @@ const createMockGraphicsLayer = (): GraphicsLayerMock =>
     add: jest.fn(),
     remove: jest.fn(),
   }) as unknown as GraphicsLayerMock;
-
-const createBaseConfig = (overrides: Partial<Config> = {}): Config => ({
-  propertyDataSourceId: "property",
-  ownerDataSourceId: "owner",
-  displayColumns: [],
-  maxResults: 100,
-  enableToggleRemoval: true,
-  enablePIIMasking: true,
-  enableBatchOwnerQuery: false,
-  ...overrides,
-});
 
 interface MockTextSymbolProps {
   text?: string;
@@ -1719,47 +1709,9 @@ describe("Property Widget - Undo Functionality", () => {
   });
 });
 
-describe("FBWebb utilities", () => {
-  const baseUrl =
-    "https://fbwebb.lund.se/FBWebb/WebbRapporter/Fastighetsforteckning";
-  const params = { user: "fblasa", password: "fblasa", database: "Lund" };
-
+describe("Clipboard utilities", () => {
   beforeEach(() => {
     copyMock.mockReset();
-  });
-
-  it("should validate HTTPS FBWebb base URLs", () => {
-    expect(isValidFbwebbBaseUrl(baseUrl)).toBe(true);
-    expect(isValidFbwebbBaseUrl("http://fbwebb.lund.se")).toBe(false);
-    expect(isValidFbwebbBaseUrl("https://127.0.0.1/fbwebb")).toBe(false);
-  });
-
-  it("should generate URLs with deduplicated FNR values", () => {
-    const url = generateFBWebbUrl(
-      [120086316, 120086316, 121049900],
-      baseUrl,
-      params
-    );
-
-    expect(url).toContain("fnr=120086316,121049900");
-    expect(url).toContain("User=fblasa");
-    expect(url).toContain("Database=Lund");
-  });
-
-  it("should throw for missing configuration", () => {
-    expect(() =>
-      generateFBWebbUrl([120086316], baseUrl, {
-        user: "",
-        password: "",
-        database: "",
-      })
-    ).toThrow("Missing FBWebb configuration");
-  });
-
-  it("should throw when no FNR values are provided", () => {
-    expect(() => generateFBWebbUrl([], baseUrl, params)).toThrow(
-      "No FNRs provided"
-    );
   });
 
   it("should copy to clipboard when library succeeds", () => {
@@ -1786,31 +1738,6 @@ describe("FBWebb utilities", () => {
     });
 
     expect(copyToClipboard("test-url")).toBe(false);
-  });
-
-  it("should mask passwords for logging", () => {
-    expect(maskPassword("fblasa")).toBe("fb****");
-    expect(maskPassword("ab")).toBe("ab");
-    expect(maskPassword("")).toBe("****");
-  });
-
-  it("should detect configured FBWebb settings", () => {
-    const configured = createBaseConfig({
-      fbwebbBaseUrl: baseUrl,
-      fbwebbUser: "user",
-      fbwebbPassword: "pass",
-      fbwebbDatabase: "Lund",
-    });
-
-    const missing = createBaseConfig({
-      fbwebbBaseUrl: baseUrl,
-      fbwebbUser: "",
-      fbwebbPassword: "",
-      fbwebbDatabase: "",
-    });
-
-    expect(isFBWebbConfigured(configured)).toBe(true);
-    expect(isFBWebbConfigured(missing)).toBe(false);
   });
 });
 
@@ -1852,6 +1779,98 @@ describe("Property Widget - Telemetry", () => {
     expect(mockError.category).toBe("Error");
     expect(mockError.action).toBe("property_query");
     expect(mockError.label).toContain("Network error");
+  });
+});
+
+describe("Clipboard Formatting", () => {
+  const baseOwner: OwnerAttributes = {
+    OBJECTID: 1,
+    FNR: "1001",
+    UUID_FASTIGHET: "uuid-1001",
+    FASTIGHET: "Lund 1:1",
+    NAMN: "John Doe",
+    BOSTADR: "Testgatan 1",
+    POSTNR: "12345",
+    POSTADR: "Lund",
+    ORGNR: "556677-8899",
+  };
+
+  const baseRow: GridRowData = {
+    id: "row-1",
+    FNR: "1001",
+    UUID_FASTIGHET: "uuid-1001",
+    FASTIGHET: "Lund 1:1",
+    BOSTADR: "Testgatan 1",
+    ADDRESS: "Testgatan 1",
+    rawOwner: baseOwner,
+  };
+
+  it("should format rows with tab separation without header", () => {
+    const result = formatPropertiesForClipboard(
+      [baseRow],
+      false,
+      "Unknown owner"
+    );
+
+    expect(result).not.toContain("FASTIGHET\tBOSTADR");
+    expect(result.split("\n")).toHaveLength(1);
+    expect(result.split("\n")[0]).toBe(
+      "Lund 1:1\tJohn Doe, Testgatan 1, 12345 Lund (556677-8899)"
+    );
+  });
+
+  it("should mask owner data when masking is enabled", () => {
+    const result = formatPropertiesForClipboard(
+      [baseRow],
+      true,
+      "Unknown owner"
+    );
+
+    expect(result).toContain("Lund 1:1\tJ*** D**");
+    expect(result).not.toContain("John Doe");
+  });
+
+  it("should sanitize HTML content in cells", () => {
+    const htmlRow: GridRowData = {
+      ...baseRow,
+      FASTIGHET: "<strong>Lund 2:5</strong>",
+      BOSTADR: "<em>Example</em>",
+      rawOwner: undefined,
+    };
+
+    const result = formatPropertiesForClipboard(
+      [htmlRow],
+      false,
+      "Unknown owner"
+    );
+
+    expect(result).toContain("Lund 2:5\tExample");
+    expect(result).not.toContain("<strong>");
+    expect(result).not.toContain("<em>");
+  });
+
+  it("should fall back to unknown owner text when owner data missing", () => {
+    const rowWithoutOwner: GridRowData = {
+      id: "row-2",
+      FNR: "1002",
+      UUID_FASTIGHET: "uuid-1002",
+      FASTIGHET: "Lund 3:7",
+      BOSTADR: "",
+      ADDRESS: "",
+    };
+
+    const result = formatPropertiesForClipboard(
+      [rowWithoutOwner],
+      true,
+      "Unknown owner"
+    );
+
+    expect(result.split("\n")[0]).toBe("Lund 3:7\tUnknown owner");
+  });
+
+  it("should return empty string when no properties provided", () => {
+    const result = formatPropertiesForClipboard([], false, "Unknown owner");
+    expect(result).toBe("");
   });
 });
 
@@ -2115,6 +2134,299 @@ describe("Export Utilities - CSV", () => {
     expect(csv).toContain("Secure");
     expect(csv).not.toContain("<strong>");
   });
+
+  it("should populate the ADDRESS column", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        ADDRESS: "Test Street 123",
+      },
+    ];
+
+    const csv = convertToCSV(rows);
+    const lines = csv.split("\n");
+    expect(lines[0]).toBe("FNR,UUID_FASTIGHET,FASTIGHET,BOSTADR,ADDRESS");
+    expect(lines[1]).toContain("Test Street 123");
+    expect(lines[1].split(",")).toHaveLength(5);
+  });
+
+  it("should quote empty ADDRESS values", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        ADDRESS: "",
+      },
+    ];
+
+    const csv = convertToCSV(rows);
+    const lines = csv.split("\n");
+    expect(lines[1]).toMatch(/,""$/);
+  });
+});
+
+describe("Export Utilities - JSON", () => {
+  const createOwner = (
+    overrides?: Partial<OwnerAttributes>
+  ): OwnerAttributes => ({
+    OBJECTID: 1,
+    FNR: "123",
+    UUID_FASTIGHET: "uuid-123",
+    FASTIGHET: "Test Property",
+    NAMN: "Test Owner",
+    BOSTADR: "Test Address 123",
+    POSTNR: "12345",
+    POSTADR: "Test City",
+    ORGNR: "123456-7890",
+    ANDEL: null,
+    ANTALANDEL: null,
+    AGARLISTA: null,
+    ...overrides,
+  });
+
+  const baseRow: GridRowData = {
+    id: "row-1",
+    FNR: "123",
+    UUID_FASTIGHET: "uuid-123",
+    FASTIGHET: "KULTUREN 25 (1/1)",
+    BOSTADR: "Test Address",
+    ADDRESS: "Test Address",
+  };
+
+  it("should convert single property with full owner info", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        rawOwner: createOwner({
+          NAMN: "BIRGIT O SVEN HÅKAN OHLSSONS STIFTELSE",
+          BOSTADR: "St Annegatan 4 F",
+          POSTNR: "22350",
+          POSTADR: "LUND",
+          ORGNR: "845000-7532",
+        }),
+      },
+    ];
+
+    const json = convertToJSON(rows, false, "Unknown Owner");
+
+    expect(json).toHaveLength(1);
+    expect(json[0].FASTIGHET).toBe("KULTUREN 25 (1/1)");
+    expect(json[0].ADDRESS).toBe(
+      "BIRGIT O SVEN HÅKAN OHLSSONS STIFTELSE, St Annegatan 4 F, 22350 LUND (845000-7532)"
+    );
+  });
+
+  it("should convert multiple properties with varying owner data", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        id: "row-1",
+        FASTIGHET: "KULTUREN 25 (1/1)",
+        rawOwner: createOwner({
+          NAMN: "BIRGIT O SVEN HÅKAN OHLSSONS STIFTELSE",
+          BOSTADR: "St Annegatan 4 F",
+          POSTNR: "22350",
+          POSTADR: "LUND",
+          ORGNR: "845000-7532",
+        }),
+      },
+      {
+        ...baseRow,
+        id: "row-2",
+        FASTIGHET: "GLÄDJEN 13 (1/3)",
+        rawOwner: createOwner({
+          NAMN: "Regnéll, Hans Olof Gerhard",
+          BOSTADR: "WINSTRUPSGATAN 10 LGH 1101",
+          POSTNR: "22222",
+          POSTADR: "LUND",
+          ORGNR: null,
+        }),
+      },
+      {
+        ...baseRow,
+        id: "row-3",
+        FASTIGHET: "WINSTRUP 9 (1/2)",
+        rawOwner: createOwner({
+          NAMN: "Hovstadius, Claes Johan Oscar",
+          BOSTADR: "WINSTRUPSGATAN 5",
+          POSTNR: "22222",
+          POSTADR: "LUND",
+          ORGNR: null,
+        }),
+      },
+    ];
+
+    const json = convertToJSON(rows, false, "Unknown Owner");
+
+    expect(json).toHaveLength(3);
+    expect(json[0].FASTIGHET).toBe("KULTUREN 25 (1/1)");
+    expect(json[0].ADDRESS).toContain("BIRGIT O SVEN HÅKAN OHLSSONS STIFTELSE");
+    expect(json[1].FASTIGHET).toBe("GLÄDJEN 13 (1/3)");
+    expect(json[1].ADDRESS).toContain("Regnéll, Hans Olof Gerhard");
+    expect(json[2].FASTIGHET).toBe("WINSTRUP 9 (1/2)");
+    expect(json[2].ADDRESS).toContain("Hovstadius, Claes Johan Oscar");
+  });
+
+  it("should apply PII masking when enabled", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        rawOwner: createOwner({
+          NAMN: "Test Owner Name",
+          BOSTADR: "Test Address 123",
+          POSTNR: "12345",
+          POSTADRESS: "Test City",
+          ORGNR: "123456-7890",
+        }),
+      },
+    ];
+
+    const json = convertToJSON(rows, true, "Unknown Owner");
+
+    expect(json[0].ADDRESS).toContain("T***");
+    expect(json[0].ADDRESS).not.toContain("Test Owner Name");
+  });
+
+  it("should handle missing owner with BOSTADR fallback", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        FASTIGHET: "PROPERTY 1",
+        BOSTADR: "Fallback Address",
+        rawOwner: undefined,
+      },
+    ];
+
+    const json = convertToJSON(rows, false, "Unknown Owner");
+
+    expect(json[0].FASTIGHET).toBe("PROPERTY 1");
+    expect(json[0].ADDRESS).toBe("Fallback Address");
+  });
+
+  it("should handle missing owner with ADDRESS fallback", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        FASTIGHET: "PROPERTY 1",
+        BOSTADR: "",
+        ADDRESS: "Secondary Address",
+        rawOwner: undefined,
+      },
+    ];
+
+    const json = convertToJSON(rows, false, "Unknown Owner");
+
+    expect(json[0].ADDRESS).toBe("Secondary Address");
+  });
+
+  it("should use unknown owner text when all fallbacks fail", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        FASTIGHET: "PROPERTY 1",
+        BOSTADR: "",
+        ADDRESS: "",
+        rawOwner: undefined,
+      },
+    ];
+
+    const json = convertToJSON(rows, false, "Unknown Owner");
+
+    expect(json[0].ADDRESS).toBe("Unknown Owner");
+  });
+
+  it("should sanitize HTML in FASTIGHET", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        FASTIGHET: "<b>PROPERTY 1</b>",
+        rawOwner: createOwner(),
+      },
+    ];
+
+    const json = convertToJSON(rows, false, "Unknown Owner");
+
+    expect(json[0].FASTIGHET).toBe("PROPERTY 1");
+    expect(json[0].FASTIGHET).not.toContain("<b>");
+  });
+
+  it("should sanitize HTML in owner information", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        rawOwner: createOwner({
+          NAMN: "<b>Bold Owner</b>",
+          BOSTADR: "<i>Italic Address</i>",
+        }),
+      },
+    ];
+
+    const json = convertToJSON(rows, false, "Unknown Owner");
+
+    expect(json[0].ADDRESS).toContain("Bold Owner");
+    expect(json[0].ADDRESS).toContain("Italic Address");
+    expect(json[0].ADDRESS).not.toContain("<b>");
+    expect(json[0].ADDRESS).not.toContain("<i>");
+  });
+
+  it("should fallback to FNR when FASTIGHET is missing", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        FASTIGHET: "",
+        FNR: "123456",
+        rawOwner: createOwner(),
+      },
+    ];
+
+    const json = convertToJSON(rows, false, "Unknown Owner");
+
+    expect(json[0].FASTIGHET).toBe("123456");
+  });
+
+  it("should return empty array for null input", () => {
+    const json = convertToJSON(
+      null as unknown as GridRowData[],
+      false,
+      "Unknown"
+    );
+    expect(json).toEqual([]);
+  });
+
+  it("should return empty array for undefined input", () => {
+    const json = convertToJSON(
+      undefined as unknown as GridRowData[],
+      false,
+      "Unknown"
+    );
+    expect(json).toEqual([]);
+  });
+
+  it("should return empty array for empty input", () => {
+    const json = convertToJSON([], false, "Unknown");
+    expect(json).toEqual([]);
+  });
+
+  it("should handle Swedish characters in output", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        FASTIGHET: "GÄRDET 15 (1/1)",
+        rawOwner: createOwner({
+          NAMN: "Svensson, Åsa",
+          BOSTADR: "Östra Vägen 5",
+          POSTNR: "12345",
+          POSTADR: "Malmö",
+        }),
+      },
+    ];
+
+    const json = convertToJSON(rows, false, "Okänd ägare");
+
+    expect(json[0].FASTIGHET).toBe("GÄRDET 15 (1/1)");
+    expect(json[0].ADDRESS).toContain("Åsa");
+    expect(json[0].ADDRESS).toContain("Östra");
+    expect(json[0].ADDRESS).toContain("Malmö");
+  });
 });
 
 describe("Export Utilities - GeoJSON", () => {
@@ -2126,19 +2438,36 @@ describe("Export Utilities - GeoJSON", () => {
     BOSTADR: "<span>Geo owner</span>",
     ADDRESS: "Geo Address",
     geometryType: null,
+    geometry: null,
   };
 
-  it("should convert polygon geometry", () => {
+  const polygonCoordinates = [
+    [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+      [0, 1],
+      [0, 0],
+    ],
+  ];
+
+  it("should include geometry coordinates for polygon", () => {
     const polygonRow: GridRowData = {
       ...baseRow,
       geometryType: "polygon",
+      geometry: {
+        type: "polygon",
+        rings: polygonCoordinates,
+      },
     };
 
     const geojson = convertToGeoJSON([
       polygonRow,
     ]) as unknown as FeatureCollectionLike;
     expect(geojson.features).toHaveLength(1);
-    expect(geojson.features[0].geometry.type).toBe("Polygon");
+    const feature = geojson.features[0];
+    expect(feature.geometry.type).toBe("Polygon");
+    expect(feature.geometry.coordinates).toEqual(polygonCoordinates);
   });
 
   it("should skip rows without geometry", () => {
@@ -2147,10 +2476,33 @@ describe("Export Utilities - GeoJSON", () => {
     expect(geojson.features).toHaveLength(0);
   });
 
+  it("should skip rows with missing coordinate data", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        geometryType: "polygon",
+        geometry: { type: "polygon", rings: [] },
+      },
+      {
+        ...baseRow,
+        geometryType: "point",
+        geometry: { type: "point", x: null, y: null },
+      },
+    ];
+
+    const geojson = convertToGeoJSON(rows) as unknown as FeatureCollectionLike;
+    expect(geojson.features).toHaveLength(0);
+  });
+
   it("should sanitize HTML in properties", () => {
     const rowWithHtml: GridRowData = {
       ...baseRow,
       geometryType: "point",
+      geometry: {
+        type: "point",
+        x: 12.345,
+        y: 67.89,
+      },
     };
 
     const geojson = convertToGeoJSON([
@@ -2158,6 +2510,69 @@ describe("Export Utilities - GeoJSON", () => {
     ]) as unknown as FeatureCollectionLike;
     expect(geojson.features[0].properties.FASTIGHET).toBe("Geo property");
     expect(geojson.features[0].properties.BOSTADR).toBe("Geo owner");
+  });
+
+  it("should include geometry coordinates for point", () => {
+    const pointRow: GridRowData = {
+      ...baseRow,
+      geometryType: "point",
+      geometry: {
+        type: "point",
+        x: 14.2,
+        y: 55.7,
+      },
+    };
+
+    const geojson = convertToGeoJSON([
+      pointRow,
+    ]) as unknown as FeatureCollectionLike;
+
+    expect(geojson.features).toHaveLength(1);
+    expect(geojson.features[0].geometry.coordinates).toEqual([14.2, 55.7]);
+  });
+});
+
+describe("Export Integration - GeoJSON Validation", () => {
+  it("should produce valid GeoJSON per specification", () => {
+    const rows: GridRowData[] = [
+      {
+        id: "valid-geo",
+        FNR: "789",
+        UUID_FASTIGHET: "uuid-valid",
+        FASTIGHET: "Valid Property",
+        BOSTADR: "Valid Owner",
+        ADDRESS: "Valid Address",
+        geometryType: "polygon",
+        geometry: {
+          type: "polygon",
+          rings: [
+            [
+              [10, 10],
+              [20, 10],
+              [20, 20],
+              [10, 20],
+              [10, 10],
+            ],
+          ],
+        },
+      },
+    ];
+
+    const geojson = convertToGeoJSON(rows) as unknown as FeatureCollectionLike;
+
+    expect(geojson.type).toBe("FeatureCollection");
+    expect(Array.isArray(geojson.features)).toBe(true);
+    expect(geojson.features[0]).toBeDefined();
+    expect(geojson.features[0].geometry.type).toBe("Polygon");
+    expect(geojson.features[0].geometry.coordinates).toEqual([
+      [
+        [10, 10],
+        [20, 10],
+        [20, 20],
+        [10, 20],
+        [10, 10],
+      ],
+    ]);
   });
 });
 
@@ -2227,12 +2642,18 @@ describe("Export Utilities - exportData", () => {
     };
 
     try {
-      exportData(rawData, rows, {
-        format: "json",
-        filename: "property-export",
-        rowCount: rows.length,
-        definition,
-      });
+      exportData(
+        rawData,
+        rows,
+        {
+          format: "json",
+          filename: "property-export",
+          rowCount: rows.length,
+          definition,
+        },
+        false,
+        "Unknown Owner"
+      );
 
       expect(createObjectURL).toHaveBeenCalled();
       expect(appendChildSpy).toHaveBeenCalledWith(anchorElement);
