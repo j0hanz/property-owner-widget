@@ -1,11 +1,10 @@
-import { stripHtml } from "./utils";
+import { stripHtml, formatOwnerInfo } from "./utils";
 import { trackEvent, trackError } from "./telemetry";
 import type {
   GridRowData,
   CsvHeaderValues,
   ExportOptions,
   SerializedQueryResult,
-  SerializedQueryFeature,
   SerializedRecord,
   GeoJsonGeometry,
 } from "../config/types";
@@ -47,6 +46,39 @@ const sanitizeValue = (value: unknown): string => {
   return "";
 };
 
+export const convertToJSON = (
+  rows: GridRowData[],
+  maskingEnabled: boolean,
+  unknownOwnerText: string
+): Array<{ FASTIGHET: string; ADDRESS: string }> => {
+  if (!rows || rows.length === 0) {
+    return [];
+  }
+
+  return rows.map((row) => {
+    const propertyLabel = sanitizeValue(row.FASTIGHET || row.FNR || "");
+
+    const ownerText = (() => {
+      if (row.rawOwner) {
+        const formattedOwner = formatOwnerInfo(
+          row.rawOwner,
+          maskingEnabled,
+          unknownOwnerText
+        );
+        return sanitizeValue(formattedOwner);
+      }
+
+      const fallback = row.BOSTADR || row.ADDRESS || unknownOwnerText;
+      return sanitizeValue(fallback);
+    })();
+
+    return {
+      FASTIGHET: propertyLabel,
+      ADDRESS: ownerText,
+    };
+  });
+};
+
 const escapeCsvValue = (value: unknown): string => {
   const sanitized = sanitizeValue(value);
   if (
@@ -78,63 +110,6 @@ export const convertToCSV = (rows: GridRowData[]): string => {
   });
 
   return [csvHeaders, ...csvRows].join("\n");
-};
-
-const cloneRecord = (
-  record: SerializedRecord | null
-): SerializedRecord | null => {
-  if (!record) {
-    return null;
-  }
-  return { ...record };
-};
-
-const stripRingsFromGeometry = (
-  data: readonly SerializedQueryResult[]
-): SerializedQueryResult[] => {
-  return data.map((result) => {
-    if (!result?.features) {
-      return result;
-    }
-
-    const sanitizedFeatures = result.features.map(
-      (feature): SerializedQueryFeature => {
-        if (!feature) {
-          return {
-            attributes: null,
-            geometry: null,
-            aggregateGeometries: null,
-            symbol: null,
-            popupTemplate: null,
-          };
-        }
-
-        const sanitized: SerializedQueryFeature = {
-          attributes: cloneRecord(feature.attributes),
-          geometry: null,
-          aggregateGeometries: cloneRecord(feature.aggregateGeometries ?? null),
-          symbol: cloneRecord(feature.symbol ?? null),
-          popupTemplate: cloneRecord(feature.popupTemplate ?? null),
-        };
-
-        if (feature.geometry) {
-          const { rings, ...other } = feature.geometry as {
-            [key: string]: unknown;
-            rings?: unknown;
-          };
-          sanitized.geometry = { ...other };
-          void rings;
-        }
-
-        return sanitized;
-      }
-    );
-
-    return {
-      ...result,
-      features: sanitizedFeatures,
-    };
-  });
 };
 
 export const convertToGeoJSON = (rows: GridRowData[]): SerializedRecord => {
@@ -190,18 +165,25 @@ const buildFilename = (
 export const exportData = (
   rawData: readonly SerializedQueryResult[] | null | undefined,
   selectedProperties: GridRowData[],
-  options: ExportOptions
+  options: ExportOptions,
+  maskingEnabled: boolean,
+  unknownOwnerText: string
 ): void => {
   const { format, filename, rowCount, definition } = options;
 
   try {
+    void rawData;
     let content = "";
     let mimeType = "application/json;charset=utf-8";
     let extension = definition?.extension || "json";
 
     if (format === "json") {
-      const cleanedData = stripRingsFromGeometry(rawData ?? []);
-      content = JSON.stringify(cleanedData, null, 2);
+      const jsonData = convertToJSON(
+        selectedProperties,
+        maskingEnabled,
+        unknownOwnerText
+      );
+      content = JSON.stringify(jsonData, null, 2);
       mimeType = definition?.mimeType || "application/json;charset=utf-8";
     } else if (format === "csv") {
       content = convertToCSV(selectedProperties);

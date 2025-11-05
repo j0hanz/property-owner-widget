@@ -656,12 +656,18 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     const selectedRows = Array.from(selectedProperties);
 
     try {
-      exportData(selectedRawData, selectedRows, {
-        format,
-        filename: "property-export",
-        rowCount: selectedRows.length,
-        definition: EXPORT_FORMATS.find((item) => item.id === format),
-      });
+      exportData(
+        selectedRawData,
+        selectedRows,
+        {
+          format,
+          filename: "property-export",
+          rowCount: selectedRows.length,
+          definition: EXPORT_FORMATS.find((item) => item.id === format),
+        },
+        config.enablePIIMasking,
+        translate("unknownOwner")
+      );
     } catch (error) {
       console.error("Export failed", error);
     }

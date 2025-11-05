@@ -58,7 +58,7 @@ export const EXPORT_FORMATS: ExportFormatDefinition[] = [
   {
     id: "json",
     label: "JSON",
-    description: "Raw query results with full metadata",
+    description: "Property designations with owner information",
     extension: "json",
     mimeType: "application/json",
   },
