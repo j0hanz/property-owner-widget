@@ -1879,16 +1879,16 @@ describe("Clipboard Formatting", () => {
     rawOwner: baseOwner,
   };
 
-  it("should format rows with tab separation and header", () => {
+  it("should format rows with tab separation without header", () => {
     const result = formatPropertiesForClipboard(
       [baseRow],
       false,
       "Unknown owner"
     );
 
-    expect(result).toContain("FASTIGHET\tBOSTADR");
-    expect(result.split("\n")).toHaveLength(2);
-    expect(result.split("\n")[1]).toBe(
+    expect(result).not.toContain("FASTIGHET\tBOSTADR");
+    expect(result.split("\n")).toHaveLength(1);
+    expect(result.split("\n")[0]).toBe(
       "Lund 1:1\tJohn Doe, Testgatan 1, 12345 Lund (556677-8899)"
     );
   });
@@ -1939,12 +1939,12 @@ describe("Clipboard Formatting", () => {
       "Unknown owner"
     );
 
-    expect(result.split("\n")[1]).toBe("Lund 3:7\tUnknown owner");
+    expect(result.split("\n")[0]).toBe("Lund 3:7\tUnknown owner");
   });
 
-  it("should return only header when no properties provided", () => {
+  it("should return empty string when no properties provided", () => {
     const result = formatPropertiesForClipboard([], false, "Unknown owner");
-    expect(result).toBe("FASTIGHET\tBOSTADR");
+    expect(result).toBe("");
   });
 });
 

@@ -405,9 +405,8 @@ export const formatPropertiesForClipboard = (
   maskingEnabled: boolean,
   unknownOwnerText: string
 ): string => {
-  const header = "FASTIGHET\tBOSTADR";
   if (!properties || properties.length === 0) {
-    return header;
+    return "";
   }
 
   const rows = properties.map((property) => {
@@ -433,7 +432,7 @@ export const formatPropertiesForClipboard = (
     return `${propertyLabel}\t${ownerText}`;
   });
 
-  return [header, ...rows].join("\n");
+  return rows.join("\n");
 };
 
 export const formatPropertyWithShare = (
