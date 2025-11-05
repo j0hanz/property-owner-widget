@@ -59,23 +59,20 @@ import {
   useThrottle,
   useHoverQuery,
 } from "../shared/hooks";
-import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api";
+import { clearQueryCache } from "../shared/api";
 import {
   formatOwnerInfo,
   formatPropertiesForClipboard,
   extractFnr,
   isAbortError,
   normalizeFnrKey,
-  validateMapClickPipeline,
   syncGraphicsWithState,
-  cleanupRemovedGraphics,
   isValidationFailure,
   buildHighlightColor,
   computeWidgetsToClose,
   applySortingToProperties,
   dataSourceHelpers,
   getValidatedOutlineWidth,
-  updateRawPropertyResults,
   logger,
   syncCursorGraphics,
   abortHelpers,
@@ -84,6 +81,10 @@ import {
   createPropertyDispatcher,
   cursorLifecycleHelpers,
   copyToClipboard,
+  validateMapClickRequest,
+  executePropertyQueryPipeline,
+  updatePropertySelectionState,
+  scheduleGraphicsRendering,
 } from "../shared/utils";
 import { createPropertySelectors } from "../extensions/store";
 import type { CursorGraphicsState } from "../shared/utils";
@@ -781,11 +782,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     async (event: __esri.ViewClickEvent) => {
       const perfStart = performance.now();
       console.log("[PERF] Map click started at", perfStart);
-      // Don't abort all on every click - only abort when starting new query
-      // abortAll() removes ability to benefit from any caching
       const tracker = createPerformanceTracker("map_click_query");
 
-      const validation = validateMapClickPipeline({
+      const validation = validateMapClickRequest({
         event,
         modules,
         config,
@@ -818,35 +817,18 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       const controller = getController();
 
       try {
-        const pipelineStart = performance.now();
-        console.log(
-          "[PERF] Pipeline started at",
-          pipelineStart - perfStart,
-          "ms"
-        );
-        const pipelineResult = await runPropertySelectionPipeline({
+        const pipelineResult = await executePropertyQueryPipeline({
           mapPoint,
-          propertyDataSourceId: config.propertyDataSourceId,
-          ownerDataSourceId: config.ownerDataSourceId,
+          config,
           dsManager: manager,
           maxResults,
           toggleEnabled,
-          enableBatchOwnerQuery: config.enableBatchOwnerQuery,
-          relationshipId: config.relationshipId,
           enablePIIMasking: piiMaskingEnabled,
-          signal: controller.signal,
           selectedProperties: selectionForPipeline,
+          signal: controller.signal,
           translate,
+          perfStart,
         });
-        const pipelineEnd = performance.now();
-        console.log(
-          "[PERF] Pipeline completed at",
-          pipelineEnd - perfStart,
-          "ms",
-          "(took",
-          pipelineEnd - pipelineStart,
-          "ms)"
-        );
 
         const abortStatus = abortHelpers.checkAbortedOrStale(
           controller.signal,
@@ -881,40 +863,20 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         }
 
         if (!isStaleRequest()) {
-          const prevRawResults = rawPropertyResultsRef.current;
-          const prevResultsPlain: SerializedQueryResultMap =
-            prevRawResults ?? {};
-          const updatedRawResults = updateRawPropertyResults(
-            prevResultsPlain,
-            pipelineResult.rowsToProcess,
-            pipelineResult.propertyResults,
-            pipelineResult.toRemove,
-            selectionForPipeline,
-            normalizeFnrKey
-          );
-
-          // Prepare Redux payloads
-          const dispatch = propertyDispatchRef.current;
-          const rowsToStore = pipelineResult.updatedRows;
-          const resultsToStore: SerializedQueryResultMap =
-            updatedRawResults instanceof Map
-              ? (Object.fromEntries(
-                  updatedRawResults
-                ) as SerializedQueryResultMap)
-              : updatedRawResults;
-
-          // Clean up removed graphics before scheduling new ones
-          cleanupRemovedGraphics({
-            toRemove: pipelineResult.toRemove,
+          const stateUpdate = updatePropertySelectionState({
+            pipelineResult,
+            previousRawResults: rawPropertyResultsRef.current,
+            selectedProperties: selectionForPipeline,
+            dispatch: propertyDispatchRef.current,
             removeGraphicsForFnr,
             normalizeFnrKey,
+            highlightColorConfig,
+            highlightOpacityConfig,
+            outlineWidthConfig,
+            perfStart,
           });
 
-          const highlightColor = buildHighlightColor(
-            highlightColorConfig,
-            highlightOpacityConfig
-          );
-          const outlineWidth = getValidatedOutlineWidth(outlineWidthConfig);
+          rawPropertyResultsRef.current = stateUpdate.resultsToStore;
 
           const graphicsHelpers = {
             addGraphicsToMap,
@@ -923,71 +885,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
             normalizeFnrKey,
           } satisfies SelectionGraphicsHelpers;
 
-          // Update Redux state first so UI reflects changes immediately
-          const reduxStart = performance.now();
-          console.log(
-            "[PERF] Redux update started at",
-            reduxStart - perfStart,
-            "ms"
-          );
-          dispatch.setSelectedProperties(rowsToStore);
-          dispatch.setRawResults(resultsToStore);
-          dispatch.setQueryInFlight(false);
-          const reduxEnd = performance.now();
-          console.log(
-            "[PERF] Redux update completed at",
-            reduxEnd - perfStart,
-            "ms",
-            "(took",
-            reduxEnd - reduxStart,
-            "ms)"
-          );
-          console.log("[PERF] UI VISIBLE TIME:", reduxEnd - perfStart, "ms");
-
-          const renderGraphics = () => {
-            if (isStaleRequest()) {
-              return;
-            }
-
-            const graphicsStart = performance.now();
-            console.log(
-              "[PERF] Graphics rendering started at",
-              graphicsStart - perfStart,
-              "ms"
-            );
-
-            syncSelectionGraphics({
-              graphicsToAdd: pipelineResult.graphicsToAdd,
-              selectedRows: pipelineResult.updatedRows,
-              getCurrentView,
-              helpers: graphicsHelpers,
-              highlightColor,
-              outlineWidth,
-            });
-
-            const graphicsEnd = performance.now();
-            console.log(
-              "[PERF] Graphics rendering completed at",
-              graphicsEnd - perfStart,
-              "ms",
-              "(took",
-              graphicsEnd - graphicsStart,
-              "ms)"
-            );
-            console.log(
-              "[PERF] TOTAL TIME (with async graphics):",
-              graphicsEnd - perfStart,
-              "ms"
-            );
-          };
-
-          if (typeof requestAnimationFrame === "function") {
-            requestAnimationFrame(() => {
-              renderGraphics();
-            });
-          } else {
-            renderGraphics();
-          }
+          scheduleGraphicsRendering({
+            pipelineResult,
+            highlightColor: stateUpdate.highlightColor,
+            outlineWidth: stateUpdate.outlineWidth,
+            graphicsHelpers,
+            getCurrentView,
+            isStaleRequest,
+            perfStart,
+            syncFn: syncSelectionGraphics,
+          });
         }
 
         tracker.success();

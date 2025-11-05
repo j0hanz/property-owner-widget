@@ -20,6 +20,14 @@ import type {
   MapClickValidationParams,
   UseDataSourceCandidate,
   MapViewWithPopupToggle,
+  SerializedQueryResultMap,
+  PropertyProcessingContext,
+  ValidatedProperty,
+  ProcessingAccumulator,
+  OwnerQueryResolution,
+  SelectionGraphicsParams,
+  PropertySelectionPipelineResult,
+  CreateGridRowParams,
 } from "../config/types";
 import type {
   DataSourceManager,
@@ -31,6 +39,7 @@ import {
   validateDataSources as validateDataSourcesCore,
   queryPropertyByPoint,
   queryOwnerByFnr,
+  runPropertySelectionPipeline,
 } from "../shared/api";
 import {
   MIN_MASK_LENGTH,
@@ -603,6 +612,217 @@ export const normalizeFnrKey = (
   return fnr != null ? String(fnr) : "";
 };
 
+export const deduplicateOwnerEntries = (
+  owners: OwnerAttributes[],
+  context: { fnr: FnrValue; propertyId: string }
+): OwnerAttributes[] => {
+  const seen = new Set<string>();
+  const unique: OwnerAttributes[] = [];
+
+  owners.forEach((owner, index) => {
+    if (!owner || typeof owner !== "object") {
+      return;
+    }
+
+    try {
+      const key = ownerIdentity.buildKey(owner, context, index);
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      unique.push(owner);
+    } catch (_error) {
+      unique.push(owner);
+    }
+  });
+
+  return unique;
+};
+
+export const createGridRow = (params: CreateGridRowParams): GridRowData => ({
+  id: params.createRowId(params.fnr, params.objectId),
+  FNR: params.fnr,
+  UUID_FASTIGHET: params.uuidFastighet,
+  FASTIGHET: params.fastighet,
+  BOSTADR: params.bostadr,
+  ADDRESS: params.address,
+  geometryType: params.geometryType,
+  geometry: params.geometry ?? null,
+  rawOwner: params.rawOwner,
+});
+
+export const accumulatePropertyRows = (
+  rows: GridRowData[],
+  accumulator: ProcessingAccumulator,
+  graphic: __esri.Graphic,
+  fnr: FnrValue,
+  currentTotal: number,
+  maxResults: number
+): boolean => {
+  if (rows.length === 0) {
+    return currentTotal >= maxResults;
+  }
+
+  const remaining = Math.max(maxResults - currentTotal, 0);
+  const rowsToAdd = remaining > 0 ? rows.slice(0, remaining) : [];
+
+  accumulator.rows.push(...rowsToAdd);
+
+  if (rowsToAdd.length > 0) {
+    accumulator.graphics.push({ graphic, fnr });
+  }
+
+  return currentTotal + rowsToAdd.length >= maxResults;
+};
+
+export const buildPropertyRows = (
+  validated: ValidatedProperty,
+  owners: OwnerAttributes[],
+  queryFailed: boolean,
+  maskPII: boolean,
+  context: PropertyProcessingContext
+): GridRowData[] => {
+  const geometry = validated.graphic.geometry;
+  const geometryType = geometry?.type ?? null;
+  const serializedGeometry =
+    geometry && typeof geometry.toJSON === "function"
+      ? geometry.toJSON()
+      : null;
+
+  if (owners.length > 0) {
+    const uniqueOwners = deduplicateOwnerEntries(owners, {
+      fnr: validated.fnr,
+      propertyId: validated.attrs.UUID_FASTIGHET,
+    });
+
+    return uniqueOwners.map((owner) =>
+      createGridRow({
+        fnr: validated.fnr,
+        objectId: owner.OBJECTID ?? validated.attrs.OBJECTID,
+        uuidFastighet: owner.UUID_FASTIGHET ?? validated.attrs.UUID_FASTIGHET,
+        fastighet: context.helpers.formatPropertyWithShare(
+          owner.FASTIGHET ?? validated.attrs.FASTIGHET,
+          owner.ANDEL
+        ),
+        bostadr: context.helpers.formatOwnerInfo(
+          owner,
+          maskPII,
+          context.messages.unknownOwner
+        ),
+        address: context.helpers.formatOwnerInfo(
+          owner,
+          maskPII,
+          context.messages.unknownOwner
+        ),
+        geometryType,
+        geometry: serializedGeometry,
+        createRowId: context.helpers.createRowId,
+        rawOwner: owner,
+      })
+    );
+  }
+
+  const fallbackMessage = queryFailed
+    ? context.messages.errorOwnerQueryFailed
+    : context.messages.unknownOwner;
+
+  const fallbackOwner: OwnerAttributes = {
+    OBJECTID: validated.attrs.OBJECTID,
+    FNR: validated.fnr,
+    UUID_FASTIGHET: validated.attrs.UUID_FASTIGHET,
+    FASTIGHET: validated.attrs.FASTIGHET,
+    NAMN: fallbackMessage,
+    BOSTADR: "",
+    POSTNR: "",
+    POSTADR: "",
+    ORGNR: "",
+  };
+
+  return [
+    createGridRow({
+      fnr: validated.fnr,
+      objectId: validated.attrs.OBJECTID,
+      uuidFastighet: validated.attrs.UUID_FASTIGHET,
+      fastighet: validated.attrs.FASTIGHET,
+      bostadr: fallbackMessage,
+      address: "",
+      geometryType,
+      geometry: serializedGeometry,
+      createRowId: context.helpers.createRowId,
+      rawOwner: fallbackOwner,
+    }),
+  ];
+};
+
+export const shouldStopAccumulation = (
+  currentRowCount: number,
+  accumulatedRows: number,
+  maxResults: number
+): boolean => {
+  if (maxResults <= 0) {
+    return true;
+  }
+  return currentRowCount + accumulatedRows >= maxResults;
+};
+
+export const processOwnerResult = (params: {
+  resolution: OwnerQueryResolution;
+  validated: ValidatedProperty;
+  context: PropertyProcessingContext;
+  maskPII: boolean;
+  accumulator: ProcessingAccumulator;
+  currentRowCount: number;
+  maxResults: number;
+}): boolean => {
+  const {
+    resolution,
+    validated,
+    context,
+    maskPII,
+    accumulator,
+    currentRowCount,
+    maxResults,
+  } = params;
+
+  if (
+    shouldStopAccumulation(currentRowCount, accumulator.rows.length, maxResults)
+  ) {
+    return true;
+  }
+
+  const totalBefore = currentRowCount + accumulator.rows.length;
+
+  if (resolution.error || !resolution.value) {
+    const rows = buildPropertyRows(validated, [], true, maskPII, context);
+    return accumulatePropertyRows(
+      rows,
+      accumulator,
+      validated.graphic,
+      validated.fnr,
+      totalBefore,
+      maxResults
+    );
+  }
+
+  const ownerResult = resolution.value;
+  const rows = buildPropertyRows(
+    ownerResult.validated,
+    ownerResult.owners,
+    ownerResult.queryFailed,
+    maskPII,
+    context
+  );
+
+  return accumulatePropertyRows(
+    rows,
+    accumulator,
+    ownerResult.validated.graphic,
+    ownerResult.validated.fnr,
+    totalBefore,
+    maxResults
+  );
+};
+
 export const isAbortError = (error: unknown): error is Error => {
   if (!error || typeof error !== "object") return false;
   const candidate = error as { name?: string; message?: string };
@@ -963,6 +1183,248 @@ export const validateMapClickPipeline = (params: {
       manager: validatedDs.data.manager,
     },
   };
+};
+
+export const validateMapClickRequest = (params: {
+  event: __esri.ViewClickEvent | null | undefined;
+  modules: EsriModules | null;
+  config: IMConfig;
+  dsManager: DataSourceManager | null;
+  translate: (key: string) => string;
+}): ValidationResult<{
+  mapPoint: __esri.Point;
+  manager: DataSourceManager;
+}> => {
+  const validation = validateMapClickPipeline(params);
+  if (checkValidationFailure(validation)) {
+    return validation;
+  }
+
+  return {
+    valid: true,
+    data: {
+      mapPoint: validation.data.mapPoint,
+      manager: validation.data.manager,
+    },
+  };
+};
+
+export const executePropertyQueryPipeline = async (params: {
+  mapPoint: __esri.Point;
+  config: IMConfig;
+  dsManager: DataSourceManager;
+  maxResults: number;
+  toggleEnabled: boolean;
+  enablePIIMasking: boolean;
+  selectedProperties: GridRowData[];
+  signal: AbortSignal;
+  translate: (key: string) => string;
+  perfStart: number;
+}): Promise<PropertySelectionPipelineResult> => {
+  const {
+    mapPoint,
+    config,
+    dsManager,
+    maxResults,
+    toggleEnabled,
+    enablePIIMasking,
+    selectedProperties,
+    signal,
+    translate,
+    perfStart,
+  } = params;
+
+  const pipelineStart = performance.now();
+  console.log("[PERF] Pipeline started at", pipelineStart - perfStart, "ms");
+
+  const pipelineResult = await runPropertySelectionPipeline({
+    mapPoint,
+    propertyDataSourceId: config.propertyDataSourceId,
+    ownerDataSourceId: config.ownerDataSourceId,
+    dsManager,
+    maxResults,
+    toggleEnabled,
+    enableBatchOwnerQuery: config.enableBatchOwnerQuery,
+    relationshipId: config.relationshipId,
+    enablePIIMasking,
+    signal,
+    selectedProperties,
+    translate,
+  });
+
+  const pipelineEnd = performance.now();
+  console.log(
+    "[PERF] Pipeline completed at",
+    pipelineEnd - perfStart,
+    "ms",
+    "(took",
+    pipelineEnd - pipelineStart,
+    "ms)"
+  );
+
+  return pipelineResult;
+};
+
+type PropertyPipelineSuccess = Extract<
+  PropertySelectionPipelineResult,
+  { status: "success" }
+>;
+
+export const updatePropertySelectionState = (params: {
+  pipelineResult: PropertyPipelineSuccess;
+  previousRawResults:
+    | SerializedQueryResultMap
+    | Map<string, SerializedQueryResult>
+    | null;
+  selectedProperties: GridRowData[];
+  dispatch: ReturnType<typeof createPropertyDispatcher>;
+  removeGraphicsForFnr: (
+    fnr: FnrValue,
+    normalize: (fnr: FnrValue | null | undefined) => string
+  ) => void;
+  normalizeFnrKey: (fnr: FnrValue | null | undefined) => string;
+  highlightColorConfig: string;
+  highlightOpacityConfig: number;
+  outlineWidthConfig: number;
+  perfStart: number;
+}): {
+  rowsToStore: GridRowData[];
+  resultsToStore: SerializedQueryResultMap;
+  highlightColor: [number, number, number, number];
+  outlineWidth: number;
+} => {
+  const {
+    pipelineResult,
+    previousRawResults,
+    selectedProperties,
+    dispatch,
+    removeGraphicsForFnr,
+    normalizeFnrKey,
+    highlightColorConfig,
+    highlightOpacityConfig,
+    outlineWidthConfig,
+    perfStart,
+  } = params;
+
+  const prevPlain = previousRawResults ?? {};
+  const updatedRawResults = updateRawPropertyResults(
+    prevPlain,
+    pipelineResult.rowsToProcess,
+    pipelineResult.propertyResults,
+    pipelineResult.toRemove,
+    selectedProperties,
+    normalizeFnrKey
+  );
+
+  cleanupRemovedGraphics({
+    toRemove: pipelineResult.toRemove,
+    removeGraphicsForFnr,
+    normalizeFnrKey,
+  });
+
+  const resultsToStore =
+    updatedRawResults instanceof Map
+      ? (Object.fromEntries(updatedRawResults) as SerializedQueryResultMap)
+      : updatedRawResults;
+
+  const highlightColor = buildHighlightColor(
+    highlightColorConfig,
+    highlightOpacityConfig
+  );
+  const outlineWidth = getValidatedOutlineWidth(outlineWidthConfig);
+
+  const reduxStart = performance.now();
+  console.log("[PERF] Redux update started at", reduxStart - perfStart, "ms");
+
+  dispatch.setSelectedProperties(pipelineResult.updatedRows);
+  dispatch.setRawResults(resultsToStore);
+  dispatch.setQueryInFlight(false);
+
+  const reduxEnd = performance.now();
+  console.log(
+    "[PERF] Redux update completed at",
+    reduxEnd - perfStart,
+    "ms",
+    "(took",
+    reduxEnd - reduxStart,
+    "ms)"
+  );
+  console.log("[PERF] UI VISIBLE TIME:", reduxEnd - perfStart, "ms");
+
+  return {
+    rowsToStore: pipelineResult.updatedRows,
+    resultsToStore,
+    highlightColor,
+    outlineWidth,
+  };
+};
+
+export const scheduleGraphicsRendering = (params: {
+  pipelineResult: PropertyPipelineSuccess;
+  highlightColor: [number, number, number, number];
+  outlineWidth: number;
+  graphicsHelpers: SelectionGraphicsHelpers;
+  getCurrentView: () => __esri.MapView | null | undefined;
+  isStaleRequest: () => boolean;
+  perfStart: number;
+  syncFn: (params: SelectionGraphicsParams) => void;
+}): void => {
+  const {
+    pipelineResult,
+    highlightColor,
+    outlineWidth,
+    graphicsHelpers,
+    getCurrentView,
+    isStaleRequest,
+    perfStart,
+    syncFn,
+  } = params;
+
+  const renderGraphics = () => {
+    if (isStaleRequest()) {
+      return;
+    }
+
+    const graphicsStart = performance.now();
+    console.log(
+      "[PERF] Graphics rendering started at",
+      graphicsStart - perfStart,
+      "ms"
+    );
+
+    syncFn({
+      graphicsToAdd: pipelineResult.graphicsToAdd,
+      selectedRows: pipelineResult.updatedRows,
+      getCurrentView,
+      helpers: graphicsHelpers,
+      highlightColor,
+      outlineWidth,
+    });
+
+    const graphicsEnd = performance.now();
+    console.log(
+      "[PERF] Graphics rendering completed at",
+      graphicsEnd - perfStart,
+      "ms",
+      "(took",
+      graphicsEnd - graphicsStart,
+      "ms)"
+    );
+    console.log(
+      "[PERF] TOTAL TIME (with async graphics):",
+      graphicsEnd - perfStart,
+      "ms"
+    );
+  };
+
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => {
+      renderGraphics();
+    });
+    return;
+  }
+
+  renderGraphics();
 };
 
 export const processPropertyQueryResults = async (

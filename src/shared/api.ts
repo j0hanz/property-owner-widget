@@ -32,7 +32,6 @@ import type {
   OwnerFetchSuccess,
   OwnerQueryResolution,
   ProcessingAccumulator,
-  CreateGridRowParams,
 } from "../config/types";
 import { isValidationFailure } from "../config/types";
 import { OWNER_QUERY_CONCURRENCY } from "../config/constants";
@@ -41,7 +40,6 @@ import {
   parseArcGISError,
   isAbortError,
   normalizeFnrKey,
-  ownerIdentity,
   abortHelpers,
   calculatePropertyUpdates,
   processPropertyQueryResults,
@@ -50,6 +48,10 @@ import {
   formatPropertyWithShare,
   formatOwnerInfo,
   extractFnr,
+  createGridRow,
+  deduplicateOwnerEntries,
+  shouldStopAccumulation,
+  processOwnerResult,
 } from "./utils";
 
 const ARC_GIS_LAYER_PATTERN = /\/(mapserver|featureserver)\/\d+(?:\/query)?$/i;
@@ -247,69 +249,6 @@ const toOwnerAttributes = (
   return graphic.attributes as OwnerAttributes;
 };
 
-const deduplicateOwnerEntries = (
-  owners: OwnerAttributes[],
-  context: { fnr: FnrValue; propertyId?: string }
-): OwnerAttributes[] => {
-  const seenKeys = new Set<string>();
-  const unique: OwnerAttributes[] = [];
-
-  owners.forEach((owner, index) => {
-    if (!owner || typeof owner !== "object") {
-      return;
-    }
-
-    try {
-      const key = ownerIdentity.buildKey(owner, context, index);
-      if (seenKeys.has(key)) {
-        return;
-      }
-      seenKeys.add(key);
-      unique.push(owner);
-    } catch (_error) {
-      unique.push(owner);
-    }
-  });
-
-  return unique;
-};
-
-const createGridRow = (params: CreateGridRowParams): GridRowData => ({
-  id: params.createRowId(params.fnr, params.objectId),
-  FNR: params.fnr,
-  UUID_FASTIGHET: params.uuidFastighet,
-  FASTIGHET: params.fastighet,
-  BOSTADR: params.bostadr,
-  ADDRESS: params.address,
-  geometryType: params.geometryType,
-  geometry: params.geometry ?? null,
-  rawOwner: params.rawOwner,
-});
-
-const accumulatePropertyRows = (
-  rows: GridRowData[],
-  accumulator: ProcessingAccumulator,
-  graphic: __esri.Graphic,
-  fnr: FnrValue,
-  currentTotal: number,
-  maxResults: number
-): boolean => {
-  if (rows.length === 0) {
-    return currentTotal >= maxResults;
-  }
-
-  const remaining = Math.max(maxResults - currentTotal, 0);
-  const rowsToAdd = remaining > 0 ? rows.slice(0, remaining) : [];
-
-  accumulator.rows.push(...rowsToAdd);
-
-  if (rowsToAdd.length > 0) {
-    accumulator.graphics.push({ graphic, fnr });
-  }
-
-  return currentTotal + rowsToAdd.length >= maxResults;
-};
-
 const shouldSkipOwnerResult = (
   result: OwnerQueryResolution,
   helpers: PropertyProcessingContext["helpers"]
@@ -326,140 +265,6 @@ const shouldSkipOwnerResult = (
   }
 
   return { skip: false };
-};
-
-const buildPropertyRows = (
-  validated: ValidatedProperty,
-  owners: OwnerAttributes[],
-  queryFailed: boolean,
-  maskPII: boolean,
-  context: PropertyProcessingContext
-): GridRowData[] => {
-  const geometry = validated.graphic.geometry;
-  const geometryType = geometry?.type ?? null;
-  const serializedGeometry =
-    geometry && typeof geometry.toJSON === "function"
-      ? geometry.toJSON()
-      : null;
-
-  if (owners.length > 0) {
-    const uniqueOwners = deduplicateOwnerEntries(owners, {
-      fnr: validated.fnr,
-      propertyId: validated.attrs.UUID_FASTIGHET,
-    });
-
-    return uniqueOwners.map((owner) =>
-      createGridRow({
-        fnr: validated.fnr,
-        objectId: owner.OBJECTID ?? validated.attrs.OBJECTID,
-        uuidFastighet: owner.UUID_FASTIGHET ?? validated.attrs.UUID_FASTIGHET,
-        fastighet: context.helpers.formatPropertyWithShare(
-          owner.FASTIGHET ?? validated.attrs.FASTIGHET,
-          owner.ANDEL
-        ),
-        bostadr: context.helpers.formatOwnerInfo(
-          owner,
-          maskPII,
-          context.messages.unknownOwner
-        ),
-        address: context.helpers.formatOwnerInfo(
-          owner,
-          maskPII,
-          context.messages.unknownOwner
-        ),
-        geometryType,
-        geometry: serializedGeometry,
-        createRowId: context.helpers.createRowId,
-        rawOwner: owner,
-      })
-    );
-  }
-
-  const fallbackMessage = queryFailed
-    ? context.messages.errorOwnerQueryFailed
-    : context.messages.unknownOwner;
-
-  const fallbackOwner: OwnerAttributes = {
-    OBJECTID: validated.attrs.OBJECTID,
-    FNR: validated.fnr,
-    UUID_FASTIGHET: validated.attrs.UUID_FASTIGHET,
-    FASTIGHET: validated.attrs.FASTIGHET,
-    NAMN: fallbackMessage,
-    BOSTADR: "",
-    POSTNR: "",
-    POSTADR: "",
-    ORGNR: "",
-  };
-
-  return [
-    createGridRow({
-      fnr: validated.fnr,
-      objectId: validated.attrs.OBJECTID,
-      uuidFastighet: validated.attrs.UUID_FASTIGHET,
-      fastighet: validated.attrs.FASTIGHET,
-      bostadr: fallbackMessage,
-      address: "",
-      geometryType,
-      geometry: serializedGeometry,
-      createRowId: context.helpers.createRowId,
-      rawOwner: fallbackOwner,
-    }),
-  ];
-};
-
-const processOwnerQueryError = (
-  validated: ValidatedProperty,
-  context: PropertyProcessingContext,
-  maskPII: boolean,
-  accumulator: ProcessingAccumulator,
-  currentRowCount: number,
-  maxResults: number
-): boolean => {
-  const totalBefore = currentRowCount + accumulator.rows.length;
-  if (totalBefore >= maxResults) {
-    return true;
-  }
-
-  const rows = buildPropertyRows(validated, [], true, maskPII, context);
-  return accumulatePropertyRows(
-    rows,
-    accumulator,
-    validated.graphic,
-    validated.fnr,
-    totalBefore,
-    maxResults
-  );
-};
-
-const processOwnerQuerySuccess = (
-  result: OwnerFetchSuccess,
-  context: PropertyProcessingContext,
-  maskPII: boolean,
-  accumulator: ProcessingAccumulator,
-  currentRowCount: number,
-  maxResults: number
-): boolean => {
-  const totalBefore = currentRowCount + accumulator.rows.length;
-  if (totalBefore >= maxResults) {
-    return true;
-  }
-
-  const rows = buildPropertyRows(
-    result.validated,
-    result.owners,
-    result.queryFailed,
-    maskPII,
-    context
-  );
-
-  return accumulatePropertyRows(
-    rows,
-    accumulator,
-    result.validated.graphic,
-    result.validated.fnr,
-    totalBefore,
-    maxResults
-  );
 };
 
 const validateAndDeduplicateProperties = (
@@ -563,6 +368,15 @@ const processBatchOfProperties = async (params: {
   for (let index = 0; index < ownerData.length; index += 1) {
     const resolution = ownerData[index];
     const validated = batch[index];
+    if (
+      shouldStopAccumulation(
+        currentRowCount,
+        accumulator.rows.length,
+        maxResults
+      )
+    ) {
+      break;
+    }
     const skip = shouldSkipOwnerResult(resolution, helpers);
 
     if (skip.skip) {
@@ -570,35 +384,15 @@ const processBatchOfProperties = async (params: {
         continue;
       }
     }
-
-    if (resolution.error) {
-      const shouldStop = processOwnerQueryError(
-        validated,
-        context,
-        config.enablePIIMasking,
-        accumulator,
-        currentRowCount,
-        maxResults
-      );
-      if (shouldStop) {
-        break;
-      }
-      continue;
-    }
-
-    const ownerResult = resolution.value;
-    if (!ownerResult) {
-      continue;
-    }
-
-    const shouldStop = processOwnerQuerySuccess(
-      ownerResult,
+    const shouldStop = processOwnerResult({
+      resolution,
+      validated,
       context,
-      config.enablePIIMasking,
+      maskPII: config.enablePIIMasking,
       accumulator,
       currentRowCount,
-      maxResults
-    );
+      maxResults,
+    });
     if (shouldStop) {
       break;
     }
