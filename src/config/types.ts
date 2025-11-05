@@ -85,6 +85,7 @@ export interface GridRowData {
   BOSTADR: string;
   ADDRESS: string;
   geometryType?: string | null;
+  geometry?: SerializedRecord | null;
   rawOwner?: OwnerAttributes;
 }
 
@@ -104,6 +105,7 @@ export interface CsvHeaderValues {
   UUID_FASTIGHET: string;
   FASTIGHET: string;
   BOSTADR: string;
+  ADDRESS: string;
 }
 
 export interface ExportOptions {
@@ -544,9 +546,10 @@ export interface EsriStubGlobal {
 // =============================================================================
 
 export type GeoJsonGeometry =
-  | { type: "Polygon" }
-  | { type: "MultiLineString" }
-  | { type: "Point" }
+  | { type: "Polygon"; coordinates: number[][][] }
+  | { type: "MultiLineString"; coordinates: number[][][] }
+  | { type: "Point"; coordinates: number[] }
+  | { type: "MultiPoint"; coordinates: number[][] }
   | null;
 
 // =============================================================================
@@ -653,6 +656,7 @@ export interface CreateGridRowParams {
   bostadr: string;
   address: string;
   geometryType: string | null;
+  geometry?: SerializedRecord | null;
   createRowId: (fnr: FnrValue, objectId: number) => string;
   rawOwner?: OwnerAttributes;
 }

@@ -2134,6 +2134,34 @@ describe("Export Utilities - CSV", () => {
     expect(csv).toContain("Secure");
     expect(csv).not.toContain("<strong>");
   });
+
+  it("should populate the ADDRESS column", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        ADDRESS: "Test Street 123",
+      },
+    ];
+
+    const csv = convertToCSV(rows);
+    const lines = csv.split("\n");
+    expect(lines[0]).toBe("FNR,UUID_FASTIGHET,FASTIGHET,BOSTADR,ADDRESS");
+    expect(lines[1]).toContain("Test Street 123");
+    expect(lines[1].split(",")).toHaveLength(5);
+  });
+
+  it("should quote empty ADDRESS values", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        ADDRESS: "",
+      },
+    ];
+
+    const csv = convertToCSV(rows);
+    const lines = csv.split("\n");
+    expect(lines[1]).toMatch(/,""$/);
+  });
 });
 
 describe("Export Utilities - JSON", () => {
@@ -2410,19 +2438,36 @@ describe("Export Utilities - GeoJSON", () => {
     BOSTADR: "<span>Geo owner</span>",
     ADDRESS: "Geo Address",
     geometryType: null,
+    geometry: null,
   };
 
-  it("should convert polygon geometry", () => {
+  const polygonCoordinates = [
+    [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+      [0, 1],
+      [0, 0],
+    ],
+  ];
+
+  it("should include geometry coordinates for polygon", () => {
     const polygonRow: GridRowData = {
       ...baseRow,
       geometryType: "polygon",
+      geometry: {
+        type: "polygon",
+        rings: polygonCoordinates,
+      },
     };
 
     const geojson = convertToGeoJSON([
       polygonRow,
     ]) as unknown as FeatureCollectionLike;
     expect(geojson.features).toHaveLength(1);
-    expect(geojson.features[0].geometry.type).toBe("Polygon");
+    const feature = geojson.features[0];
+    expect(feature.geometry.type).toBe("Polygon");
+    expect(feature.geometry.coordinates).toEqual(polygonCoordinates);
   });
 
   it("should skip rows without geometry", () => {
@@ -2431,10 +2476,33 @@ describe("Export Utilities - GeoJSON", () => {
     expect(geojson.features).toHaveLength(0);
   });
 
+  it("should skip rows with missing coordinate data", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        geometryType: "polygon",
+        geometry: { type: "polygon", rings: [] },
+      },
+      {
+        ...baseRow,
+        geometryType: "point",
+        geometry: { type: "point", x: null, y: null },
+      },
+    ];
+
+    const geojson = convertToGeoJSON(rows) as unknown as FeatureCollectionLike;
+    expect(geojson.features).toHaveLength(0);
+  });
+
   it("should sanitize HTML in properties", () => {
     const rowWithHtml: GridRowData = {
       ...baseRow,
       geometryType: "point",
+      geometry: {
+        type: "point",
+        x: 12.345,
+        y: 67.89,
+      },
     };
 
     const geojson = convertToGeoJSON([
@@ -2442,6 +2510,69 @@ describe("Export Utilities - GeoJSON", () => {
     ]) as unknown as FeatureCollectionLike;
     expect(geojson.features[0].properties.FASTIGHET).toBe("Geo property");
     expect(geojson.features[0].properties.BOSTADR).toBe("Geo owner");
+  });
+
+  it("should include geometry coordinates for point", () => {
+    const pointRow: GridRowData = {
+      ...baseRow,
+      geometryType: "point",
+      geometry: {
+        type: "point",
+        x: 14.2,
+        y: 55.7,
+      },
+    };
+
+    const geojson = convertToGeoJSON([
+      pointRow,
+    ]) as unknown as FeatureCollectionLike;
+
+    expect(geojson.features).toHaveLength(1);
+    expect(geojson.features[0].geometry.coordinates).toEqual([14.2, 55.7]);
+  });
+});
+
+describe("Export Integration - GeoJSON Validation", () => {
+  it("should produce valid GeoJSON per specification", () => {
+    const rows: GridRowData[] = [
+      {
+        id: "valid-geo",
+        FNR: "789",
+        UUID_FASTIGHET: "uuid-valid",
+        FASTIGHET: "Valid Property",
+        BOSTADR: "Valid Owner",
+        ADDRESS: "Valid Address",
+        geometryType: "polygon",
+        geometry: {
+          type: "polygon",
+          rings: [
+            [
+              [10, 10],
+              [20, 10],
+              [20, 20],
+              [10, 20],
+              [10, 10],
+            ],
+          ],
+        },
+      },
+    ];
+
+    const geojson = convertToGeoJSON(rows) as unknown as FeatureCollectionLike;
+
+    expect(geojson.type).toBe("FeatureCollection");
+    expect(Array.isArray(geojson.features)).toBe(true);
+    expect(geojson.features[0]).toBeDefined();
+    expect(geojson.features[0].geometry.type).toBe("Polygon");
+    expect(geojson.features[0].geometry.coordinates).toEqual([
+      [
+        [10, 10],
+        [20, 10],
+        [20, 20],
+        [10, 20],
+        [10, 10],
+      ],
+    ]);
   });
 });
 

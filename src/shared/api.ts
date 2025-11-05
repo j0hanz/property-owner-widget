@@ -282,6 +282,7 @@ const createGridRow = (params: CreateGridRowParams): GridRowData => ({
   BOSTADR: params.bostadr,
   ADDRESS: params.address,
   geometryType: params.geometryType,
+  geometry: params.geometry ?? null,
   rawOwner: params.rawOwner,
 });
 
@@ -334,7 +335,12 @@ const buildPropertyRows = (
   maskPII: boolean,
   context: PropertyProcessingContext
 ): GridRowData[] => {
-  const geometryType = validated.graphic.geometry?.type ?? null;
+  const geometry = validated.graphic.geometry;
+  const geometryType = geometry?.type ?? null;
+  const serializedGeometry =
+    geometry && typeof geometry.toJSON === "function"
+      ? geometry.toJSON()
+      : null;
 
   if (owners.length > 0) {
     const uniqueOwners = deduplicateOwnerEntries(owners, {
@@ -362,6 +368,7 @@ const buildPropertyRows = (
           context.messages.unknownOwner
         ),
         geometryType,
+        geometry: serializedGeometry,
         createRowId: context.helpers.createRowId,
         rawOwner: owner,
       })
@@ -393,6 +400,7 @@ const buildPropertyRows = (
       bostadr: fallbackMessage,
       address: "",
       geometryType,
+      geometry: serializedGeometry,
       createRowId: context.helpers.createRowId,
       rawOwner: fallbackOwner,
     }),
@@ -1045,6 +1053,12 @@ const processBatchQuery = async (
 
     for (const validated of chunk) {
       const owners = ownersByFnr.get(String(validated.fnr)) ?? [];
+      const geometry = validated.graphic.geometry;
+      const geometryType = geometry?.type ?? null;
+      const serializedGeometry =
+        geometry && typeof geometry.toJSON === "function"
+          ? geometry.toJSON()
+          : null;
 
       if (owners.length > 0) {
         const uniqueOwners = deduplicateOwnerEntries(owners, {
@@ -1072,7 +1086,8 @@ const processBatchQuery = async (
               fastighet: propertyWithShare,
               bostadr: formattedOwner,
               address: formattedOwner,
-              geometryType: validated.graphic.geometry?.type ?? null,
+              geometryType,
+              geometry: serializedGeometry,
               createRowId: context.helpers.createRowId,
               rawOwner: owner,
             })
@@ -1103,7 +1118,8 @@ const processBatchQuery = async (
             fastighet: validated.attrs.FASTIGHET,
             bostadr: fallbackMessage,
             address: "",
-            geometryType: validated.graphic.geometry?.type ?? null,
+            geometryType,
+            geometry: serializedGeometry,
             createRowId: context.helpers.createRowId,
             rawOwner: fallbackOwner,
           })
