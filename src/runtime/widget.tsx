@@ -33,6 +33,7 @@ import { shallowEqual } from "react-redux";
 import {
   CURSOR_TOOLTIP_STYLE,
   EXPORT_FORMATS,
+  MAP_CLICK_ACTIVATION_DELAY_MS,
   MIN_SPINNER_DISPLAY_MS,
   WIDGET_STARTUP_DELAY_MS,
 } from "../config/constants";
@@ -64,6 +65,7 @@ import {
   useEsriModules,
   useGraphicsLayer,
   useHitTestHover,
+  useMapClickActivation,
   useMapViewLifecycle,
   usePopupManager,
   useThrottle,
@@ -476,10 +478,15 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   } = useEsriModules();
 
   // Debounced startup state to prevent spinner flicker
-  const { shouldShowLoading } = useWidgetStartup({
+  const { shouldShowLoading, modulesReady } = useWidgetStartup({
     modulesLoading,
     startupDelay: WIDGET_STARTUP_DELAY_MS,
     minSpinnerDisplay: MIN_SPINNER_DISPLAY_MS,
+  });
+
+  const { mapClickActive } = useMapClickActivation({
+    modulesReady,
+    activationDelay: MAP_CLICK_ACTIVATION_DELAY_MS,
   });
 
   const {
@@ -884,6 +891,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const { onActiveViewChange, getCurrentView, reactivateMapView, cleanup } =
     useMapViewLifecycle({
       modules,
+      mapClickActive,
       destroyGraphicsLayer,
       disablePopup,
       restorePopup,

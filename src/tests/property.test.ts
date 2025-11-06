@@ -1,4 +1,4 @@
-import { WidgetState } from "jimu-core";
+import { React, WidgetState } from "jimu-core";
 import type {
   DataSourceManager,
   FeatureDataRecord,
@@ -6,6 +6,7 @@ import type {
 } from "jimu-core";
 import { describe, expect, it, jest } from "@jest/globals";
 import "@testing-library/jest-dom";
+import { act, render } from "@testing-library/react";
 import copyLib from "copy-to-clipboard";
 import * as configConstants from "../config/constants";
 import * as apiModule from "../shared/api";
@@ -32,6 +33,7 @@ import {
   runPropertySelectionPipeline,
   validateDataSources,
 } from "../shared/api";
+import { useMapClickActivation } from "../shared/hooks";
 import {
   applySortingToProperties,
   buildFnrWhereClause,
@@ -2019,6 +2021,12 @@ describe("Query Controls", () => {
     expect(ABORT_CONTROLLER_POOL_SIZE).toBeLessThanOrEqual(20);
   });
 
+  it("should define map click activation delay", () => {
+    const { MAP_CLICK_ACTIVATION_DELAY_MS } = configConstants;
+
+    expect(MAP_CLICK_ACTIVATION_DELAY_MS).toBe(500);
+  });
+
   it("should increase owner query concurrency for better performance", () => {
     const { OWNER_QUERY_CONCURRENCY } = configConstants;
 
@@ -3473,5 +3481,109 @@ describe("Property Widget - FeatureLayer Load Pattern", () => {
     instances.forEach((instance) => {
       expect(instance.destroy).toHaveBeenCalled();
     });
+  });
+});
+
+describe("useMapClickActivation", () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.runOnlyPendingTimers();
+    jest.useRealTimers();
+  });
+
+  it("activates map click handling after the configured delay", () => {
+    let latestActive = true;
+
+    const Harness = (props: { modulesReady: boolean; delay: number }) => {
+      const { mapClickActive } = useMapClickActivation({
+        modulesReady: props.modulesReady,
+        activationDelay: props.delay,
+      });
+      latestActive = mapClickActive;
+      return null;
+    };
+
+    const { rerender } = render(
+      React.createElement(Harness, { modulesReady: false, delay: 200 })
+    );
+
+    expect(latestActive).toBe(false);
+
+    act(() => {
+      rerender(
+        React.createElement(Harness, { modulesReady: true, delay: 200 })
+      );
+    });
+
+    expect(latestActive).toBe(false);
+
+    act(() => {
+      jest.advanceTimersByTime(199);
+    });
+    expect(latestActive).toBe(false);
+
+    act(() => {
+      jest.advanceTimersByTime(1);
+    });
+    expect(latestActive).toBe(true);
+  });
+
+  it("cancels pending activation when modules reload", () => {
+    let latestActive = true;
+
+    const Harness = (props: { modulesReady: boolean; delay: number }) => {
+      const { mapClickActive } = useMapClickActivation({
+        modulesReady: props.modulesReady,
+        activationDelay: props.delay,
+      });
+      latestActive = mapClickActive;
+      return null;
+    };
+
+    const { rerender, unmount } = render(
+      React.createElement(Harness, { modulesReady: false, delay: 300 })
+    );
+
+    expect(latestActive).toBe(false);
+
+    act(() => {
+      rerender(
+        React.createElement(Harness, { modulesReady: true, delay: 300 })
+      );
+    });
+
+    act(() => {
+      jest.advanceTimersByTime(150);
+    });
+    expect(latestActive).toBe(false);
+
+    act(() => {
+      rerender(
+        React.createElement(Harness, { modulesReady: false, delay: 300 })
+      );
+    });
+
+    expect(latestActive).toBe(false);
+
+    act(() => {
+      jest.advanceTimersByTime(500);
+    });
+    expect(latestActive).toBe(false);
+
+    act(() => {
+      rerender(
+        React.createElement(Harness, { modulesReady: true, delay: 300 })
+      );
+    });
+
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+    expect(latestActive).toBe(true);
+
+    unmount();
   });
 });
