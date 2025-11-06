@@ -134,18 +134,34 @@ export const useEsriModules = () => {
   return { modules, loading, error };
 };
 
-export const useDebouncedValue = <T>(value: T, delay: number) => {
-  const [debouncedValue, setDebouncedValue] = React.useState(value);
+export const useDebouncedValue = <T>(value: T, delay: number): T => {
+  const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0;
+  const [debouncedValue, setDebouncedValue] = React.useState<T>(value);
+  const mountedRef = React.useRef(true);
 
-  hooks.useEffectWithPreviousValues(() => {
-    const handler = setTimeout(() => {
+  // No debouncing needed for delay=0
+  hooks.useUpdateEffect(() => {
+    if (safeDelay === 0) {
       setDebouncedValue(value);
-    }, delay);
+      return undefined;
+    }
+
+    const handler = setTimeout(() => {
+      if (mountedRef.current) {
+        setDebouncedValue(value);
+      }
+    }, safeDelay);
 
     return () => {
       clearTimeout(handler);
     };
-  }, [value, delay]);
+  }, [value, safeDelay]);
+
+  hooks.useEffectOnce(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  });
 
   return debouncedValue;
 };
@@ -1089,13 +1105,14 @@ export const useDebounce = <T extends (...args: unknown[]) => void>(
     }
   });
 
-  const undebouncedWithCancel = React.useMemo(() => {
+  const undebouncedWithCancelRef = React.useRef<DebouncedFn<T> | null>(null);
+  if (!undebouncedWithCancelRef.current) {
     const fn = undebounced as DebouncedFn<T>;
     fn.cancel = () => {
       // No-op cancel for instant execution
     };
-    return fn;
-  }, [undebounced]);
+    undebouncedWithCancelRef.current = fn;
+  }
 
   const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = React.useRef(false);
@@ -1161,7 +1178,78 @@ export const useDebounce = <T extends (...args: unknown[]) => void>(
     };
   });
 
-  return safeDelay === 0 ? undebouncedWithCancel : debouncedRef.current;
+  return safeDelay === 0
+    ? undebouncedWithCancelRef.current
+    : debouncedRef.current;
+};
+
+export const useWidgetStartup = (params: {
+  modulesLoading: boolean;
+  startupDelay: number;
+  minSpinnerDisplay: number;
+}) => {
+  const { modulesLoading, startupDelay, minSpinnerDisplay } = params;
+
+  const [isInitializing, setIsInitializing] = React.useState(true);
+  const [spinnerVisible, setSpinnerVisible] = React.useState(false);
+  const spinnerStartTimeRef = React.useRef<number | null>(null);
+  const mountedRef = React.useRef(true);
+
+  // Debounce the loading state to prevent flicker
+  const debouncedLoading = useDebouncedValue(modulesLoading, startupDelay);
+
+  // Show spinner after delay if still loading
+  hooks.useUpdateEffect(() => {
+    if (debouncedLoading && !spinnerVisible) {
+      setSpinnerVisible(true);
+      spinnerStartTimeRef.current = performance.now();
+    }
+  }, [debouncedLoading, spinnerVisible]);
+
+  // Handle module load completion with minimum spinner display time
+  hooks.useUpdateEffect(() => {
+    if (!modulesLoading && spinnerVisible) {
+      const elapsed = spinnerStartTimeRef.current
+        ? performance.now() - spinnerStartTimeRef.current
+        : minSpinnerDisplay;
+
+      if (elapsed >= minSpinnerDisplay) {
+        // Spinner has been visible long enough, hide immediately
+        setSpinnerVisible(false);
+        setIsInitializing(false);
+      } else {
+        // Keep spinner visible for minimum duration
+        const remainingTime = minSpinnerDisplay - elapsed;
+        const timer = setTimeout(() => {
+          if (mountedRef.current) {
+            setSpinnerVisible(false);
+            setIsInitializing(false);
+          }
+        }, remainingTime);
+
+        return () => {
+          clearTimeout(timer);
+        };
+      }
+    } else if (!modulesLoading && !spinnerVisible) {
+      // Fast load completed, no spinner was shown
+      setIsInitializing(false);
+    }
+
+    return undefined;
+  }, [modulesLoading, spinnerVisible, minSpinnerDisplay]);
+
+  hooks.useEffectOnce(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  });
+
+  return {
+    shouldShowLoading: spinnerVisible,
+    isInitializing,
+    modulesReady: !modulesLoading && !isInitializing,
+  };
 };
 
 /**

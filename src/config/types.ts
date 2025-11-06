@@ -419,6 +419,12 @@ export interface LoadingBlockProps {
   size?: number;
 }
 
+export interface WidgetStartupState {
+  isInitializing: boolean;
+  shouldShowSpinner: boolean;
+  modulesReady: boolean;
+}
+
 // =============================================================================
 // UTILITY INTERFACES FROM SHARED MODULES
 // Interfaces extracted from utils.ts, api.ts, hooks.ts, and export.ts

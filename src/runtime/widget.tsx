@@ -30,7 +30,12 @@ import {
 } from "jimu-ui";
 import type { ColumnDef, SortingState } from "@tanstack/react-table";
 import { shallowEqual } from "react-redux";
-import { CURSOR_TOOLTIP_STYLE, EXPORT_FORMATS } from "../config/constants";
+import {
+  CURSOR_TOOLTIP_STYLE,
+  EXPORT_FORMATS,
+  MIN_SPINNER_DISPLAY_MS,
+  WIDGET_STARTUP_DELAY_MS,
+} from "../config/constants";
 import { ErrorType } from "../config/enums";
 import { useWidgetStyles } from "../config/style";
 import type {
@@ -62,6 +67,7 @@ import {
   useMapViewLifecycle,
   usePopupManager,
   useThrottle,
+  useWidgetStartup,
 } from "../shared/hooks";
 import {
   createPerformanceTracker,
@@ -139,10 +145,6 @@ const resolveWidgetId = (props: AllWidgetProps<IMConfig>): string => {
   return fallbackId ?? fallbackId;
 };
 
-const usePropertySelectors = (widgetId: string) => {
-  return React.useMemo(() => createPropertySelectors(widgetId), [widgetId]);
-};
-
 // Error boundaries require class components in React (no functional equivalent)
 class PropertyWidgetErrorBoundary extends React.Component<
   ErrorBoundaryProps,
@@ -189,7 +191,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const translate = hooks.useTranslation(jimuUIMessages, defaultMessages);
 
   const widgetId = resolveWidgetId(props);
-  const selectors = usePropertySelectors(widgetId);
+  const selectorsRef = React.useRef(createPropertySelectors(widgetId));
+  const selectors = selectorsRef.current;
   const dispatch = ReactRedux.useDispatch();
 
   const runtimeState = ReactRedux.useSelector((state: IMState) => {
@@ -475,6 +478,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     loading: modulesLoading,
     error: modulesError,
   } = useEsriModules();
+
+  // Debounced startup state to prevent spinner flicker
+  const { shouldShowLoading } = useWidgetStartup({
+    modulesLoading,
+    startupDelay: WIDGET_STARTUP_DELAY_MS,
+    minSpinnerDisplay: MIN_SPINNER_DISPLAY_MS,
+  });
+
   const {
     ensureLayerView,
     clearHighlights,
@@ -1182,7 +1193,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   const isConfigured = config.propertyDataSourceId && config.ownerDataSourceId;
 
-  if (modulesLoading) {
+  if (shouldShowLoading) {
     return (
       <div
         css={styles.parent}
