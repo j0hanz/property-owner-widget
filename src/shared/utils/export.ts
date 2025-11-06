@@ -1,5 +1,6 @@
-import { sanitizeForExport, buildExportRow } from "./utils";
-import { trackEvent, trackError } from "./telemetry";
+import copy from "copy-to-clipboard";
+import { trackEvent, trackError } from "../telemetry";
+import { CSV_HEADERS, SORT_COMPARE_OPTIONS } from "../../config/constants";
 import type {
   GridRowData,
   CsvHeaderValues,
@@ -7,10 +8,14 @@ import type {
   SerializedQueryResult,
   SerializedRecord,
   GeoJsonGeometry,
-} from "../config/types";
-import { CSV_HEADERS } from "../config/constants";
+  SerializationErrorHandler,
+} from "../../config/types";
+import { formatOwnerInfo, stripHtml } from "./privacy";
 
-const handleSerializationError = (error: unknown, typeName: string): void => {
+const handleSerializationError: SerializationErrorHandler = (
+  error,
+  typeName
+) => {
   trackError(
     "export_sanitize_object",
     error,
@@ -18,8 +23,204 @@ const handleSerializationError = (error: unknown, typeName: string): void => {
   );
 };
 
-const sanitizeValue = (value: unknown): string =>
-  sanitizeForExport(value, handleSerializationError);
+export const sanitizeForExport = (
+  value: unknown,
+  onSerializationError?: SerializationErrorHandler
+): string => {
+  if (value == null) {
+    return "";
+  }
+
+  if (typeof value === "string") {
+    return stripHtml(value);
+  }
+
+  if (typeof value === "number" || typeof value === "bigint") {
+    return stripHtml(String(value));
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+
+  if (typeof value === "symbol") {
+    return stripHtml(value.description ?? "");
+  }
+
+  if (typeof value === "function") {
+    return stripHtml(value.name ?? "");
+  }
+
+  if (typeof value === "object") {
+    try {
+      return stripHtml(JSON.stringify(value));
+    } catch (error) {
+      const typeName = (value as { constructor?: { name?: string } })
+        .constructor?.name;
+      onSerializationError?.(error, typeName ?? typeof value);
+      return "";
+    }
+  }
+
+  return "";
+};
+const sanitizeValue = (
+  value: unknown,
+  onError?: SerializationErrorHandler
+): string => sanitizeForExport(value, onError);
+
+export const buildExportRow = (params: {
+  row: GridRowData;
+  maskingEnabled: boolean;
+  unknownOwnerText: string;
+  sanitize: (value: unknown) => string;
+}): { propertyLabel: string; ownerLabel: string } => {
+  const { row, maskingEnabled, unknownOwnerText, sanitize } = params;
+  const propertySource = row.FASTIGHET || row.FNR || "";
+
+  const ownerSource = row.rawOwner
+    ? formatOwnerInfo(row.rawOwner, maskingEnabled, unknownOwnerText)
+    : row.BOSTADR || row.ADDRESS || unknownOwnerText;
+
+  return {
+    propertyLabel: sanitize(propertySource),
+    ownerLabel: sanitize(ownerSource),
+  };
+};
+
+const sanitizeClipboardCell = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  const raw =
+    typeof value === "string" || typeof value === "number" ? String(value) : "";
+
+  const sanitized = stripHtml(raw);
+  if (!sanitized) {
+    return "";
+  }
+
+  return sanitized.replace(/[\t\r\n]+/g, " ").trim();
+};
+
+export const applySortingToProperties = (
+  properties: GridRowData[],
+  sorting: Array<{ id: string; desc: boolean }>
+): GridRowData[] => {
+  if (!sorting || sorting.length === 0) {
+    return [...properties];
+  }
+
+  const activeSorting = sorting.filter((item) =>
+    Boolean(item && typeof item.id === "string")
+  );
+
+  if (activeSorting.length === 0) {
+    return [...properties];
+  }
+
+  const valueCache = new WeakMap<GridRowData, Map<string, string>>();
+
+  const getSortableValue = (row: GridRowData, columnId: string): string => {
+    let rowCache = valueCache.get(row);
+    if (!rowCache) {
+      rowCache = new Map();
+      valueCache.set(row, rowCache);
+    }
+
+    const cachedValue = rowCache.get(columnId);
+    if (cachedValue !== undefined) {
+      return cachedValue;
+    }
+
+    const rawValue = row[columnId as keyof GridRowData];
+    const normalized = (() => {
+      if (rawValue === null || rawValue === undefined) return "";
+      if (typeof rawValue === "string") return rawValue;
+      if (typeof rawValue === "number") return String(rawValue);
+      if (typeof rawValue === "boolean") return String(rawValue);
+      return "";
+    })();
+
+    rowCache.set(columnId, normalized);
+    return normalized;
+  };
+
+  const comparatorOrder = [...activeSorting].reverse();
+
+  const sorted = [...properties];
+  sorted.sort((a, b) => {
+    for (const sortItem of comparatorOrder) {
+      const { id, desc } = sortItem;
+      const key = id as keyof GridRowData;
+      const aValue = getSortableValue(a, key as string);
+      const bValue = getSortableValue(b, key as string);
+
+      const comparison = aValue.localeCompare(
+        bValue,
+        "sv",
+        SORT_COMPARE_OPTIONS
+      );
+
+      if (comparison !== 0) {
+        return desc ? -comparison : comparison;
+      }
+    }
+
+    return 0;
+  });
+
+  return sorted;
+};
+
+export const formatPropertiesForClipboard = (
+  properties: GridRowData[] | null | undefined,
+  maskingEnabled: boolean,
+  unknownOwnerText: string
+): string => {
+  if (!properties || properties.length === 0) {
+    return "";
+  }
+
+  const sanitizedUnknown = sanitizeClipboardCell(unknownOwnerText);
+
+  const rows = properties.map((property) => {
+    const propertyLabel = sanitizeClipboardCell(
+      property.FASTIGHET || property.FNR || ""
+    );
+
+    const ownerText = (() => {
+      if (property.rawOwner) {
+        const formattedOwner = formatOwnerInfo(
+          property.rawOwner,
+          maskingEnabled,
+          unknownOwnerText
+        );
+        const sanitizedOwner = sanitizeClipboardCell(formattedOwner);
+        return sanitizedOwner || sanitizedUnknown;
+      }
+
+      const fallbackSanitized = sanitizeClipboardCell(property.BOSTADR);
+      return fallbackSanitized || sanitizedUnknown;
+    })();
+
+    return `${propertyLabel}\t${ownerText}`;
+  });
+
+  return rows.join("\n");
+};
+
+export const copyToClipboard = (text: string): boolean => {
+  try {
+    return copy(text, {
+      debug: false,
+      format: "text/plain",
+    });
+  } catch (_error) {
+    return false;
+  }
+};
 
 export const convertToJSON = (
   rows: GridRowData[],
@@ -35,7 +236,8 @@ export const convertToJSON = (
       row,
       maskingEnabled,
       unknownOwnerText,
-      sanitize: sanitizeValue,
+      sanitize: (value: unknown) =>
+        sanitizeValue(value, handleSerializationError),
     });
 
     return {
@@ -46,7 +248,7 @@ export const convertToJSON = (
 };
 
 const escapeCsvValue = (value: unknown): string => {
-  const sanitized = sanitizeValue(value);
+  const sanitized = sanitizeValue(value, handleSerializationError);
   if (sanitized === "") {
     return '""';
   }
@@ -222,10 +424,13 @@ export const convertToGeoJSON = (rows: GridRowData[]): SerializedRecord => {
         type: "Feature",
         id: row.id,
         properties: {
-          FNR: sanitizeValue(row.FNR),
-          UUID_FASTIGHET: sanitizeValue(row.UUID_FASTIGHET),
-          FASTIGHET: sanitizeValue(row.FASTIGHET),
-          BOSTADR: sanitizeValue(row.BOSTADR),
+          FNR: sanitizeValue(row.FNR, handleSerializationError),
+          UUID_FASTIGHET: sanitizeValue(
+            row.UUID_FASTIGHET,
+            handleSerializationError
+          ),
+          FASTIGHET: sanitizeValue(row.FASTIGHET, handleSerializationError),
+          BOSTADR: sanitizeValue(row.BOSTADR, handleSerializationError),
         },
         geometry: geojsonGeometry,
       } as SerializedRecord;

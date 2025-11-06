@@ -24,7 +24,11 @@ import {
   copyToClipboard,
   formatPropertiesForClipboard,
   applySortingToProperties,
-} from "../shared/utils";
+  convertToCSV,
+  convertToGeoJSON,
+  convertToJSON,
+  exportData,
+} from "../shared/utils/index";
 import {
   isValidArcGISUrl,
   validateDataSources,
@@ -34,13 +38,7 @@ import {
   runPropertySelectionPipeline,
   queryOwnersByRelationship,
 } from "../shared/api";
-import {
-  convertToCSV,
-  convertToGeoJSON,
-  convertToJSON,
-  exportData,
-} from "../shared/export";
-import { CURSOR_TOOLTIP_STYLE } from "../config/constants";
+import * as configConstants from "../config/constants";
 import type {
   OwnerAttributes,
   GridRowData,
@@ -62,7 +60,9 @@ import type {
 } from "jimu-core";
 import copyLib from "copy-to-clipboard";
 import * as apiModule from "../shared/api";
-import * as utilsModule from "../shared/utils";
+import * as processingModule from "../shared/utils/processing";
+
+const { CURSOR_TOOLTIP_STYLE } = configConstants;
 
 jest.mock("copy-to-clipboard", () => ({
   __esModule: true,
@@ -1533,7 +1533,10 @@ describe("Property Selection Pipeline - Performance Optimizations", () => {
     const propertySpy = jest
       .spyOn(apiModule, "queryPropertyByPoint")
       .mockResolvedValue(propertyResults);
-    const processSpy = jest.spyOn(utilsModule, "processPropertyQueryResults");
+    const processSpy = jest.spyOn(
+      processingModule,
+      "processPropertyQueryResults"
+    );
 
     const abortController = new AbortController();
 
@@ -1967,15 +1970,25 @@ describe("Query Controls", () => {
   });
 
   it("should remove deprecated query cache constants", () => {
-    const constants = require("../config/constants");
-
-    expect("QUERY_DEDUPLICATION_TIMEOUT" in constants).toBe(false);
-    expect("PROPERTY_QUERY_CACHE" in constants).toBe(false);
-    expect("OWNER_QUERY_CACHE" in constants).toBe(false);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        configConstants,
+        "QUERY_DEDUPLICATION_TIMEOUT"
+      )
+    ).toBe(false);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        configConstants,
+        "PROPERTY_QUERY_CACHE"
+      )
+    ).toBe(false);
+    expect(
+      Object.prototype.hasOwnProperty.call(configConstants, "OWNER_QUERY_CACHE")
+    ).toBe(false);
   });
 
   it("should configure abort controller pool size", () => {
-    const { ABORT_CONTROLLER_POOL_SIZE } = require("../config/constants");
+    const { ABORT_CONTROLLER_POOL_SIZE } = configConstants;
 
     expect(ABORT_CONTROLLER_POOL_SIZE).toBeDefined();
     expect(typeof ABORT_CONTROLLER_POOL_SIZE).toBe("number");
@@ -1984,7 +1997,7 @@ describe("Query Controls", () => {
   });
 
   it("should increase owner query concurrency for better performance", () => {
-    const { OWNER_QUERY_CONCURRENCY } = require("../config/constants");
+    const { OWNER_QUERY_CONCURRENCY } = configConstants;
 
     expect(OWNER_QUERY_CONCURRENCY).toBeDefined();
     expect(OWNER_QUERY_CONCURRENCY).toBe(20);

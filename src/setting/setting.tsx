@@ -53,7 +53,7 @@ import {
   normalizeHostList,
   computeSettingsVisibility,
   resetDependentFields,
-} from "../shared/utils";
+} from "../shared/utils/index";
 import addIcon from "../assets/plus.svg";
 import removeIcon from "../assets/close.svg";
 import infoIcon from "../assets/info.svg";

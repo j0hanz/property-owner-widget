@@ -708,6 +708,38 @@ export type PropertyAction =
       widgetId: string;
     };
 
+/**
+ * Redux dispatch function type
+ * Used in dispatcher to safely dispatch actions to Redux store
+ */
+export type DispatchFn = ((action: unknown) => void) | undefined;
+
+/**
+ * Property dispatcher interface
+ * Provides type-safe methods for dispatching property widget actions
+ * Created by createPropertyDispatcher factory function
+ */
+export interface PropertyDispatcher {
+  setError: (error: ErrorState | null) => void;
+  clearError: () => void;
+  setSelectedProperties: (properties: Iterable<GridRowData>) => void;
+  clearAll: () => void;
+  setQueryInFlight: (inFlight: boolean) => void;
+  setRawResults: (
+    results: { [key: string]: SerializedQueryResult } | null
+  ) => void;
+  removeWidgetState: () => void;
+}
+
+/**
+ * Error handler for serialization failures during export
+ * Receives error and type name for telemetry tracking
+ */
+export type SerializationErrorHandler = (
+  error: unknown,
+  typeName: string
+) => void;
+
 export type SeamlessImmutableFactory = <T>(input: T) => Immutable<T>;
 
 // =============================================================================

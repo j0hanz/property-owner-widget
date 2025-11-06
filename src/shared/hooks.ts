@@ -22,7 +22,9 @@ import {
   logger,
   createSymbolCache,
   batchGraphicsRenderer,
-} from "./utils";
+  validateNumericRange,
+  executeHoverQuery,
+} from "./utils/index";
 
 const isConfigDictionary = (value: unknown): value is ConfigDictionary => {
   return typeof value === "object" && value !== null;
@@ -789,7 +791,6 @@ export const useNumericValidator = (
   ) => void
 ) => {
   return hooks.useEventCallback((value: string): boolean => {
-    const { validateNumericRange } = require("./utils");
     const result = validateNumericRange({ value, min, max, errorMessage });
     setFieldErrors((prev) => ({
       ...prev,
@@ -956,7 +957,6 @@ export const useHoverQuery = (params: HoverQueryParams) => {
 
       setIsHoverQueryActive(true);
       try {
-        const { executeHoverQuery } = require("./utils");
         const result = await executeHoverQuery({
           mapPoint,
           config: {

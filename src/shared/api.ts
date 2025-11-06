@@ -55,7 +55,7 @@ import {
   createValidationError,
   deriveToggleState,
   buildPropertyRows,
-} from "./utils";
+} from "./utils/index";
 
 let cachedFeatureLayerCtor: FeatureLayerConstructor | null = null;
 let cachedQueryCtor: QueryConstructor | null = null;

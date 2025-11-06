@@ -63,7 +63,7 @@ import {
   useThrottle,
   useHoverQuery,
 } from "../shared/hooks";
-import { clearQueryCache } from "../shared/api";
+import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api";
 import {
   formatOwnerInfo,
   formatPropertiesForClipboard,
@@ -90,9 +90,10 @@ import {
   updatePropertySelectionState,
   scheduleGraphicsRendering,
   createCursorTrackingState,
-} from "../shared/utils";
+  exportData,
+  type CursorGraphicsState,
+} from "../shared/utils/index";
 import { createPropertySelectors } from "../extensions/store";
-import type { CursorGraphicsState } from "../shared/utils";
 import {
   EXPORT_FORMATS,
   CURSOR_TOOLTIP_STYLE,
@@ -109,7 +110,6 @@ import setupIcon from "../assets/config-missing.svg";
 import mapSelect from "../assets/map-select.svg";
 import exportIcon from "../assets/export.svg";
 import copyButton from "../assets/copy.svg";
-import { exportData } from "../shared/export";
 
 const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   const {
@@ -504,6 +504,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         signal: context.controller.signal,
         translate,
         perfStart,
+        runPipeline: runPropertySelectionPipeline,
       });
 
       const abortStatus = abortHelpers.checkAbortedOrStale(
