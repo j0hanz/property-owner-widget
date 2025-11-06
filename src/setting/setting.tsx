@@ -1,63 +1,63 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import {
-  React,
+  DataSourceTypes,
   hooks,
+  Immutable,
+  type ImmutableArray,
   jsx,
+  React,
   ReactRedux,
   type UseDataSource,
-  type ImmutableArray,
-  DataSourceTypes,
-  Immutable,
 } from "jimu-core";
+import { DataSourceSelector } from "jimu-ui/advanced/data-source-selector";
+import {
+  MapWidgetSelector,
+  SettingRow,
+  SettingSection,
+} from "jimu-ui/advanced/setting-components";
+import { ColorPicker } from "jimu-ui/basic/color-picker";
 import {
   Alert,
   Button,
   CollapsablePanel,
+  defaultMessages as jimuUIMessages,
   NumericInput,
   Slider,
-  Tooltip,
+  SVG,
   Switch,
   TextInput,
-  SVG,
-  defaultMessages as jimuUIMessages,
+  Tooltip,
 } from "jimu-ui";
-import { ColorPicker } from "jimu-ui/basic/color-picker";
 import type { AllWidgetSettingProps } from "jimu-for-builder";
-import {
-  SettingSection,
-  SettingRow,
-  MapWidgetSelector,
-} from "jimu-ui/advanced/setting-components";
-import { DataSourceSelector } from "jimu-ui/advanced/data-source-selector";
-import defaultMessages from "./translations/default";
+import { useSettingStyles } from "../config/style";
 import type {
-  IMConfig,
   FieldErrors,
+  IMConfig,
   ImmutableArrayFactory,
   MutableAccessor,
 } from "../config/types";
-import { useSettingStyles } from "../config/style";
+import { createPropertySelectors } from "../extensions/store";
 import {
   useBooleanConfigValue,
-  useUpdateConfig,
-  useSwitchConfigHandler,
-  useSliderConfigHandler,
   useNumericValidator,
+  useSliderConfigHandler,
+  useSwitchConfigHandler,
+  useUpdateConfig,
   useValidatedNumericHandler,
 } from "../shared/hooks";
 import {
+  computeSettingsVisibility,
+  normalizeHostList,
+  normalizeHostValue,
   opacityHelpers,
   outlineWidthHelpers,
-  normalizeHostValue,
-  normalizeHostList,
-  computeSettingsVisibility,
   resetDependentFields,
 } from "../shared/utils/index";
-import addIcon from "../assets/plus.svg";
+import defaultMessages from "./translations/default";
 import removeIcon from "../assets/close.svg";
 import infoIcon from "../assets/info.svg";
-import { createPropertySelectors } from "../extensions/store";
+import addIcon from "../assets/plus.svg";
 
 const getImmutableArrayFactory = (): ImmutableArrayFactory =>
   Immutable as unknown as ImmutableArrayFactory;

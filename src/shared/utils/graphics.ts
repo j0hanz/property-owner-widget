@@ -1,12 +1,12 @@
-import type {
-  EsriModules,
-  SelectionGraphicsHelpers,
-  HighlightSymbolJSON,
-} from "../../config/types";
 import {
   HEX_COLOR_PATTERN,
   HIGHLIGHT_MARKER_SIZE,
 } from "../../config/constants";
+import type {
+  EsriModules,
+  HighlightSymbolJSON,
+  SelectionGraphicsHelpers,
+} from "../../config/types";
 
 const resolveGeometryCategory = (
   geometryType: string | undefined

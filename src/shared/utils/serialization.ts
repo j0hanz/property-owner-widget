@@ -1,10 +1,10 @@
 import type {
-  SerializedRecord,
+  GraphicWithAggregates,
+  QueryResult,
   SerializedQueryFeature,
   SerializedQueryResult,
+  SerializedRecord,
   UnknownRecord,
-  QueryResult,
-  GraphicWithAggregates,
 } from "../../config/types";
 import { isRecord } from "./helpers";
 

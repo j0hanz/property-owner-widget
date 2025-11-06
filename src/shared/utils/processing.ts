@@ -1,36 +1,36 @@
 import type { DataSourceManager } from "jimu-core";
 import type {
-  GridRowData,
   CreateGridRowParams,
-  ProcessingAccumulator,
-  PropertyProcessingContext,
-  OwnerQueryResolution,
+  FnrValue,
+  GridRowData,
+  IMConfig,
   OwnerAttributes,
-  QueryResult,
-  ValidatedProperty,
-  PropertySelectionPipelineResult,
-  PropertySelectionPipelineParams,
-  PropertyPipelineSuccess,
+  OwnerQueryResolution,
+  ProcessingAccumulator,
   ProcessPropertyQueryParams,
   ProcessPropertyResult,
-  FnrValue,
+  PropertyDispatcher,
+  PropertyPipelineSuccess,
+  PropertyProcessingContext,
+  PropertySelectionPipelineParams,
+  PropertySelectionPipelineResult,
+  QueryResult,
+  SelectionGraphicsHelpers,
+  SelectionGraphicsParams,
   SerializedQueryResult,
   SerializedQueryResultMap,
   SerializedRecord,
-  SelectionGraphicsParams,
-  SelectionGraphicsHelpers,
-  IMConfig,
-  PropertyDispatcher,
+  ValidatedProperty,
 } from "../../config/types";
-import { deduplicateOwnerEntries } from "./privacy";
+import { getValidatedOutlineWidth } from "./formatting";
+import { buildHighlightColor } from "./graphics";
 import {
   cleanupRemovedGraphics,
   createRowId,
   extractFnr,
   normalizeFnrKey,
 } from "./helpers";
-import { buildHighlightColor } from "./graphics";
-import { getValidatedOutlineWidth } from "./formatting";
+import { deduplicateOwnerEntries } from "./privacy";
 import { serializeGeometry, serializePropertyResult } from "./serialization";
 
 export { createRowId, extractFnr, normalizeFnrKey };

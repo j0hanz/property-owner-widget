@@ -1,10 +1,10 @@
 import type { ImmutableArray } from "jimu-core";
 import type { IMConfig } from "../../config/types";
 import {
-  resolveEntry,
+  normalizeHostValue,
   getStringValue as readString,
   resolveCollectionLength,
-  normalizeHostValue,
+  resolveEntry,
 } from "./helpers";
 
 export const computeSettingsVisibility = (params: {

@@ -1,9 +1,9 @@
 import type { SortingState } from "@tanstack/react-table";
 import type {
+  ClipboardPayload,
   GridRowData,
   SerializedQueryResult,
   SerializedQueryResultMap,
-  ClipboardPayload,
 } from "../../config/types";
 import {
   applySortingToProperties,

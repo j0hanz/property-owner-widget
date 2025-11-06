@@ -1,21 +1,21 @@
 import copy from "copy-to-clipboard";
-import { trackEvent, trackError } from "../telemetry";
 import { CSV_HEADERS, SORT_COMPARE_OPTIONS } from "../../config/constants";
 import type {
-  GridRowData,
   CsvHeaderValues,
-  ExportOptions,
+  ExportContent,
   ExportFormat,
   ExportFormatDefinition,
+  ExportOptions,
+  GeoJsonGeometry,
+  GeometryInput,
+  GridRowData,
+  SerializationErrorHandler,
   SerializedQueryResult,
   SerializedRecord,
-  GeoJsonGeometry,
-  SerializationErrorHandler,
-  GeometryInput,
-  ExportContent,
 } from "../../config/types";
+import { trackError, trackEvent } from "../telemetry";
+import { sanitizeClipboardCell, stripHtml } from "./helpers";
 import { formatOwnerInfo } from "./privacy";
-import { stripHtml, sanitizeClipboardCell } from "./helpers";
 
 const handleSerializationError: SerializationErrorHandler = (
   error,

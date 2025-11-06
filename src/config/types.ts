@@ -1,13 +1,13 @@
 import type {
-  ImmutableObject,
   DataSourceManager,
+  ImmutableArray,
+  ImmutableObject,
   IMState,
   UseDataSource,
-  ImmutableArray,
 } from "jimu-core";
 import type { ColumnDef, SortingState } from "@tanstack/react-table";
-import type { WidgetStyles } from "./style";
 import type { Immutable } from "seamless-immutable";
+import type { WidgetStyles } from "./style";
 
 export interface AttributeMap {
   [key: string]: unknown;

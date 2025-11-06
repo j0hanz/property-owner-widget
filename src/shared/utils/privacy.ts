@@ -1,11 +1,11 @@
-import type { OwnerAttributes, FnrValue } from "../../config/types";
 import {
+  DEFAULT_MASK,
+  IDENTITY_KEY_PREFIXES,
   MAX_MASK_ASTERISKS,
   MIN_MASK_LENGTH,
-  IDENTITY_KEY_PREFIXES,
   SPACE_CHAR_CODE,
-  DEFAULT_MASK,
 } from "../../config/constants";
+import type { FnrValue, OwnerAttributes } from "../../config/types";
 import { sanitizeTextContent } from "./helpers";
 
 const createMasker = (maskFn: (normalized: string) => string) => {

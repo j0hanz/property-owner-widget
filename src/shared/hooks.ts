@@ -1,29 +1,29 @@
-import { React, hooks } from "jimu-core";
+import { hooks, React } from "jimu-core";
 import { loadArcGISJSAPIModules } from "jimu-arcgis";
 import type { JimuMapView } from "jimu-arcgis";
+import {
+  ABORT_CONTROLLER_POOL_SIZE,
+  ESRI_MODULES_TO_LOAD,
+} from "../config/constants";
 import type {
   AttributeMap,
-  EsriModules,
-  HoverQueryParams,
-  DebouncedFn,
-  FnrValue,
   ConfigDictionary,
-  ConfigWithSet,
   ConfigUpdater,
+  ConfigWithSet,
+  DebouncedFn,
+  EsriModules,
   EsriStubGlobal,
+  FnrValue,
+  HoverQueryParams,
 } from "../config/types";
 import {
-  ESRI_MODULES_TO_LOAD,
-  ABORT_CONTROLLER_POOL_SIZE,
-} from "../config/constants";
-import {
-  popupSuppressionManager,
+  batchGraphicsRenderer,
+  createSymbolCache,
+  executeHoverQuery,
   isAbortError,
   logger,
-  createSymbolCache,
-  batchGraphicsRenderer,
+  popupSuppressionManager,
   validateNumericRange,
-  executeHoverQuery,
 } from "./utils/index";
 
 const isConfigDictionary = (value: unknown): value is ConfigDictionary => {

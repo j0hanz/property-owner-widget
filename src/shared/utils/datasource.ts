@@ -1,10 +1,10 @@
 import type { ImmutableArray, UseDataSource } from "jimu-core";
 import type { UseDataSourceCandidate } from "../../config/types";
 import {
-  hasAsMutable,
-  isIndexedCollection,
-  hasFind,
   extractStringFromImmutable,
+  hasAsMutable,
+  hasFind,
+  isIndexedCollection,
 } from "./helpers";
 
 export const dataSourceHelpers = {

@@ -1,10 +1,10 @@
-import { propertyActions } from "../../extensions/store";
 import type {
+  DispatchFn,
   ErrorState,
   GridRowData,
   SerializedQueryResult,
-  DispatchFn,
 } from "../../config/types";
+import { propertyActions } from "../../extensions/store";
 
 const safeDispatch = (
   dispatch: DispatchFn,

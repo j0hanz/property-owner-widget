@@ -1,5 +1,5 @@
-import type { FnrValue, MapViewWithPopupToggle } from "../../config/types";
 import { HTML_WHITESPACE_PATTERN } from "../../config/constants";
+import type { FnrValue, MapViewWithPopupToggle } from "../../config/types";
 
 export const isRecord = (
   value: unknown

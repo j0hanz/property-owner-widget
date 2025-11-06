@@ -1,19 +1,19 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import {
-  React,
-  jsx,
-  hooks,
   type AllWidgetProps,
-  DataSourceManager,
-  DataSourceComponent,
-  ReactRedux,
-  type IMState,
-  WidgetState,
   appActions,
+  DataSourceComponent,
+  DataSourceManager,
   getAppStore,
-  type UseDataSource,
+  hooks,
   type ImmutableObject,
+  type IMState,
+  jsx,
+  React,
+  ReactRedux,
+  type UseDataSource,
+  WidgetState,
 } from "jimu-core";
 import { JimuMapViewComponent } from "jimu-arcgis";
 import {
@@ -23,95 +23,95 @@ import {
   DropdownButton,
   DropdownItem,
   DropdownMenu,
+  defaultMessages as jimuUIMessages,
   Loading,
   LoadingType,
   SVG,
-  defaultMessages as jimuUIMessages,
 } from "jimu-ui";
-import { PropertyTable } from "./components/table";
-import {
-  createPropertyTableColumns,
-  getDefaultSorting,
-} from "../shared/config";
-import defaultMessages from "./translations/default";
 import type { ColumnDef, SortingState } from "@tanstack/react-table";
+import {
+  CURSOR_TOOLTIP_STYLE,
+  EXPORT_FORMATS,
+  HOVER_QUERY_TOLERANCE_PX,
+} from "../config/constants";
+import { ErrorType } from "../config/enums";
+import { useWidgetStyles } from "../config/style";
 import type {
-  IMConfig,
   ErrorBoundaryProps,
-  GridRowData,
-  SelectionGraphicsParams,
-  SelectionGraphicsHelpers,
-  ExportFormat,
-  SerializedQueryResult,
-  SerializedQueryResultMap,
   ErrorState,
+  ExportFormat,
+  GridRowData,
+  IMConfig,
   IMStateWithProperty,
   PipelineExecutionContext,
   PipelineRunResult,
   PropertyPipelineSuccess,
+  SelectionGraphicsHelpers,
+  SelectionGraphicsParams,
+  SerializedQueryResult,
+  SerializedQueryResultMap,
 } from "../config/types";
-import { ErrorType } from "../config/enums";
-import { useWidgetStyles } from "../config/style";
-import {
-  useEsriModules,
-  useGraphicsLayer,
-  usePopupManager,
-  useMapViewLifecycle,
-  useAbortControllerPool,
-  useDebounce,
-  useThrottle,
-  useHoverQuery,
-} from "../shared/hooks";
+import { createPropertySelectors } from "../extensions/store";
 import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api";
 import {
-  formatOwnerInfo,
-  extractFnr,
-  isAbortError,
-  normalizeFnrKey,
-  syncGraphicsWithState,
-  isValidationFailure,
-  buildHighlightColor,
-  computeWidgetsToClose,
-  readAppWidgetsFromState,
-  dataSourceHelpers,
-  getValidatedOutlineWidth,
-  logger,
-  syncCursorGraphics,
+  createPropertyTableColumns,
+  getDefaultSorting,
+} from "../shared/config";
+import {
+  useAbortControllerPool,
+  useDebounce,
+  useEsriModules,
+  useGraphicsLayer,
+  useHoverQuery,
+  useMapViewLifecycle,
+  usePopupManager,
+  useThrottle,
+} from "../shared/hooks";
+import {
+  createPerformanceTracker,
+  trackError,
+  trackEvent,
+  trackFeatureUsage,
+} from "../shared/telemetry";
+import {
   abortHelpers,
-  shouldSkipHoverQuery,
-  updateGraphicSymbol,
-  createPropertyDispatcher,
-  cursorLifecycleHelpers,
-  copyToClipboard,
-  validateMapClickRequest,
-  executePropertyQueryPipeline,
-  updatePropertySelectionState,
-  scheduleGraphicsRendering,
-  createCursorTrackingState,
-  exportData,
+  buildClipboardPayload,
+  buildHighlightColor,
   buildResultsMap,
   collectSelectedRawData,
-  buildClipboardPayload,
-  notifyCopyOutcome,
+  computeWidgetsToClose,
+  copyToClipboard,
+  createCursorTrackingState,
+  createPropertyDispatcher,
   type CursorGraphicsState,
+  cursorLifecycleHelpers,
+  dataSourceHelpers,
+  executePropertyQueryPipeline,
+  exportData,
+  extractFnr,
+  formatOwnerInfo,
+  getValidatedOutlineWidth,
+  isAbortError,
+  isValidationFailure,
+  logger,
+  normalizeFnrKey,
+  notifyCopyOutcome,
+  readAppWidgetsFromState,
+  scheduleGraphicsRendering,
+  shouldSkipHoverQuery,
+  syncCursorGraphics,
+  syncGraphicsWithState,
+  updateGraphicSymbol,
+  updatePropertySelectionState,
+  validateMapClickRequest,
 } from "../shared/utils/index";
-import { createPropertySelectors } from "../extensions/store";
-import {
-  EXPORT_FORMATS,
-  CURSOR_TOOLTIP_STYLE,
-  HOVER_QUERY_TOLERANCE_PX,
-} from "../config/constants";
-import {
-  trackEvent,
-  trackError,
-  trackFeatureUsage,
-  createPerformanceTracker,
-} from "../shared/telemetry";
+import { PropertyTable } from "./components/table";
+import defaultMessages from "./translations/default";
 import clearIcon from "../assets/clear-selection-general.svg";
 import setupIcon from "../assets/config-missing.svg";
-import mapSelect from "../assets/map-select.svg";
-import exportIcon from "../assets/export.svg";
 import copyButton from "../assets/copy.svg";
+import exportIcon from "../assets/export.svg";
+import mapSelect from "../assets/map-select.svg";
 
 const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   const {

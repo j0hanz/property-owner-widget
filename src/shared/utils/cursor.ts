@@ -1,20 +1,20 @@
 import type { MutableRefObject } from "react";
+import type { DataSourceManager } from "jimu-core";
 import {
   CURSOR_TOOLTIP_STYLE,
   HIGHLIGHT_MARKER_SIZE,
 } from "../../config/constants";
-import type { DataSourceManager } from "jimu-core";
 import type {
+  CursorGraphicsState,
   CursorTooltipStyle,
   EsriModules,
-  CursorGraphicsState,
   HoverQueryConfig,
 } from "../../config/types";
-import { queryPropertyByPoint, queryOwnerByFnr } from "../api";
-import { formatOwnerInfo } from "./privacy";
+import { queryOwnerByFnr, queryPropertyByPoint } from "../api";
 import { abortHelpers, stripHtml } from "./helpers";
-import { validateDataSourcesCore, checkValidationFailure } from "./validation";
+import { formatOwnerInfo } from "./privacy";
 import { extractFnr } from "./processing";
+import { checkValidationFailure, validateDataSourcesCore } from "./validation";
 
 const createOpaqueColor = (
   color: [number, number, number, number]

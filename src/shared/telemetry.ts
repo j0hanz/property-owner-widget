@@ -1,7 +1,7 @@
 import type {
-  TelemetryEvent,
-  PerformanceMetric,
   NavigatorWithPrivacy,
+  PerformanceMetric,
+  TelemetryEvent,
   WindowWithPrivacy,
 } from "../config/types";
 

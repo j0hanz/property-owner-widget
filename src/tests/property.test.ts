@@ -1,66 +1,66 @@
-import { describe, it, expect, jest } from "@jest/globals";
-import "@testing-library/jest-dom";
-import {
-  buildFnrWhereClause,
-  formatOwnerInfo,
-  formatPropertyWithShare,
-  createRowId,
-  extractFnr,
-  isAbortError,
-  parseArcGISError,
-  maskName,
-  maskAddress,
-  normalizeFnrKey,
-  isDuplicateProperty,
-  shouldToggleRemove,
-  calculatePropertyUpdates,
-  buildHighlightColor,
-  buildHighlightSymbolJSON,
-  buildTooltipSymbol,
-  syncCursorGraphics,
-  updateRawPropertyResults,
-  createPropertyDispatcher,
-  computeWidgetsToClose,
-  copyToClipboard,
-  formatPropertiesForClipboard,
-  applySortingToProperties,
-  convertToCSV,
-  convertToGeoJSON,
-  convertToJSON,
-  exportData,
-} from "../shared/utils/index";
-import {
-  isValidArcGISUrl,
-  validateDataSources,
-  propertyQueryService,
-  queryPropertyByPoint,
-  clearQueryCache,
-  runPropertySelectionPipeline,
-  queryOwnersByRelationship,
-} from "../shared/api";
-import * as configConstants from "../config/constants";
-import type {
-  OwnerAttributes,
-  GridRowData,
-  SerializedQueryResult,
-  QueryResult,
-  EsriModules,
-  PropertyAction,
-  PropertyQueryHelpers,
-  PropertyQueryMessages,
-  PropertyProcessingContext,
-  RelationshipQueryLike,
-} from "../config/types";
-import { PropertyActionType } from "../config/enums";
 import { WidgetState } from "jimu-core";
 import type {
   DataSourceManager,
-  FeatureLayerDataSource,
   FeatureDataRecord,
+  FeatureLayerDataSource,
 } from "jimu-core";
+import { describe, expect, it, jest } from "@jest/globals";
+import "@testing-library/jest-dom";
 import copyLib from "copy-to-clipboard";
+import * as configConstants from "../config/constants";
 import * as apiModule from "../shared/api";
 import * as processingModule from "../shared/utils/processing";
+import { PropertyActionType } from "../config/enums";
+import type {
+  EsriModules,
+  GridRowData,
+  OwnerAttributes,
+  PropertyAction,
+  PropertyProcessingContext,
+  PropertyQueryHelpers,
+  PropertyQueryMessages,
+  QueryResult,
+  RelationshipQueryLike,
+  SerializedQueryResult,
+} from "../config/types";
+import {
+  clearQueryCache,
+  isValidArcGISUrl,
+  propertyQueryService,
+  queryOwnersByRelationship,
+  queryPropertyByPoint,
+  runPropertySelectionPipeline,
+  validateDataSources,
+} from "../shared/api";
+import {
+  applySortingToProperties,
+  buildFnrWhereClause,
+  buildHighlightColor,
+  buildHighlightSymbolJSON,
+  buildTooltipSymbol,
+  calculatePropertyUpdates,
+  computeWidgetsToClose,
+  convertToCSV,
+  convertToGeoJSON,
+  convertToJSON,
+  copyToClipboard,
+  createPropertyDispatcher,
+  createRowId,
+  exportData,
+  extractFnr,
+  formatOwnerInfo,
+  formatPropertiesForClipboard,
+  formatPropertyWithShare,
+  isAbortError,
+  isDuplicateProperty,
+  maskAddress,
+  maskName,
+  normalizeFnrKey,
+  parseArcGISError,
+  shouldToggleRemove,
+  syncCursorGraphics,
+  updateRawPropertyResults,
+} from "../shared/utils/index";
 
 const { CURSOR_TOOLTIP_STYLE } = configConstants;
 
@@ -673,7 +673,11 @@ describe("Property Widget - Highlight Styling", () => {
   });
 
   it("should build highlight symbol definition with solid fill and outline", () => {
-    const symbolJSON = buildHighlightSymbolJSON([10, 20, 30, 0.75], 3);
+    const symbolJSON = buildHighlightSymbolJSON(
+      [10, 20, 30, 0.75],
+      3,
+      "polygon"
+    );
 
     expect(symbolJSON).toMatchObject({
       style: "solid",

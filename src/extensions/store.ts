@@ -1,20 +1,20 @@
-import * as SeamlessImmutableNs from "seamless-immutable";
 import type { extensionSpec, ImmutableObject } from "jimu-core";
+import * as SeamlessImmutableNs from "seamless-immutable";
+import { PROPERTY_ACTION_TYPES } from "../config/constants";
+import { PropertyActionType } from "../config/enums";
 import type {
   ErrorState,
   GridRowData,
   IMPropertyGlobalState,
   IMStateWithProperty,
+  MutableAccessor,
+  PropertyAction,
+  PropertySubStateMap,
   PropertyWidgetState,
+  SeamlessImmutableFactory,
   SerializedQueryResult,
   SerializedQueryResultMap,
-  PropertyAction,
-  SeamlessImmutableFactory,
-  MutableAccessor,
-  PropertySubStateMap,
 } from "../config/types";
-import { PropertyActionType } from "../config/enums";
-import { PROPERTY_ACTION_TYPES } from "../config/constants";
 
 export const propertyActions = {
   setError: (error: ErrorState | null, widgetId: string): PropertyAction => ({

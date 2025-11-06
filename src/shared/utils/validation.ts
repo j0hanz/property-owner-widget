@@ -1,14 +1,14 @@
 import type { DataSourceManager, FeatureLayerDataSource } from "jimu-core";
+import { LOCALHOST_PATTERNS, PRIVATE_IP_REGEX } from "../../config/constants";
 import type {
-  ValidationResult,
-  ValidationFailureResult,
   ErrorState,
+  EsriModules,
   IMConfig,
   MapClickValidationParams,
-  EsriModules,
+  ValidationFailureResult,
   ValidationPipelineExecutor,
+  ValidationResult,
 } from "../../config/types";
-import { LOCALHOST_PATTERNS, PRIVATE_IP_REGEX } from "../../config/constants";
 import { validateNumericRange } from "./helpers";
 
 export { validateNumericRange };
