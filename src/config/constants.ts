@@ -54,6 +54,9 @@ export const LOADING_VISIBILITY_DEBOUNCE_MS = 200;
 // Pixel tolerance for hover queries to improve usability
 export const HOVER_QUERY_TOLERANCE_PX = 10;
 
+// Throttle duration for hover query invocations
+export const HOVER_QUERY_THROTTLE_MS = 33;
+
 export const EXPORT_FORMATS: ExportFormatDefinition[] = [
   {
     id: "json",
@@ -95,8 +98,6 @@ export const CSV_HEADERS = [
   "ADDRESS",
 ] as const;
 
-// Hover query settings
-export const HOVER_QUERY_THROTTLE_MS = 50;
 
 // Redux store action types
 export const PROPERTY_ACTION_TYPES = [

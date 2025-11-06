@@ -605,7 +605,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     translate,
   });
 
-  // Throttled hover query with spatial tolerance
+  // Throttled hover query function
   const throttledHoverQuery = useThrottle(
     (mapPoint: __esri.Point, screenPoint: { x: number; y: number }) => {
       const hasTrustedHoverResult =
@@ -624,7 +624,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       lastHoverQueryPointRef.current = screenPoint;
       queryPropertyAtPoint(mapPoint);
     },
-    100
+    0
   );
 
   hooks.useUpdateEffect(() => {
@@ -1127,7 +1127,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         modules
       );
     });
-  }, 100);
+  }, 0);
 
   hooks.useUpdateEffect(() => {
     debouncedSyncGraphics();
