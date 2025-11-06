@@ -90,10 +90,8 @@ import {
   exportData,
   extractFnr,
   formatOwnerInfo,
-  getValidatedOutlineWidth,
   isAbortError,
   isValidationFailure,
-  logger,
   normalizeFnrKey,
   notifyCopyOutcome,
   readAppWidgetsFromState,
@@ -111,7 +109,7 @@ import copyButton from "../assets/copy.svg";
 import exportIcon from "../assets/export.svg";
 import mapSelect from "../assets/map-select.svg";
 
-const syncSelectionGraphics = async (params: SelectionGraphicsParams) => {
+const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   const {
     graphicsToAdd,
     selectedRows,
@@ -126,7 +124,7 @@ const syncSelectionGraphics = async (params: SelectionGraphicsParams) => {
     return;
   }
 
-  await syncGraphicsWithState({
+  syncGraphicsWithState({
     graphicsToAdd,
     selectedRows,
     view,
@@ -380,8 +378,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       const graphicsHelpers = {
         highlightGraphics,
         clearHighlights,
-        ensureLayerView,
-        applyHighlightOptions,
         removeHighlightForFnr,
         extractFnr,
         normalizeFnrKey,
@@ -417,7 +413,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         return;
       }
 
-      logger.error("Property query error:", error, {
+      console.log("Property query error:", error, {
         message: error instanceof Error ? error.message : undefined,
         stack: error instanceof Error ? error.stack : undefined,
         propertyDsId: config.propertyDataSourceId,
@@ -487,16 +483,15 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   });
 
   const {
-    ensureLayerView,
     clearHighlights,
     removeHighlightForFnr,
     highlightGraphics,
-    applyHighlightOptions,
     destroyGraphicsLayer,
   } = useGraphicsLayer({
     widgetId,
     propertyDataSourceId: config.propertyDataSourceId,
     dsManagerRef,
+    modules,
   });
   const { disablePopup, restorePopup } = usePopupManager(widgetId);
   const { getController, releaseController, abortAll } =
@@ -889,7 +884,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const { onActiveViewChange, getCurrentView, reactivateMapView, cleanup } =
     useMapViewLifecycle({
       modules,
-      ensureLayerView,
       destroyGraphicsLayer,
       disablePopup,
       restorePopup,
@@ -1116,19 +1110,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   hooks.useUpdateEffect(() => {
     const view = getCurrentView();
     if (!view) {
-      return;
+      // Note: Highlight color and outline width are now applied directly when creating graphics
+      // No separate applyHighlightOptions call needed
     }
-
-    const currentHighlightColor = buildHighlightColor(
-      highlightColorConfig,
-      highlightOpacityConfig
-    );
-    const currentOutlineWidth = getValidatedOutlineWidth(outlineWidthConfig);
-
-    applyHighlightOptions(view, currentHighlightColor, currentOutlineWidth);
   }, [
     getCurrentView,
-    applyHighlightOptions,
     highlightColorConfig,
     highlightOpacityConfig,
     outlineWidthConfig,

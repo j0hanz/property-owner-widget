@@ -28,7 +28,6 @@ import {
   cleanupRemovedGraphics,
   createRowId,
   extractFnr,
-  logger,
   normalizeFnrKey,
 } from "./helpers";
 import { deduplicateOwnerEntries } from "./privacy";
@@ -863,7 +862,7 @@ export const scheduleGraphicsRendering = (params: {
       typeof result.catch === "function"
     ) {
       result.catch((error: unknown) => {
-        logger.error("Failed to render selection highlights", error, {
+        console.log("Failed to render selection highlights", error, {
           selectionSize: pipelineResult.updatedRows.length,
         });
       });

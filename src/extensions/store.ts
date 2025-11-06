@@ -66,7 +66,7 @@ const resolveImmutableFactory = (): SeamlessImmutableFactory => {
     try {
       return require("seamless-immutable");
     } catch (error) {
-      console.error("Property Widget: Failed to load seamless-immutable", {
+      console.log("Property Widget: Failed to load seamless-immutable", {
         error,
       });
     }

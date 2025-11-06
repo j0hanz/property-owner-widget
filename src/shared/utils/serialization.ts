@@ -60,7 +60,7 @@ export const clonePlainValue = (
   maxDepth = 20
 ): unknown => {
   if (depth > maxDepth) {
-    console.warn(
+    console.log(
       "[serialization] Max clone depth exceeded, returning value as-is"
     );
     return value;
