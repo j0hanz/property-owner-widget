@@ -1,68 +1,69 @@
-import { describe, it, expect, jest } from "@jest/globals";
-import "@testing-library/jest-dom";
-import {
-  buildFnrWhereClause,
-  formatOwnerInfo,
-  formatPropertyWithShare,
-  createRowId,
-  extractFnr,
-  isAbortError,
-  parseArcGISError,
-  maskName,
-  maskAddress,
-  normalizeFnrKey,
-  isDuplicateProperty,
-  shouldToggleRemove,
-  calculatePropertyUpdates,
-  buildHighlightColor,
-  buildHighlightSymbolJSON,
-  buildTooltipSymbol,
-  syncCursorGraphics,
-  updateRawPropertyResults,
-  createPropertyDispatcher,
-  computeWidgetsToClose,
-  copyToClipboard,
-  formatPropertiesForClipboard,
-  applySortingToProperties,
-} from "../shared/utils";
-import {
-  isValidArcGISUrl,
-  validateDataSources,
-  propertyQueryService,
-  queryPropertyByPoint,
-  clearQueryCache,
-  runPropertySelectionPipeline,
-  queryOwnersByRelationship,
-} from "../shared/api";
-import {
-  convertToCSV,
-  convertToGeoJSON,
-  convertToJSON,
-  exportData,
-} from "../shared/export";
-import { CURSOR_TOOLTIP_STYLE } from "../config/constants";
-import type {
-  OwnerAttributes,
-  GridRowData,
-  SerializedQueryResult,
-  QueryResult,
-  EsriModules,
-  PropertyAction,
-  PropertyQueryHelpers,
-  PropertyQueryMessages,
-  PropertyProcessingContext,
-  RelationshipQueryLike,
-} from "../config/types";
-import { PropertyActionType } from "../config/enums";
 import { WidgetState } from "jimu-core";
 import type {
   DataSourceManager,
-  FeatureLayerDataSource,
   FeatureDataRecord,
+  FeatureLayerDataSource,
 } from "jimu-core";
+import { describe, expect, it, jest } from "@jest/globals";
+import "@testing-library/jest-dom";
 import copyLib from "copy-to-clipboard";
+import * as configConstants from "../config/constants";
 import * as apiModule from "../shared/api";
-import * as utilsModule from "../shared/utils";
+import * as processingModule from "../shared/utils/processing";
+import { PropertyActionType } from "../config/enums";
+import type {
+  EsriModules,
+  GridRowData,
+  OwnerAttributes,
+  PropertyAction,
+  PropertyProcessingContext,
+  PropertyQueryHelpers,
+  PropertyQueryMessages,
+  QueryResult,
+  RelationshipQueryLike,
+  SerializedQueryResult,
+} from "../config/types";
+import {
+  clearQueryCache,
+  isValidArcGISUrl,
+  propertyQueryService,
+  queryOwnersByRelationship,
+  queryPropertyByPoint,
+  runPropertySelectionPipeline,
+  validateDataSources,
+} from "../shared/api";
+import {
+  applySortingToProperties,
+  buildFnrWhereClause,
+  buildHighlightColor,
+  buildHighlightSymbolJSON,
+  buildTooltipSymbol,
+  calculatePropertyUpdates,
+  computeWidgetsToClose,
+  convertToCSV,
+  convertToGeoJSON,
+  convertToJSON,
+  copyToClipboard,
+  createPropertyDispatcher,
+  createRowId,
+  exportData,
+  extractFnr,
+  formatOwnerInfo,
+  formatPropertiesForClipboard,
+  formatPropertyWithShare,
+  isAbortError,
+  isDuplicateProperty,
+  maskAddress,
+  maskName,
+  normalizeFnrKey,
+  parseArcGISError,
+  shouldSkipHoverQuery,
+  shouldToggleRemove,
+  syncCursorGraphics,
+  updateRawPropertyResults,
+} from "../shared/utils/index";
+
+const { CURSOR_TOOLTIP_STYLE } = configConstants;
 
 jest.mock("copy-to-clipboard", () => ({
   __esModule: true,
@@ -673,7 +674,11 @@ describe("Property Widget - Highlight Styling", () => {
   });
 
   it("should build highlight symbol definition with solid fill and outline", () => {
-    const symbolJSON = buildHighlightSymbolJSON([10, 20, 30, 0.75], 3);
+    const symbolJSON = buildHighlightSymbolJSON(
+      [10, 20, 30, 0.75],
+      3,
+      "polygon"
+    );
 
     expect(symbolJSON).toMatchObject({
       style: "solid",
@@ -1287,6 +1292,24 @@ describe("Property Widget - Utility Helper Functions", () => {
     expect(symbol.font.family).toBe(CURSOR_TOOLTIP_STYLE.fontFamily);
   });
 
+  it("should re-query after minimal movement when no property was found previously", () => {
+    const lastPoint = { x: 100, y: 100 };
+    const screenPoint = { x: 105, y: 102 };
+    const tolerance = 10;
+
+    expect(shouldSkipHoverQuery(screenPoint, lastPoint, tolerance, true)).toBe(
+      true
+    );
+
+    expect(shouldSkipHoverQuery(screenPoint, lastPoint, tolerance, false)).toBe(
+      false
+    );
+
+    expect(shouldSkipHoverQuery(screenPoint, null, tolerance, true)).toBe(
+      false
+    );
+  });
+
   it("should map property query results to each owner row for export", () => {
     const propertyResult: QueryResult = {
       propertyId: "123",
@@ -1348,9 +1371,9 @@ describe("Property Widget - Utility Helper Functions", () => {
       ],
     };
 
-    expect(Object.keys(updated).length).toBe(2);
-    expect(updated[ownerRowA.id]).toEqual(expectedSerialized);
-    expect(updated[ownerRowB.id]).toEqual(expectedSerialized);
+    expect(updated.size).toBe(2);
+    expect(updated.get(ownerRowA.id)).toEqual(expectedSerialized);
+    expect(updated.get(ownerRowB.id)).toEqual(expectedSerialized);
   });
 
   it("should remove raw property results for deselected properties", () => {
@@ -1391,8 +1414,8 @@ describe("Property Widget - Utility Helper Functions", () => {
       normalizeFnrKey
     );
     expect(ownerRow.id in prev).toBe(true);
-    expect(ownerRow.id in updated).toBe(false);
-    expect(Object.keys(updated).length).toBe(0);
+    expect(updated.has(ownerRow.id)).toBe(false);
+    expect(updated.size).toBe(0);
   });
 
   it("should create and clear cursor graphics through sync helper", () => {
@@ -1407,7 +1430,6 @@ describe("Property Widget - Utility Helper Functions", () => {
       mapPoint,
       tooltipText: "<em>FAST-1</em>",
       highlightColor,
-      outlineWidth: 2,
       existing: null,
       style: CURSOR_TOOLTIP_STYLE,
     });
@@ -1431,7 +1453,6 @@ describe("Property Widget - Utility Helper Functions", () => {
       mapPoint: null,
       tooltipText: null,
       highlightColor,
-      outlineWidth: 2,
       existing: state,
       style: CURSOR_TOOLTIP_STYLE,
     });
@@ -1454,7 +1475,6 @@ describe("Property Widget - Utility Helper Functions", () => {
       mapPoint: mapPoint1,
       tooltipText: "Property A",
       highlightColor,
-      outlineWidth: 2,
       existing: null,
       style: CURSOR_TOOLTIP_STYLE,
     });
@@ -1469,7 +1489,6 @@ describe("Property Widget - Utility Helper Functions", () => {
       mapPoint: mapPoint2,
       tooltipText: "Property A",
       highlightColor,
-      outlineWidth: 2,
       existing: state1,
       style: CURSOR_TOOLTIP_STYLE,
     });
@@ -1485,7 +1504,6 @@ describe("Property Widget - Utility Helper Functions", () => {
       mapPoint: mapPoint2,
       tooltipText: "Property B",
       highlightColor,
-      outlineWidth: 2,
       existing: state2,
       style: CURSOR_TOOLTIP_STYLE,
     });
@@ -1533,7 +1551,10 @@ describe("Property Selection Pipeline - Performance Optimizations", () => {
     const propertySpy = jest
       .spyOn(apiModule, "queryPropertyByPoint")
       .mockResolvedValue(propertyResults);
-    const processSpy = jest.spyOn(utilsModule, "processPropertyQueryResults");
+    const processSpy = jest.spyOn(
+      processingModule,
+      "processPropertyQueryResults"
+    );
 
     const abortController = new AbortController();
 
@@ -1967,15 +1988,25 @@ describe("Query Controls", () => {
   });
 
   it("should remove deprecated query cache constants", () => {
-    const constants = require("../config/constants");
-
-    expect("QUERY_DEDUPLICATION_TIMEOUT" in constants).toBe(false);
-    expect("PROPERTY_QUERY_CACHE" in constants).toBe(false);
-    expect("OWNER_QUERY_CACHE" in constants).toBe(false);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        configConstants,
+        "QUERY_DEDUPLICATION_TIMEOUT"
+      )
+    ).toBe(false);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        configConstants,
+        "PROPERTY_QUERY_CACHE"
+      )
+    ).toBe(false);
+    expect(
+      Object.prototype.hasOwnProperty.call(configConstants, "OWNER_QUERY_CACHE")
+    ).toBe(false);
   });
 
   it("should configure abort controller pool size", () => {
-    const { ABORT_CONTROLLER_POOL_SIZE } = require("../config/constants");
+    const { ABORT_CONTROLLER_POOL_SIZE } = configConstants;
 
     expect(ABORT_CONTROLLER_POOL_SIZE).toBeDefined();
     expect(typeof ABORT_CONTROLLER_POOL_SIZE).toBe("number");
@@ -1984,7 +2015,7 @@ describe("Query Controls", () => {
   });
 
   it("should increase owner query concurrency for better performance", () => {
-    const { OWNER_QUERY_CONCURRENCY } = require("../config/constants");
+    const { OWNER_QUERY_CONCURRENCY } = configConstants;
 
     expect(OWNER_QUERY_CONCURRENCY).toBeDefined();
     expect(OWNER_QUERY_CONCURRENCY).toBe(20);

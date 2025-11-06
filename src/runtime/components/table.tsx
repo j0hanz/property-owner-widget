@@ -1,7 +1,7 @@
 /** @jsx jsx */
-import { React, jsx } from "jimu-core";
-import { Scrollable } from "jimu-ui";
-import { useReactTable, flexRender } from "@tanstack/react-table";
+import { jsx, React } from "jimu-core";
+import { Scrollable, SVG } from "jimu-ui";
+import { flexRender, useReactTable } from "@tanstack/react-table";
 import type { ColumnFiltersState } from "@tanstack/react-table";
 import type { PropertyTableProps } from "../../config/types";
 import {
@@ -10,6 +10,8 @@ import {
   getRowId,
   getVisibleRows,
 } from "../../shared/config";
+import arrowDownIcon from "../../assets/arrow-down.svg";
+import arrowUpIcon from "../../assets/arrow-up.svg";
 
 export const PropertyTable = (props: PropertyTableProps) => {
   const { data, columns, translate, styles, sorting, onSortingChange } = props;
@@ -37,7 +39,7 @@ export const PropertyTable = (props: PropertyTableProps) => {
     if (!isSorted) return null;
     return (
       <span css={styles.sortIndicator} aria-hidden="true">
-        {isSorted === "asc" ? "↑" : "↓"}
+        <SVG src={isSorted === "asc" ? arrowUpIcon : arrowDownIcon} size={12} />
       </span>
     );
   };

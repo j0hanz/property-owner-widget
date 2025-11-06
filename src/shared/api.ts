@@ -1,65 +1,61 @@
 import type {
   DataSourceManager,
-  FeatureLayerDataSource,
   FeatureDataRecord,
+  FeatureLayerDataSource,
   QueryOptions,
 } from "jimu-core";
 import { loadArcGISJSAPIModules } from "jimu-arcgis";
+import { OWNER_QUERY_CONCURRENCY } from "../config/constants";
 import type {
   AttributeMap,
-  ErrorState,
+  FeatureLayerConstructor,
   FnrValue,
   GridRowData,
   OwnerAttributes,
+  OwnerFetchSuccess,
+  OwnerQueryResolution,
+  ProcessingAccumulator,
   ProcessPropertyResult,
+  PromiseUtilsLike,
   PropertyAttributes,
   PropertyBatchQueryParams,
   PropertyIndividualQueryParams,
   PropertyProcessingContext,
   PropertySelectionPipelineParams,
   PropertySelectionPipelineResult,
-  PromiseUtilsLike,
-  QueryResult,
-  ValidationResult,
-  FeatureLayerConstructor,
   QueryConstructor,
-  QueryTaskLike,
+  QueryResult,
   QueryTaskConstructor,
+  QueryTaskLike,
   RelationshipQueryConstructor,
   SignalOptions,
   ValidateDataSourcesParams,
   ValidatedProperty,
-  OwnerFetchSuccess,
-  OwnerQueryResolution,
-  ProcessingAccumulator,
-  CreateGridRowParams,
+  ValidationResult,
 } from "../config/types";
 import { isValidationFailure } from "../config/types";
-import { OWNER_QUERY_CONCURRENCY } from "../config/constants";
 import {
-  buildFnrWhereClause,
-  parseArcGISError,
-  isAbortError,
-  normalizeFnrKey,
-  ownerIdentity,
   abortHelpers,
+  buildFnrWhereClause,
+  buildPropertyRows,
   calculatePropertyUpdates,
-  processPropertyQueryResults,
-  logger,
   createRowId,
-  formatPropertyWithShare,
-  formatOwnerInfo,
+  createValidationError,
+  createValidationPipeline,
+  deriveToggleState,
   extractFnr,
-} from "./utils";
-
-const ARC_GIS_LAYER_PATTERN = /\/(mapserver|featureserver)\/\d+(?:\/query)?$/i;
-const PRIVATE_IPV4_PATTERNS = [
-  /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u,
-  /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/u,
-  /^192\.168\.\d{1,3}\.\d{1,3}$/u,
-];
-const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
-const LOOPBACK_IPV6 = "::1";
+  formatOwnerInfo,
+  formatPropertyWithShare,
+  getDataSourceUrl,
+  isAbortError,
+  isValidArcGISUrl,
+  logger,
+  normalizeFnrKey,
+  parseArcGISError,
+  processOwnerResult,
+  processPropertyQueryResults,
+  shouldStopAccumulation,
+} from "./utils/index";
 
 let cachedFeatureLayerCtor: FeatureLayerConstructor | null = null;
 let cachedQueryCtor: QueryConstructor | null = null;
@@ -81,54 +77,6 @@ const getPromiseUtils = async (): Promise<PromiseUtilsLike> => {
   cachedPromiseUtils = promiseUtils;
   return promiseUtils;
 };
-
-const stripIpv6Brackets = (hostname: string): string => {
-  if (hostname.startsWith("[") && hostname.endsWith("]")) {
-    return hostname.slice(1, -1);
-  }
-  return hostname;
-};
-
-const isIpv4Address = (value: string): boolean =>
-  /^\d{1,3}(\.\d{1,3}){3}$/u.test(value);
-
-const isPrivateHost = (hostname: string): boolean => {
-  const normalized = stripIpv6Brackets(hostname.toLowerCase());
-  if (LOCAL_HOSTNAMES.has(normalized)) {
-    return true;
-  }
-  if (normalized === LOOPBACK_IPV6) {
-    return true;
-  }
-  if (isIpv4Address(normalized)) {
-    return PRIVATE_IPV4_PATTERNS.some((pattern) => pattern.test(normalized));
-  }
-  return false;
-};
-
-const normalizeHostname = (hostname: string): string =>
-  hostname.trim().toLowerCase();
-
-const isAllowedHost = (
-  hostname: string,
-  allowedHosts?: readonly string[]
-): boolean => {
-  if (!allowedHosts || allowedHosts.length === 0) {
-    return true;
-  }
-
-  const normalizedHostname = normalizeHostname(hostname);
-
-  return allowedHosts.some((allowedHost) => {
-    const normalizedAllowed = normalizeHostname(allowedHost);
-    return (
-      normalizedHostname === normalizedAllowed ||
-      normalizedHostname.endsWith(`.${normalizedAllowed}`)
-    );
-  });
-};
-
-const isStandardPort = (port: string): boolean => port === "" || port === "443";
 
 const createSignalOptions = (
   signal?: AbortSignal
@@ -156,46 +104,39 @@ const clearFeatureLayerCache = (): void => {
   cachedPromiseUtils = null;
 };
 
-const createValidationError = (
-  type: ErrorState["type"],
-  message: string,
-  failureReason: string
-): ValidationResult<never> => ({
-  valid: false,
-  error: { type, message },
-  failureReason,
-});
+const appendRowsForValidatedProperty = (
+  accumulator: {
+    rows: GridRowData[];
+    graphics: Array<{ graphic: __esri.Graphic; fnr: FnrValue }>;
+  },
+  params: {
+    validated: ValidatedProperty;
+    owners: OwnerAttributes[];
+    ownerQueryFailed: boolean;
+    maskPII: boolean;
+    context: PropertyProcessingContext;
+  }
+) => {
+  const { rows, graphics } = accumulator;
+  const { validated, owners, ownerQueryFailed, maskPII, context } = params;
 
-const extractDataSourceUrl = (
-  dataSource: FeatureLayerDataSource | null
-): string | null => {
-  if (!dataSource) {
-    return null;
+  const builtRows = buildPropertyRows(
+    validated,
+    owners,
+    ownerQueryFailed,
+    maskPII,
+    context
+  );
+
+  if (builtRows.length > 0) {
+    rows.push(...builtRows);
   }
 
-  if (typeof dataSource.url === "string" && dataSource.url) {
-    return dataSource.url;
-  }
-
-  const layerDefinition = dataSource.getLayerDefinition?.();
-  if (layerDefinition && typeof layerDefinition === "object") {
-    const candidate = (layerDefinition as { url?: string | null }).url;
-    if (candidate) {
-      return candidate;
-    }
-  }
-
-  const dsJson = dataSource.getDataSourceJson?.();
-  if (dsJson && typeof dsJson === "object") {
-    const candidate = (dsJson as { url?: string | null }).url;
-    if (candidate) {
-      return candidate;
-    }
-  }
-
-  return null;
+  graphics.push({
+    graphic: validated.graphic,
+    fnr: validated.fnr,
+  });
 };
-
 const validateSingleDataSource = (
   dataSource: FeatureLayerDataSource | null,
   role: "property" | "owner",
@@ -218,7 +159,7 @@ const validateDataSourceUrl = (
   allowedHosts: readonly string[] | undefined,
   translate: (key: string) => string
 ): ValidationResult<{ url: string }> => {
-  const url = extractDataSourceUrl(dataSource);
+  const url = getDataSourceUrl(dataSource);
   if (!url) {
     return createValidationError(
       "VALIDATION_ERROR",
@@ -247,69 +188,6 @@ const toOwnerAttributes = (
   return graphic.attributes as OwnerAttributes;
 };
 
-const deduplicateOwnerEntries = (
-  owners: OwnerAttributes[],
-  context: { fnr: FnrValue; propertyId?: string }
-): OwnerAttributes[] => {
-  const seenKeys = new Set<string>();
-  const unique: OwnerAttributes[] = [];
-
-  owners.forEach((owner, index) => {
-    if (!owner || typeof owner !== "object") {
-      return;
-    }
-
-    try {
-      const key = ownerIdentity.buildKey(owner, context, index);
-      if (seenKeys.has(key)) {
-        return;
-      }
-      seenKeys.add(key);
-      unique.push(owner);
-    } catch (_error) {
-      unique.push(owner);
-    }
-  });
-
-  return unique;
-};
-
-const createGridRow = (params: CreateGridRowParams): GridRowData => ({
-  id: params.createRowId(params.fnr, params.objectId),
-  FNR: params.fnr,
-  UUID_FASTIGHET: params.uuidFastighet,
-  FASTIGHET: params.fastighet,
-  BOSTADR: params.bostadr,
-  ADDRESS: params.address,
-  geometryType: params.geometryType,
-  geometry: params.geometry ?? null,
-  rawOwner: params.rawOwner,
-});
-
-const accumulatePropertyRows = (
-  rows: GridRowData[],
-  accumulator: ProcessingAccumulator,
-  graphic: __esri.Graphic,
-  fnr: FnrValue,
-  currentTotal: number,
-  maxResults: number
-): boolean => {
-  if (rows.length === 0) {
-    return currentTotal >= maxResults;
-  }
-
-  const remaining = Math.max(maxResults - currentTotal, 0);
-  const rowsToAdd = remaining > 0 ? rows.slice(0, remaining) : [];
-
-  accumulator.rows.push(...rowsToAdd);
-
-  if (rowsToAdd.length > 0) {
-    accumulator.graphics.push({ graphic, fnr });
-  }
-
-  return currentTotal + rowsToAdd.length >= maxResults;
-};
-
 const shouldSkipOwnerResult = (
   result: OwnerQueryResolution,
   helpers: PropertyProcessingContext["helpers"]
@@ -326,140 +204,6 @@ const shouldSkipOwnerResult = (
   }
 
   return { skip: false };
-};
-
-const buildPropertyRows = (
-  validated: ValidatedProperty,
-  owners: OwnerAttributes[],
-  queryFailed: boolean,
-  maskPII: boolean,
-  context: PropertyProcessingContext
-): GridRowData[] => {
-  const geometry = validated.graphic.geometry;
-  const geometryType = geometry?.type ?? null;
-  const serializedGeometry =
-    geometry && typeof geometry.toJSON === "function"
-      ? geometry.toJSON()
-      : null;
-
-  if (owners.length > 0) {
-    const uniqueOwners = deduplicateOwnerEntries(owners, {
-      fnr: validated.fnr,
-      propertyId: validated.attrs.UUID_FASTIGHET,
-    });
-
-    return uniqueOwners.map((owner) =>
-      createGridRow({
-        fnr: validated.fnr,
-        objectId: owner.OBJECTID ?? validated.attrs.OBJECTID,
-        uuidFastighet: owner.UUID_FASTIGHET ?? validated.attrs.UUID_FASTIGHET,
-        fastighet: context.helpers.formatPropertyWithShare(
-          owner.FASTIGHET ?? validated.attrs.FASTIGHET,
-          owner.ANDEL
-        ),
-        bostadr: context.helpers.formatOwnerInfo(
-          owner,
-          maskPII,
-          context.messages.unknownOwner
-        ),
-        address: context.helpers.formatOwnerInfo(
-          owner,
-          maskPII,
-          context.messages.unknownOwner
-        ),
-        geometryType,
-        geometry: serializedGeometry,
-        createRowId: context.helpers.createRowId,
-        rawOwner: owner,
-      })
-    );
-  }
-
-  const fallbackMessage = queryFailed
-    ? context.messages.errorOwnerQueryFailed
-    : context.messages.unknownOwner;
-
-  const fallbackOwner: OwnerAttributes = {
-    OBJECTID: validated.attrs.OBJECTID,
-    FNR: validated.fnr,
-    UUID_FASTIGHET: validated.attrs.UUID_FASTIGHET,
-    FASTIGHET: validated.attrs.FASTIGHET,
-    NAMN: fallbackMessage,
-    BOSTADR: "",
-    POSTNR: "",
-    POSTADR: "",
-    ORGNR: "",
-  };
-
-  return [
-    createGridRow({
-      fnr: validated.fnr,
-      objectId: validated.attrs.OBJECTID,
-      uuidFastighet: validated.attrs.UUID_FASTIGHET,
-      fastighet: validated.attrs.FASTIGHET,
-      bostadr: fallbackMessage,
-      address: "",
-      geometryType,
-      geometry: serializedGeometry,
-      createRowId: context.helpers.createRowId,
-      rawOwner: fallbackOwner,
-    }),
-  ];
-};
-
-const processOwnerQueryError = (
-  validated: ValidatedProperty,
-  context: PropertyProcessingContext,
-  maskPII: boolean,
-  accumulator: ProcessingAccumulator,
-  currentRowCount: number,
-  maxResults: number
-): boolean => {
-  const totalBefore = currentRowCount + accumulator.rows.length;
-  if (totalBefore >= maxResults) {
-    return true;
-  }
-
-  const rows = buildPropertyRows(validated, [], true, maskPII, context);
-  return accumulatePropertyRows(
-    rows,
-    accumulator,
-    validated.graphic,
-    validated.fnr,
-    totalBefore,
-    maxResults
-  );
-};
-
-const processOwnerQuerySuccess = (
-  result: OwnerFetchSuccess,
-  context: PropertyProcessingContext,
-  maskPII: boolean,
-  accumulator: ProcessingAccumulator,
-  currentRowCount: number,
-  maxResults: number
-): boolean => {
-  const totalBefore = currentRowCount + accumulator.rows.length;
-  if (totalBefore >= maxResults) {
-    return true;
-  }
-
-  const rows = buildPropertyRows(
-    result.validated,
-    result.owners,
-    result.queryFailed,
-    maskPII,
-    context
-  );
-
-  return accumulatePropertyRows(
-    rows,
-    accumulator,
-    result.validated.graphic,
-    result.validated.fnr,
-    totalBefore,
-    maxResults
-  );
 };
 
 const validateAndDeduplicateProperties = (
@@ -563,6 +307,15 @@ const processBatchOfProperties = async (params: {
   for (let index = 0; index < ownerData.length; index += 1) {
     const resolution = ownerData[index];
     const validated = batch[index];
+    if (
+      shouldStopAccumulation(
+        currentRowCount,
+        accumulator.rows.length,
+        maxResults
+      )
+    ) {
+      break;
+    }
     const skip = shouldSkipOwnerResult(resolution, helpers);
 
     if (skip.skip) {
@@ -570,81 +323,21 @@ const processBatchOfProperties = async (params: {
         continue;
       }
     }
-
-    if (resolution.error) {
-      const shouldStop = processOwnerQueryError(
-        validated,
-        context,
-        config.enablePIIMasking,
-        accumulator,
-        currentRowCount,
-        maxResults
-      );
-      if (shouldStop) {
-        break;
-      }
-      continue;
-    }
-
-    const ownerResult = resolution.value;
-    if (!ownerResult) {
-      continue;
-    }
-
-    const shouldStop = processOwnerQuerySuccess(
-      ownerResult,
+    const shouldStop = processOwnerResult({
+      resolution,
+      validated,
       context,
-      config.enablePIIMasking,
+      maskPII: config.enablePIIMasking,
       accumulator,
       currentRowCount,
-      maxResults
-    );
+      maxResults,
+    });
     if (shouldStop) {
       break;
     }
   }
 
   return accumulator;
-};
-
-export const isValidArcGISUrl = (
-  url: string,
-  allowedHosts?: readonly string[]
-): boolean => {
-  if (!url || typeof url !== "string") {
-    return false;
-  }
-
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch (_error) {
-    return false;
-  }
-
-  if (parsed.protocol !== "https:") {
-    return false;
-  }
-
-  if (!isStandardPort(parsed.port)) {
-    return false;
-  }
-
-  const hostname = parsed.hostname;
-  if (isPrivateHost(hostname)) {
-    return false;
-  }
-
-  if (!isAllowedHost(hostname, allowedHosts)) {
-    return false;
-  }
-
-  const normalizedPath = parsed.pathname.replace(/\/+/g, "/").toLowerCase();
-  if (!ARC_GIS_LAYER_PATTERN.test(normalizedPath)) {
-    return false;
-  }
-
-  return true;
 };
 
 export const clearQueryCache = (): void => {
@@ -654,83 +347,202 @@ export const clearQueryCache = (): void => {
 export const validateDataSources = (
   params: ValidateDataSourcesParams
 ): ValidationResult<{ manager: DataSourceManager }> => {
-  const { propertyDsId, ownerDsId, dsManager, allowedHosts, translate } =
-    params;
-
-  if (!propertyDsId || !ownerDsId) {
-    return createValidationError(
-      "VALIDATION_ERROR",
-      translate("errorNoDataAvailable"),
-      "missing_data_sources"
-    );
+  interface ValidationState {
+    propertyDsId?: string | null;
+    ownerDsId?: string | null;
+    dsManager: DataSourceManager | null;
+    manager?: DataSourceManager;
+    allowedHosts?: readonly string[];
+    translate: (key: string) => string;
+    propertyDs?: FeatureLayerDataSource;
+    ownerDs?: FeatureLayerDataSource;
   }
 
-  if (!dsManager) {
+  const initialState: ValidationState = {
+    propertyDsId: params.propertyDsId,
+    ownerDsId: params.ownerDsId,
+    dsManager: params.dsManager,
+    allowedHosts: params.allowedHosts,
+    translate: params.translate,
+  };
+
+  const validateDataSourceIds = (
+    state: ValidationState
+  ): ValidationResult<ValidationState> => {
+    if (!state.propertyDsId || !state.ownerDsId) {
+      return createValidationError(
+        "VALIDATION_ERROR",
+        state.translate("errorNoDataAvailable"),
+        "missing_data_sources"
+      ) as ValidationResult<ValidationState>;
+    }
+    return { valid: true, data: state };
+  };
+
+  const validateManager = (
+    state: ValidationState
+  ): ValidationResult<ValidationState> => {
+    if (!state.dsManager) {
+      return createValidationError(
+        "QUERY_ERROR",
+        state.translate("errorQueryFailed"),
+        "no_data_source_manager"
+      ) as ValidationResult<ValidationState>;
+    }
+    return {
+      valid: true,
+      data: { ...state, manager: state.dsManager },
+    };
+  };
+
+  const validatePropertyDataSource = (
+    state: ValidationState
+  ): ValidationResult<ValidationState> => {
+    const manager = state.manager ?? state.dsManager;
+    if (!manager) {
+      return createValidationError(
+        "QUERY_ERROR",
+        state.translate("errorQueryFailed"),
+        "no_data_source_manager"
+      ) as ValidationResult<ValidationState>;
+    }
+    const propertyDs = manager.getDataSource(
+      state.propertyDsId
+    ) as FeatureLayerDataSource | null;
+    const validation = validateSingleDataSource(
+      propertyDs,
+      "property",
+      state.translate
+    );
+    if (isValidationFailure(validation)) {
+      return {
+        valid: false,
+        error: validation.error,
+        failureReason: validation.failureReason,
+      };
+    }
+    return {
+      valid: true,
+      data: {
+        ...state,
+        manager,
+        propertyDs: validation.data.dataSource,
+      },
+    };
+  };
+
+  const validateOwnerDataSource = (
+    state: ValidationState
+  ): ValidationResult<ValidationState> => {
+    const manager = state.manager ?? state.dsManager;
+    if (!manager) {
+      return createValidationError(
+        "QUERY_ERROR",
+        state.translate("errorQueryFailed"),
+        "no_data_source_manager"
+      ) as ValidationResult<ValidationState>;
+    }
+    const ownerDs = manager.getDataSource(
+      state.ownerDsId
+    ) as FeatureLayerDataSource | null;
+    const validation = validateSingleDataSource(
+      ownerDs,
+      "owner",
+      state.translate
+    );
+    if (isValidationFailure(validation)) {
+      return {
+        valid: false,
+        error: validation.error,
+        failureReason: validation.failureReason,
+      };
+    }
+    return {
+      valid: true,
+      data: {
+        ...state,
+        manager,
+        ownerDs: validation.data.dataSource,
+      },
+    };
+  };
+
+  const validatePropertyUrl = (
+    state: ValidationState
+  ): ValidationResult<ValidationState> => {
+    if (!state.propertyDs) {
+      return createValidationError(
+        "VALIDATION_ERROR",
+        state.translate("errorNoDataAvailable"),
+        "property_data_source_missing"
+      ) as ValidationResult<ValidationState>;
+    }
+    const validation = validateDataSourceUrl(
+      state.propertyDs,
+      "property",
+      state.allowedHosts,
+      state.translate
+    );
+    if (isValidationFailure(validation)) {
+      return {
+        valid: false,
+        error: validation.error,
+        failureReason: validation.failureReason,
+      };
+    }
+    return { valid: true, data: state };
+  };
+
+  const validateOwnerUrl = (
+    state: ValidationState
+  ): ValidationResult<ValidationState> => {
+    if (!state.ownerDs) {
+      return createValidationError(
+        "VALIDATION_ERROR",
+        state.translate("errorNoDataAvailable"),
+        "owner_data_source_missing"
+      ) as ValidationResult<ValidationState>;
+    }
+    const validation = validateDataSourceUrl(
+      state.ownerDs,
+      "owner",
+      state.allowedHosts,
+      state.translate
+    );
+    if (isValidationFailure(validation)) {
+      return {
+        valid: false,
+        error: validation.error,
+        failureReason: validation.failureReason,
+      };
+    }
+    return { valid: true, data: state };
+  };
+
+  const pipeline = createValidationPipeline<ValidationState>([
+    validateDataSourceIds,
+    validateManager,
+    validatePropertyDataSource,
+    validateOwnerDataSource,
+    validatePropertyUrl,
+    validateOwnerUrl,
+  ]);
+
+  const pipelineResult = pipeline(initialState);
+  if (isValidationFailure(pipelineResult)) {
+    return pipelineResult;
+  }
+
+  const resolvedManager = pipelineResult.data.manager;
+  if (!resolvedManager) {
     return createValidationError(
       "QUERY_ERROR",
-      translate("errorQueryFailed"),
+      params.translate("errorQueryFailed"),
       "no_data_source_manager"
     );
   }
 
-  const propertyDs = dsManager.getDataSource(
-    propertyDsId
-  ) as FeatureLayerDataSource | null;
-  const ownerDs = dsManager.getDataSource(
-    ownerDsId
-  ) as FeatureLayerDataSource | null;
-
-  const propertyValidation = validateSingleDataSource(
-    propertyDs,
-    "property",
-    translate
-  );
-  if (isValidationFailure(propertyValidation)) {
-    return {
-      valid: false,
-      error: propertyValidation.error,
-      failureReason: propertyValidation.failureReason,
-    };
-  }
-
-  const ownerValidation = validateSingleDataSource(ownerDs, "owner", translate);
-  if (isValidationFailure(ownerValidation)) {
-    return {
-      valid: false,
-      error: ownerValidation.error,
-      failureReason: ownerValidation.failureReason,
-    };
-  }
-
-  const propertyUrlValidation = validateDataSourceUrl(
-    propertyValidation.data.dataSource,
-    "property",
-    allowedHosts,
-    translate
-  );
-  if (isValidationFailure(propertyUrlValidation)) {
-    return {
-      valid: false,
-      error: propertyUrlValidation.error,
-      failureReason: propertyUrlValidation.failureReason,
-    };
-  }
-
-  const ownerUrlValidation = validateDataSourceUrl(
-    ownerValidation.data.dataSource,
-    "owner",
-    allowedHosts,
-    translate
-  );
-  if (isValidationFailure(ownerUrlValidation)) {
-    return {
-      valid: false,
-      error: ownerUrlValidation.error,
-      failureReason: ownerUrlValidation.failureReason,
-    };
-  }
-
-  return { valid: true, data: { manager: dsManager } };
+  return { valid: true, data: { manager: resolvedManager } };
 };
 
 export const queryPropertyByPoint = async (
@@ -922,25 +734,28 @@ export const queryOwnersByRelationship = async (
       fnrBatches.push(propertyFnrs.slice(index, index + BATCH_SIZE));
     }
 
-    const batchPromises = fnrBatches.map((batch) =>
-      propertyDs.query(
-        {
-          where: batch.map((fnr) => buildFnrWhereClause(fnr)).join(" OR "),
-          outFields: ["FNR", "OBJECTID"],
-          returnGeometry: false,
-        },
-        toDataSourceQueryOptions(signalOptions)
-      )
+    const batchRequests = fnrBatches.map(
+      (batch) => () =>
+        propertyDs.query(
+          {
+            where: batch.map((fnr) => buildFnrWhereClause(fnr)).join(" OR "),
+            outFields: ["FNR", "OBJECTID"],
+            returnGeometry: false,
+          },
+          toDataSourceQueryOptions(signalOptions)
+        )
     );
 
     const propertyRecords: FeatureDataRecord[] = [];
     for (
       let index = 0;
-      index < batchPromises.length;
+      index < batchRequests.length;
       index += OWNER_QUERY_CONCURRENCY
     ) {
-      const slice = batchPromises.slice(index, index + OWNER_QUERY_CONCURRENCY);
-      const settled = await Promise.all(slice);
+      const slice = batchRequests.slice(index, index + OWNER_QUERY_CONCURRENCY);
+      const settled = await Promise.all(
+        slice.map((createRequest) => createRequest())
+      );
       settled.forEach((result) => {
         const records = ((result?.records ?? []) as FeatureDataRecord[]) || [];
         if (records.length > 0) {
@@ -1053,83 +868,18 @@ const processBatchQuery = async (
 
     for (const validated of chunk) {
       const owners = ownersByFnr.get(String(validated.fnr)) ?? [];
-      const geometry = validated.graphic.geometry;
-      const geometryType = geometry?.type ?? null;
-      const serializedGeometry =
-        geometry && typeof geometry.toJSON === "function"
-          ? geometry.toJSON()
-          : null;
+      const ownerQueryFailed = failedFnrs.has(String(validated.fnr));
 
-      if (owners.length > 0) {
-        const uniqueOwners = deduplicateOwnerEntries(owners, {
-          fnr: validated.fnr,
-          propertyId: validated.attrs.UUID_FASTIGHET,
-        });
-
-        uniqueOwners.forEach((owner) => {
-          const formattedOwner = context.helpers.formatOwnerInfo(
-            owner,
-            config.enablePIIMasking,
-            context.messages.unknownOwner
-          );
-          const propertyWithShare = context.helpers.formatPropertyWithShare(
-            validated.attrs.FASTIGHET,
-            owner.ANDEL
-          );
-
-          rowsToProcess.push(
-            createGridRow({
-              fnr: validated.fnr,
-              objectId: owner.OBJECTID ?? validated.attrs.OBJECTID,
-              uuidFastighet:
-                owner.UUID_FASTIGHET ?? validated.attrs.UUID_FASTIGHET,
-              fastighet: propertyWithShare,
-              bostadr: formattedOwner,
-              address: formattedOwner,
-              geometryType,
-              geometry: serializedGeometry,
-              createRowId: context.helpers.createRowId,
-              rawOwner: owner,
-            })
-          );
-        });
-      } else {
-        const fallbackMessage = failedFnrs.has(String(validated.fnr))
-          ? context.messages.errorOwnerQueryFailed
-          : context.messages.unknownOwner;
-
-        const fallbackOwner: OwnerAttributes = {
-          OBJECTID: validated.attrs.OBJECTID,
-          FNR: validated.fnr,
-          UUID_FASTIGHET: validated.attrs.UUID_FASTIGHET,
-          FASTIGHET: validated.attrs.FASTIGHET,
-          NAMN: fallbackMessage,
-          BOSTADR: "",
-          POSTNR: "",
-          POSTADR: "",
-          ORGNR: "",
-        };
-
-        rowsToProcess.push(
-          createGridRow({
-            fnr: validated.fnr,
-            objectId: validated.attrs.OBJECTID,
-            uuidFastighet: validated.attrs.UUID_FASTIGHET,
-            fastighet: validated.attrs.FASTIGHET,
-            bostadr: fallbackMessage,
-            address: "",
-            geometryType,
-            geometry: serializedGeometry,
-            createRowId: context.helpers.createRowId,
-            rawOwner: fallbackOwner,
-          })
-        );
-      }
-
-      graphicsToAdd.push({
-        graphic: validated.graphic,
-        fnr: validated.fnr,
-      });
+      appendRowsForValidatedProperty(
+        { rows: rowsToProcess, graphics: graphicsToAdd },
+        {
+          validated,
+          owners,
+          ownerQueryFailed,
+          maskPII: config.enablePIIMasking,
+          context,
+        }
+      );
     }
 
     if (index + CHUNK_SIZE < validatedProperties.length) {
@@ -1211,89 +961,38 @@ export const runPropertySelectionPipeline = async (
     translate,
   } = params;
 
-  const propQueryStart = performance.now();
-  console.log("[PERF-API] Property query started");
   const propertyResults = await queryPropertyByPoint(
     mapPoint,
     propertyDataSourceId,
     dsManager,
     { signal }
   );
-  const propQueryEnd = performance.now();
-  console.log(
-    "[PERF-API] Property query completed in",
-    propQueryEnd - propQueryStart,
-    "ms",
-    "(returned",
-    propertyResults.length,
-    "results)"
-  );
 
   if (propertyResults.length === 0) {
     return { status: "empty" };
   }
 
-  const extractFnrFromResult = (result: QueryResult): FnrValue | null => {
-    const feature = result?.features?.[0];
-    const attrs = feature?.attributes as AttributeMap | null | undefined;
-    return attrs ? extractFnr(attrs) : null;
-  };
-
-  const computeToggleOnlyRemoval = (
-    results: QueryResult[],
-    selected: GridRowData[]
-  ): Set<string> | null => {
-    if (!toggleEnabled || selected.length === 0) {
-      return null;
-    }
-
-    const selectedFnrs = new Set(
-      selected.map((row) => normalizeFnrKey(row.FNR))
-    );
-    if (selectedFnrs.size === 0) {
-      return null;
-    }
-
-    const toRemove = new Set<string>();
-
-    for (const result of results) {
-      const fnr = extractFnrFromResult(result);
-      if (fnr == null) {
-        return null;
-      }
-
-      const key = normalizeFnrKey(fnr);
-      if (!selectedFnrs.has(key)) {
-        return null;
-      }
-      toRemove.add(key);
-    }
-
-    return toRemove.size > 0 ? toRemove : null;
-  };
-
-  const toggleOnlyRemovals = computeToggleOnlyRemoval(
+  const toggleRemovalState = deriveToggleState({
     propertyResults,
-    selectedProperties
-  );
+    selectedProperties,
+    toggleEnabled,
+    normalizeFnrKey,
+    extractFnr,
+  });
 
-  if (toggleOnlyRemovals && toggleOnlyRemovals.size > 0) {
-    const updatedRows = selectedProperties.filter(
-      (row) => !toggleOnlyRemovals.has(normalizeFnrKey(row.FNR))
-    );
+  if (toggleRemovalState) {
+    const { updatedRows, keysToRemove } = toggleRemovalState;
 
     return {
       status: "success",
       rowsToProcess: [],
       graphicsToAdd: [],
       updatedRows,
-      toRemove: toggleOnlyRemovals,
+      toRemove: keysToRemove,
       propertyResults,
     };
   }
 
-  const processStart = performance.now();
-  console.log("[PERF-API] Processing property results started");
   const processingResult = await processPropertyQueryResults({
     propertyResults,
     config: {
@@ -1327,15 +1026,6 @@ export const runPropertySelectionPipeline = async (
       processIndividual: propertyQueryService.processIndividual,
     },
   });
-  const processEnd = performance.now();
-  console.log(
-    "[PERF-API] Processing completed in",
-    processEnd - processStart,
-    "ms",
-    "(produced",
-    processingResult.rowsToProcess.length,
-    "rows)"
-  );
 
   abortHelpers.throwIfAborted(signal);
 
@@ -1421,3 +1111,5 @@ export const queryPropertiesInBuffer = async (
     throw new Error(parseArcGISError(error, "Buffer query failed"));
   }
 };
+
+export { isValidArcGISUrl };

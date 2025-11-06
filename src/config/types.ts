@@ -1,13 +1,13 @@
 import type {
-  ImmutableObject,
   DataSourceManager,
+  ImmutableArray,
+  ImmutableObject,
   IMState,
   UseDataSource,
-  ImmutableArray,
 } from "jimu-core";
 import type { ColumnDef, SortingState } from "@tanstack/react-table";
-import type { WidgetStyles } from "./style";
 import type { Immutable } from "seamless-immutable";
+import type { WidgetStyles } from "./style";
 
 export interface AttributeMap {
   [key: string]: unknown;
@@ -422,6 +422,43 @@ export interface CursorGraphicsState {
   lastTooltipText: string | null;
 }
 
+export interface HoverQueryConfig {
+  propertyDataSourceId: string;
+  ownerDataSourceId: string;
+  allowedHosts?: readonly string[];
+}
+
+export interface GeometryInput {
+  rings?: unknown;
+  paths?: unknown;
+  points?: unknown;
+  xmin?: unknown;
+  ymin?: unknown;
+  xmax?: unknown;
+  ymax?: unknown;
+  x?: unknown;
+  y?: unknown;
+  z?: unknown;
+}
+
+export interface ExportContent {
+  content: string;
+  mimeType: string;
+  extension: string;
+}
+
+export type GraphicWithAggregates = __esri.Graphic & {
+  aggregateGeometries?: unknown;
+};
+
+export interface ValidationPipelineExecutor<TContext> {
+  (context: TContext): ValidationResult<TContext>;
+  addStep: (
+    step: (context: TContext) => ValidationResult<TContext>
+  ) => ValidationPipelineExecutor<TContext>;
+  run: (context: TContext) => ValidationResult<TContext>;
+}
+
 export interface ProcessPropertyQueryParams {
   propertyResults: QueryResult[];
   config: {
@@ -708,4 +745,92 @@ export type PropertyAction =
       widgetId: string;
     };
 
+/**
+ * Redux dispatch function type
+ * Used in dispatcher to safely dispatch actions to Redux store
+ */
+export type DispatchFn = ((action: unknown) => void) | undefined;
+
+/**
+ * Property dispatcher interface
+ * Provides type-safe methods for dispatching property widget actions
+ * Created by createPropertyDispatcher factory function
+ */
+export interface PropertyDispatcher {
+  setError: (error: ErrorState | null) => void;
+  clearError: () => void;
+  setSelectedProperties: (properties: Iterable<GridRowData>) => void;
+  clearAll: () => void;
+  setQueryInFlight: (inFlight: boolean) => void;
+  setRawResults: (
+    results: { [key: string]: SerializedQueryResult } | null
+  ) => void;
+  removeWidgetState: () => void;
+}
+
+/**
+ * Error handler for serialization failures during export
+ * Receives error and type name for telemetry tracking
+ */
+export type SerializationErrorHandler = (
+  error: unknown,
+  typeName: string
+) => void;
+
 export type SeamlessImmutableFactory = <T>(input: T) => Immutable<T>;
+
+// =============================================================================
+// VALIDATION UTILITY TYPES
+// Helper types for validation result extraction
+// =============================================================================
+
+export type ValidationFailureResult<T> = Extract<
+  ValidationResult<T>,
+  { valid: false }
+>;
+
+export type HighlightSymbolJSON<T extends "polygon" | "polyline" | "point"> =
+  T extends "polygon"
+    ? __esri.SimpleFillSymbolProperties
+    : T extends "polyline"
+      ? __esri.SimpleLineSymbolProperties
+      : __esri.SimpleMarkerSymbolProperties;
+
+// =============================================================================
+// RUNTIME WIDGET TYPES
+// Types for clipboard, pipeline execution, and error boundaries
+// =============================================================================
+
+export interface ClipboardPayload {
+  text: string;
+  count: number;
+  isSorted: boolean;
+}
+
+export interface PipelineExecutionContext {
+  mapPoint: __esri.Point;
+  manager: DataSourceManager;
+  controller: AbortController;
+  isStaleRequest: () => boolean;
+  selectionForPipeline: GridRowData[];
+}
+
+export type PipelineRunResult =
+  | { status: "stale" }
+  | { status: "aborted" }
+  | { status: "empty" }
+  | { status: "success"; pipelineResult: PropertyPipelineSuccess };
+
+export type PropertyPipelineSuccess = Extract<
+  PropertySelectionPipelineResult,
+  { status: "success" }
+>;
+
+// =============================================================================
+// STORE EXTENSION TYPES
+// Types for Redux store state manipulation
+// =============================================================================
+
+export interface PropertySubStateMap {
+  [key: string]: ImmutableObject<PropertyWidgetState>;
+}

@@ -29,6 +29,7 @@ export const DEFAULT_MAX_RESULTS = 100;
 export const OWNER_QUERY_CONCURRENCY = 20;
 
 export const HIGHLIGHT_MARKER_SIZE = 12;
+export const SYMBOL_CACHE_MAX_SIZE = 100;
 
 export const CURSOR_TOOLTIP_STYLE = {
   textColor: "#000000",
@@ -50,9 +51,6 @@ export const ABORT_CONTROLLER_POOL_SIZE = 5;
 
 // Debounce duration for loading indicator visibility to prevent flicker
 export const LOADING_VISIBILITY_DEBOUNCE_MS = 200;
-
-// Pixel tolerance for hover queries to improve usability
-export const HOVER_QUERY_TOLERANCE_PX = 10;
 
 export const EXPORT_FORMATS: ExportFormatDefinition[] = [
   {
@@ -82,7 +80,7 @@ export const EXPORT_FORMATS: ExportFormatDefinition[] = [
 export const HEX_COLOR_PATTERN = /^#?([0-9a-fA-F]{6})$/;
 
 // Query cache settings
-export const QUERY_CACHE_MAX_SIZE = 100;
+export const QUERY_CACHE_MAX_SIZE = 50;
 export const QUERY_CACHE_EVICTION_PERCENTAGE = 0.2;
 
 // CSV export settings
@@ -95,5 +93,47 @@ export const CSV_HEADERS = [
   "ADDRESS",
 ] as const;
 
-// Hover query settings
-export const HOVER_QUERY_THROTTLE_MS = 50;
+// Redux store action types
+export const PROPERTY_ACTION_TYPES = [
+  "PROPERTY_WIDGET/SET_ERROR",
+  "PROPERTY_WIDGET/CLEAR_ERROR",
+  "PROPERTY_WIDGET/SET_SELECTED_PROPERTIES",
+  "PROPERTY_WIDGET/CLEAR_ALL",
+  "PROPERTY_WIDGET/SET_QUERY_IN_FLIGHT",
+  "PROPERTY_WIDGET/SET_RAW_RESULTS",
+  "PROPERTY_WIDGET/REMOVE_WIDGET_STATE",
+] as const;
+
+// HTML sanitization patterns
+export const HTML_WHITESPACE_PATTERN = /[\s\u00A0\u200B]+/g;
+
+// Sorting and comparison options
+export const SORT_COMPARE_OPTIONS: Intl.CollatorOptions = {
+  numeric: true,
+  sensitivity: "base",
+} as const;
+
+// Privacy: Owner identity key prefixes for deduplication
+export const IDENTITY_KEY_PREFIXES = {
+  OWNER_LIST: "A",
+  NAME: "N",
+  ADDRESS: "B",
+  POSTAL_CODE: "P",
+  CITY: "C",
+  ORG_NUMBER: "O",
+  SHARE: "S",
+  PROPERTY: "PR",
+  FNR: "FN",
+  OBJECT_ID: "OB",
+  UUID: "UU",
+  INDEX: "IX",
+} as const;
+
+// Privacy: Character codes and defaults
+export const SPACE_CHAR_CODE = 32;
+export const DEFAULT_MASK = "***";
+
+// Validation: Network security patterns
+export const LOCALHOST_PATTERNS = ["localhost", "127.0.0.1", "::1", "[::1]"];
+export const PRIVATE_IP_REGEX =
+  /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[0-1])\.)/u;

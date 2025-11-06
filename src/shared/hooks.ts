@@ -1,27 +1,29 @@
-import { React, hooks } from "jimu-core";
+import { hooks, React, type DataSourceManager } from "jimu-core";
 import { loadArcGISJSAPIModules } from "jimu-arcgis";
 import type { JimuMapView } from "jimu-arcgis";
+import {
+  ABORT_CONTROLLER_POOL_SIZE,
+  ESRI_MODULES_TO_LOAD,
+} from "../config/constants";
 import type {
   AttributeMap,
-  EsriModules,
-  HoverQueryParams,
-  DebouncedFn,
-  FnrValue,
   ConfigDictionary,
-  ConfigWithSet,
   ConfigUpdater,
+  ConfigWithSet,
+  DebouncedFn,
+  EsriModules,
   EsriStubGlobal,
+  FnrValue,
 } from "../config/types";
+import { queryPropertyByPoint } from "./api";
 import {
-  ESRI_MODULES_TO_LOAD,
-  ABORT_CONTROLLER_POOL_SIZE,
-} from "../config/constants";
-import {
-  popupSuppressionManager,
-  buildHighlightSymbolJSON,
+  batchGraphicsRenderer,
+  createSymbolCache,
   isAbortError,
   logger,
-} from "./utils";
+  popupSuppressionManager,
+  validateNumericRange,
+} from "./utils/index";
 
 const isConfigDictionary = (value: unknown): value is ConfigDictionary => {
   return typeof value === "object" && value !== null;
@@ -199,6 +201,7 @@ export const useGraphicsLayer = (
   const graphicsMapRef = React.useRef<Map<string | number, __esri.Graphic[]>>(
     new Map()
   );
+  const symbolCacheRef = React.useRef(createSymbolCache());
 
   const ensureGraphicsLayer = hooks.useEventCallback(
     (view: __esri.MapView | null | undefined): boolean => {
@@ -254,6 +257,7 @@ export const useGraphicsLayer = (
       graphicsLayerRef.current.removeAll();
     }
     graphicsMapRef.current.clear();
+    symbolCacheRef.current.clear();
   });
 
   const removeGraphicsForFnr = hooks.useEventCallback(
@@ -271,59 +275,6 @@ export const useGraphicsLayer = (
       }
     }
   );
-
-  const createHighlightSymbol = (
-    graphic: __esri.Graphic | null | undefined,
-    highlightColor: [number, number, number, number],
-    outlineWidth: number
-  ):
-    | __esri.SimpleFillSymbol
-    | __esri.SimpleLineSymbol
-    | __esri.SimpleMarkerSymbol
-    | null => {
-    const currentModules = modulesRef.current;
-    if (!currentModules || !graphic) return null;
-
-    const geometry = graphic.geometry;
-    if (!geometry) return null;
-
-    const geometryType = geometry.type;
-
-    if (geometryType === "polygon" || geometryType === "extent") {
-      const symbolJSON = buildHighlightSymbolJSON(
-        highlightColor,
-        outlineWidth,
-        "polygon"
-      );
-      return new currentModules.SimpleFillSymbol(
-        symbolJSON as __esri.SimpleFillSymbolProperties
-      );
-    }
-
-    if (geometryType === "polyline") {
-      const symbolJSON = buildHighlightSymbolJSON(
-        highlightColor,
-        outlineWidth,
-        "polyline"
-      );
-      return new currentModules.SimpleLineSymbol(
-        symbolJSON as __esri.SimpleLineSymbolProperties
-      );
-    }
-
-    if (geometryType === "point" || geometryType === "multipoint") {
-      const symbolJSON = buildHighlightSymbolJSON(
-        highlightColor,
-        outlineWidth,
-        "point"
-      );
-      return new currentModules.SimpleMarkerSymbol(
-        symbolJSON as __esri.SimpleMarkerSymbolProperties
-      );
-    }
-    // Unsupported geometry type
-    return null;
-  };
 
   const addGraphicsToMap = hooks.useEventCallback(
     (
@@ -343,11 +294,12 @@ export const useGraphicsLayer = (
 
       const attributes = (graphic.attributes ?? null) as AttributeMap | null;
       const fnr = extractFnr(attributes);
-      const symbol = createHighlightSymbol(
+      const symbol = symbolCacheRef.current.getSymbolForGraphic({
+        modules: currentModules,
         graphic,
         highlightColor,
-        outlineWidth
-      );
+        outlineWidth,
+      });
       if (!symbol) return;
 
       // Create a new graphic with the highlight symbol
@@ -403,11 +355,12 @@ export const useGraphicsLayer = (
           return;
         }
 
-        const symbol = createHighlightSymbol(
+        const symbol = symbolCacheRef.current.getSymbolForGraphic({
+          modules: currentModules,
           graphic,
           highlightColor,
-          outlineWidth
-        );
+          outlineWidth,
+        });
         if (!symbol) return;
 
         const highlightGraphic = new currentModules.Graphic({
@@ -430,12 +383,11 @@ export const useGraphicsLayer = (
         }
       });
 
-      // Use layer.addMany() for batch addition (single DOM update)
       if (highlightGraphics.length > 0) {
-        requestAnimationFrame(() => {
-          if (layer && !layer.destroyed) {
-            layer.addMany(highlightGraphics);
-          }
+        batchGraphicsRenderer({
+          layer,
+          graphics: highlightGraphics,
+          chunkSize: 10,
         });
       }
     }
@@ -460,6 +412,7 @@ export const useGraphicsLayer = (
       graphicsLayerRef.current = null;
     }
     graphicsMapRef.current.clear();
+    symbolCacheRef.current.clear();
   });
 
   return {
@@ -837,7 +790,6 @@ export const useNumericValidator = (
   ) => void
 ) => {
   return hooks.useEventCallback((value: string): boolean => {
-    const { validateNumericRange } = require("./utils");
     const result = validateNumericRange({ value, min, max, errorMessage });
     setFieldErrors((prev) => ({
       ...prev,
@@ -852,11 +804,23 @@ export const useThrottle = <T extends (...args: unknown[]) => void>(
   delay: number
 ): ((...args: Parameters<T>) => void) => {
   const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0;
+  const callbackRef = hooks.useLatest(callback);
+
+  // If delay is 0, return unthrottled callback for instant execution
+  const unthrottled = hooks.useEventCallback((...args: Parameters<T>) => {
+    try {
+      callbackRef.current(...args);
+    } catch (error) {
+      if (!isAbortError(error)) {
+        console.error("Unthrottled function error:", error);
+      }
+    }
+  });
+
   const lastCallTimeRef = React.useRef<number>(0);
   const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingArgsRef = React.useRef<Parameters<T> | null>(null);
   const mountedRef = React.useRef(true);
-  const callbackRef = hooks.useLatest(callback);
 
   const execute = hooks.useEventCallback((args: Parameters<T>) => {
     if (!mountedRef.current) return;
@@ -903,7 +867,7 @@ export const useThrottle = <T extends (...args: unknown[]) => void>(
     };
   });
 
-  return throttled;
+  return safeDelay === 0 ? unthrottled : throttled;
 };
 
 export const useDebounce = <T extends (...args: unknown[]) => void>(
@@ -912,10 +876,28 @@ export const useDebounce = <T extends (...args: unknown[]) => void>(
   options?: { onPendingChange?: (pending: boolean) => void }
 ): DebouncedFn<T> => {
   const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0;
+  const callbackRef = hooks.useLatest(callback);
+
+  // If delay is 0, return undebounced callback for instant execution
+  const undebounced = hooks.useEventCallback((...args: Parameters<T>) => {
+    try {
+      callbackRef.current(...args);
+    } catch (error) {
+      logger.debug("Undebounced function error:", { error });
+    }
+  });
+
+  const undebouncedWithCancel = React.useMemo(() => {
+    const fn = undebounced as DebouncedFn<T>;
+    fn.cancel = () => {
+      // No-op cancel for instant execution
+    };
+    return fn;
+  }, [undebounced]);
+
   const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = React.useRef(false);
   const mountedRef = React.useRef(true);
-  const callbackRef = hooks.useLatest(callback);
   const optionsRef = hooks.useLatest(options);
 
   const notifyPending = hooks.useEventCallback((next: boolean) => {
@@ -977,70 +959,114 @@ export const useDebounce = <T extends (...args: unknown[]) => void>(
     };
   });
 
-  return debouncedRef.current;
+  return safeDelay === 0 ? undebouncedWithCancel : debouncedRef.current;
 };
 
-export const useHoverQuery = (params: HoverQueryParams) => {
-  const { config, dsManager, enablePIIMasking, translate } = params;
+/**
+ * Hook for hover query functionality using point-buffer spatial queries.
+ * Queries property data when user hovers over the map.
+ */
+export const useHitTestHover = (params: {
+  dataSourceId: string | undefined;
+  dsManagerRef: React.MutableRefObject<DataSourceManager | null>;
+  viewRef: React.MutableRefObject<__esri.MapView | null>;
+  enablePIIMasking: boolean;
+  translate: (key: string, fallback?: string) => string;
+}) => {
   const [hoverTooltipData, setHoverTooltipData] = React.useState<{
     fastighet: string;
     bostadr: string;
   } | null>(null);
-  const [isHoverQueryActive, setIsHoverQueryActive] = React.useState(false);
-  const hoverQueryAbortRef = React.useRef<AbortController | null>(null);
+
+  const [hasCompletedFirstHitTest, setHasCompletedFirstHitTest] =
+    React.useState(false);
+
+  const [isQuerying, setIsQuerying] = React.useState(false);
+
+  const abortControllerRef = React.useRef<AbortController | null>(null);
   const lastHoverQueryPointRef = React.useRef<{ x: number; y: number } | null>(
     null
   );
 
-  const queryPropertyAtPoint = hooks.useEventCallback(
-    async (mapPoint: __esri.Point) => {
-      if (hoverQueryAbortRef.current) {
-        hoverQueryAbortRef.current.abort();
-        hoverQueryAbortRef.current = null;
+  const performHitTest = hooks.useEventCallback(
+    async (event: __esri.ViewPointerMoveEvent) => {
+      // Abort previous query
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
+      const view = params.viewRef.current;
+      const dsManager = params.dsManagerRef.current;
+      const dataSourceId = params.dataSourceId;
+
+      if (!view || !dsManager || !dataSourceId) {
+        setHoverTooltipData(null);
+        setIsQuerying(false);
+        return;
+      }
+
+      const mapPoint = view.toMap({ x: event.x, y: event.y });
+      if (!mapPoint) {
+        setHoverTooltipData(null);
+        setIsQuerying(false);
+        return;
       }
 
       const controller = new AbortController();
-      hoverQueryAbortRef.current = controller;
+      abortControllerRef.current = controller;
+      lastHoverQueryPointRef.current = { x: event.x, y: event.y };
+      setIsQuerying(true);
 
-      setIsHoverQueryActive(true);
       try {
-        const { executeHoverQuery } = require("./utils");
-        const result = await executeHoverQuery({
+        // Query properties at the point location
+        const results = await queryPropertyByPoint(
           mapPoint,
-          config: {
-            propertyDataSourceId: config.propertyDataSourceId,
-            ownerDataSourceId: config.ownerDataSourceId,
-            allowedHosts: config.allowedHosts,
-          },
+          dataSourceId,
           dsManager,
-          signal: controller.signal,
-          enablePIIMasking,
-          translate,
-        });
+          { signal: controller.signal }
+        );
 
-        if (controller.signal.aborted) return;
-
-        setHoverTooltipData(result);
-        setIsHoverQueryActive(false);
-      } catch (error) {
-        if (isAbortError(error)) return;
-        setHoverTooltipData(null);
-        setIsHoverQueryActive(false);
-      } finally {
-        if (hoverQueryAbortRef.current === controller) {
-          hoverQueryAbortRef.current = null;
+        // Check if query was aborted
+        if (controller.signal.aborted) {
+          return;
         }
+
+        setIsQuerying(false);
+
+        if (results && results.length > 0) {
+          const result = results[0];
+          const feature = result.features[0];
+          if (feature?.attributes) {
+            const fastighet = String(feature.attributes.FASTIGHET || "");
+            const bostadr = String(feature.attributes.BOSTADR || "");
+            setHoverTooltipData({ fastighet, bostadr });
+          } else {
+            setHoverTooltipData(null);
+          }
+        } else {
+          setHoverTooltipData(null);
+        }
+
+        if (!hasCompletedFirstHitTest) {
+          setHasCompletedFirstHitTest(true);
+        }
+      } catch (error) {
+        setIsQuerying(false);
+        if (!isAbortError(error)) {
+          logger.error("hover_query_error", error);
+        }
+        // Don't clear hoverTooltipData on error - keep previous value
       }
     }
   );
 
   const cleanup = hooks.useEventCallback(() => {
-    if (hoverQueryAbortRef.current) {
-      hoverQueryAbortRef.current.abort();
-      hoverQueryAbortRef.current = null;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
     setHoverTooltipData(null);
-    setIsHoverQueryActive(false);
+    setIsQuerying(false);
     lastHoverQueryPointRef.current = null;
   });
 
@@ -1050,9 +1076,10 @@ export const useHoverQuery = (params: HoverQueryParams) => {
 
   return {
     hoverTooltipData,
-    isHoverQueryActive,
-    queryPropertyAtPoint,
+    isQuerying,
+    performHitTest,
     lastHoverQueryPointRef,
     cleanup,
+    hasCompletedFirstHitTest,
   };
 };

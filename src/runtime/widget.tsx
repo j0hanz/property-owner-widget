@@ -1,19 +1,19 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import {
-  React,
-  jsx,
-  hooks,
   type AllWidgetProps,
-  DataSourceManager,
-  DataSourceComponent,
-  ReactRedux,
-  type IMState,
-  WidgetState,
   appActions,
+  DataSourceComponent,
+  DataSourceManager,
   getAppStore,
-  type UseDataSource,
+  hooks,
   type ImmutableObject,
+  type IMState,
+  jsx,
+  React,
+  ReactRedux,
+  type UseDataSource,
+  WidgetState,
 } from "jimu-core";
 import { JimuMapViewComponent } from "jimu-arcgis";
 import {
@@ -23,87 +23,89 @@ import {
   DropdownButton,
   DropdownItem,
   DropdownMenu,
+  defaultMessages as jimuUIMessages,
   Loading,
   LoadingType,
   SVG,
-  defaultMessages as jimuUIMessages,
 } from "jimu-ui";
-import { PropertyTable } from "./components/table";
+import type { ColumnDef, SortingState } from "@tanstack/react-table";
+import { CURSOR_TOOLTIP_STYLE, EXPORT_FORMATS } from "../config/constants";
+import { ErrorType } from "../config/enums";
+import { useWidgetStyles } from "../config/style";
+import type {
+  ErrorBoundaryProps,
+  ErrorState,
+  ExportFormat,
+  GridRowData,
+  IMConfig,
+  IMStateWithProperty,
+  PipelineExecutionContext,
+  PipelineRunResult,
+  PropertyPipelineSuccess,
+  SelectionGraphicsHelpers,
+  SelectionGraphicsParams,
+  SerializedQueryResult,
+  SerializedQueryResultMap,
+} from "../config/types";
+import { createPropertySelectors } from "../extensions/store";
+import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api";
 import {
   createPropertyTableColumns,
   getDefaultSorting,
 } from "../shared/config";
-import defaultMessages from "./translations/default";
-import type { ColumnDef, SortingState } from "@tanstack/react-table";
-import type {
-  IMConfig,
-  ErrorBoundaryProps,
-  GridRowData,
-  SelectionGraphicsParams,
-  SelectionGraphicsHelpers,
-  ExportFormat,
-  SerializedQueryResult,
-  SerializedQueryResultMap,
-  ErrorState,
-  IMStateWithProperty,
-} from "../config/types";
-import { ErrorType } from "../config/enums";
-import { useWidgetStyles } from "../config/style";
 import {
-  useEsriModules,
-  useGraphicsLayer,
-  usePopupManager,
-  useMapViewLifecycle,
   useAbortControllerPool,
   useDebounce,
+  useEsriModules,
+  useGraphicsLayer,
+  useHitTestHover,
+  useMapViewLifecycle,
+  usePopupManager,
   useThrottle,
-  useHoverQuery,
 } from "../shared/hooks";
-import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api";
 import {
-  formatOwnerInfo,
-  formatPropertiesForClipboard,
-  extractFnr,
-  isAbortError,
-  normalizeFnrKey,
-  validateMapClickPipeline,
-  syncGraphicsWithState,
-  cleanupRemovedGraphics,
-  isValidationFailure,
-  buildHighlightColor,
-  computeWidgetsToClose,
-  applySortingToProperties,
-  dataSourceHelpers,
-  getValidatedOutlineWidth,
-  updateRawPropertyResults,
-  logger,
-  syncCursorGraphics,
-  abortHelpers,
-  shouldSkipHoverQuery,
-  updateGraphicSymbol,
-  createPropertyDispatcher,
-  cursorLifecycleHelpers,
-  copyToClipboard,
-} from "../shared/utils";
-import { createPropertySelectors } from "../extensions/store";
-import type { CursorGraphicsState } from "../shared/utils";
-import {
-  EXPORT_FORMATS,
-  CURSOR_TOOLTIP_STYLE,
-  HOVER_QUERY_TOLERANCE_PX,
-} from "../config/constants";
-import {
-  trackEvent,
-  trackError,
-  trackFeatureUsage,
   createPerformanceTracker,
+  trackError,
+  trackEvent,
+  trackFeatureUsage,
 } from "../shared/telemetry";
+import {
+  abortHelpers,
+  buildClipboardPayload,
+  buildHighlightColor,
+  buildResultsMap,
+  collectSelectedRawData,
+  computeWidgetsToClose,
+  copyToClipboard,
+  createPropertyDispatcher,
+  type CursorGraphicsState,
+  cursorLifecycleHelpers,
+  dataSourceHelpers,
+  executePropertyQueryPipeline,
+  exportData,
+  extractFnr,
+  formatOwnerInfo,
+  getValidatedOutlineWidth,
+  isAbortError,
+  isValidationFailure,
+  logger,
+  normalizeFnrKey,
+  notifyCopyOutcome,
+  readAppWidgetsFromState,
+  scheduleGraphicsRendering,
+  syncCursorGraphics,
+  syncGraphicsWithState,
+  updateGraphicSymbol,
+  updatePropertySelectionState,
+  validateMapClickRequest,
+} from "../shared/utils/index";
+import { PropertyTable } from "./components/table";
+import defaultMessages from "./translations/default";
 import clearIcon from "../assets/clear-selection-general.svg";
 import setupIcon from "../assets/config-missing.svg";
-import mapSelect from "../assets/map-select.svg";
-import exportIcon from "../assets/export.svg";
 import copyButton from "../assets/copy.svg";
-import { exportData } from "../shared/export";
+import exportIcon from "../assets/export.svg";
+import mapSelect from "../assets/map-select.svg";
 
 const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   const {
@@ -128,6 +130,29 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
     highlightColor,
     outlineWidth,
   });
+};
+
+const resolveWidgetId = (props: AllWidgetProps<IMConfig>): string => {
+  const widgetIdProp = (props as unknown as { widgetId?: string }).widgetId;
+  const fallbackId = props.id as unknown as string;
+  if (typeof widgetIdProp === "string" && widgetIdProp.length > 0) {
+    return widgetIdProp;
+  }
+  return fallbackId ?? fallbackId;
+};
+
+const usePropertySelectors = (widgetId: string) => {
+  const selectorsRef = React.useRef(createPropertySelectors(widgetId));
+  const previousWidgetId = hooks.usePrevious(widgetId);
+
+  if (
+    !selectorsRef.current ||
+    (previousWidgetId && previousWidgetId !== widgetId)
+  ) {
+    selectorsRef.current = createPropertySelectors(widgetId);
+  }
+
+  return selectorsRef.current;
 };
 
 // Error boundaries require class components in React (no functional equivalent)
@@ -175,49 +200,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const styles = useWidgetStyles();
   const translate = hooks.useTranslation(jimuUIMessages, defaultMessages);
 
-  const widgetIdProp = (props as unknown as { widgetId?: string }).widgetId;
-  const widgetId =
-    (typeof widgetIdProp === "string" && widgetIdProp.length > 0
-      ? widgetIdProp
-      : (id as unknown as string)) ?? (id as unknown as string);
-
-  const selectorsRef = React.useRef(createPropertySelectors(widgetId));
-  const previousWidgetId = hooks.usePrevious(widgetId);
-  if (
-    !selectorsRef.current ||
-    (previousWidgetId && previousWidgetId !== widgetId)
-  ) {
-    selectorsRef.current = createPropertySelectors(widgetId);
-  }
-  const selectors = selectorsRef.current;
-
-  const ensureImmutableUseDataSource = (
-    candidate: ReturnType<typeof dataSourceHelpers.findById>
-  ): ImmutableObject<UseDataSource> | null => {
-    if (!candidate) {
-      return null;
-    }
-
-    const mutableCandidate = candidate as {
-      asMutable?: (options?: { deep?: boolean }) => unknown;
-    };
-
-    if (typeof mutableCandidate.asMutable === "function") {
-      return candidate as ImmutableObject<UseDataSource>;
-    }
-
-    return null;
-  };
-
-  const isSerializedResultRecord = (
-    value: unknown
-  ): value is SerializedQueryResultMap => {
-    if (!value || typeof value !== "object") {
-      return false;
-    }
-
-    return !(value instanceof Map);
-  };
+  const widgetId = resolveWidgetId(props);
+  const selectors = usePropertySelectors(widgetId);
 
   const runtimeState = ReactRedux.useSelector((state: IMState) => {
     const widgetInfo = state.widgetsRuntimeInfo?.[widgetId];
@@ -278,24 +262,220 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     );
   }, [props.dispatch, widgetId]);
 
+  // Latest value refs: Provide current values to callbacks without triggering re-renders
   const selectedPropertiesRef =
     hooks.useLatest<GridRowData[]>(selectedProperties);
   const rawPropertyResultsRef =
     hooks.useLatest<SerializedQueryResultMap | null>(rawPropertyResults);
 
+  const prepareQueryExecution = hooks.useEventCallback(
+    (
+      event: __esri.ViewClickEvent,
+      tracker: ReturnType<typeof createPerformanceTracker>
+    ): PipelineExecutionContext | null => {
+      const validation = validateMapClickRequest({
+        event,
+        modules,
+        config,
+        dsManager: dsManagerRef.current,
+        translate,
+      });
+
+      if (isValidationFailure(validation)) {
+        const { error, failureReason } = validation;
+        setError(error.type as ErrorType, error.message);
+        tracker.failure(failureReason);
+        trackError("map_click_validation", failureReason);
+        return null;
+      }
+
+      const { mapPoint, manager } = validation.data;
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+      const isStaleRequest = () => requestId !== requestIdRef.current;
+
+      propertyDispatchRef.current.clearError();
+      propertyDispatchRef.current.setQueryInFlight(true);
+
+      const currentSelection = selectedPropertiesRef.current ?? [];
+      const selectionForPipeline = [...currentSelection];
+
+      const controller = getController();
+
+      return {
+        mapPoint,
+        manager,
+        controller,
+        isStaleRequest,
+        selectionForPipeline,
+      };
+    }
+  );
+
+  const runSelectionPipeline = hooks.useEventCallback(
+    async (params: {
+      context: PipelineExecutionContext;
+      perfStart: number;
+    }): Promise<PipelineRunResult> => {
+      const { context } = params;
+
+      const pipelineResult = await executePropertyQueryPipeline({
+        mapPoint: context.mapPoint,
+        config,
+        dsManager: context.manager,
+        maxResults,
+        toggleEnabled,
+        enablePIIMasking: piiMaskingEnabled,
+        selectedProperties: context.selectionForPipeline,
+        signal: context.controller.signal,
+        translate,
+        runPipeline: runPropertySelectionPipeline,
+      });
+
+      const abortStatus = abortHelpers.checkAbortedOrStale(
+        context.controller.signal,
+        context.isStaleRequest
+      );
+
+      if (abortStatus === "stale") {
+        return { status: "stale" };
+      }
+
+      if (abortStatus === "aborted") {
+        return { status: "aborted" };
+      }
+
+      if (pipelineResult.status === "empty") {
+        return { status: "empty" };
+      }
+
+      return {
+        status: "success",
+        pipelineResult,
+      };
+    }
+  );
+
+  const finalizeSelection = hooks.useEventCallback(
+    (params: {
+      pipelineResult: PropertyPipelineSuccess;
+      context: PipelineExecutionContext;
+      perfStart: number;
+    }): number => {
+      const { pipelineResult, context } = params;
+
+      const removedRows = context.selectionForPipeline.filter((row) =>
+        pipelineResult.toRemove.has(normalizeFnrKey(row.FNR))
+      );
+
+      if (removedRows.length > 0) {
+        trackEvent({
+          category: "Property",
+          action: "toggle_remove",
+          value: removedRows.length,
+        });
+      }
+
+      if (context.isStaleRequest()) {
+        return pipelineResult.rowsToProcess.length;
+      }
+
+      const stateUpdate = updatePropertySelectionState({
+        pipelineResult,
+        previousRawResults: rawPropertyResultsRef.current,
+        selectedProperties: context.selectionForPipeline,
+        dispatch: propertyDispatchRef.current,
+        removeGraphicsForFnr,
+        normalizeFnrKey,
+        highlightColorConfig,
+        highlightOpacityConfig,
+        outlineWidthConfig,
+      });
+
+      rawPropertyResultsRef.current = stateUpdate.resultsToStore;
+
+      const graphicsHelpers = {
+        addGraphicsToMap,
+        addManyGraphicsToMap,
+        extractFnr,
+        normalizeFnrKey,
+      } satisfies SelectionGraphicsHelpers;
+
+      scheduleGraphicsRendering({
+        pipelineResult,
+        highlightColor: stateUpdate.highlightColor,
+        outlineWidth: stateUpdate.outlineWidth,
+        graphicsHelpers,
+        getCurrentView,
+        isStaleRequest: context.isStaleRequest,
+        syncFn: syncSelectionGraphics,
+      });
+
+      return pipelineResult.rowsToProcess.length;
+    }
+  );
+
+  const handleSelectionError = hooks.useEventCallback(
+    (
+      error: unknown,
+      tracker: ReturnType<typeof createPerformanceTracker>,
+      context: PipelineExecutionContext
+    ) => {
+      if (context.isStaleRequest()) {
+        return;
+      }
+
+      if (isAbortError(error)) {
+        tracker.failure("aborted");
+        propertyDispatchRef.current.setQueryInFlight(false);
+        return;
+      }
+
+      logger.error("Property query error:", error, {
+        message: error instanceof Error ? error.message : undefined,
+        stack: error instanceof Error ? error.stack : undefined,
+        propertyDsId: config.propertyDataSourceId,
+        ownerDsId: config.ownerDataSourceId,
+      });
+      setError(ErrorType.QUERY_ERROR, translate("errorQueryFailed"));
+      tracker.failure("query_error");
+      propertyDispatchRef.current.setQueryInFlight(false);
+      trackError("property_query", error);
+    }
+  );
+
   hooks.useEffectOnce(() => {
     // Widget mounted
   });
 
-  const propertyUseDataSource = ensureImmutableUseDataSource(
-    dataSourceHelpers.findById(
+  const propertyUseDataSource = (() => {
+    const candidate = dataSourceHelpers.findById(
       props.useDataSources,
       config.propertyDataSourceId
-    )
-  );
-  const ownerUseDataSource = ensureImmutableUseDataSource(
-    dataSourceHelpers.findById(props.useDataSources, config.ownerDataSourceId)
-  );
+    );
+    if (!candidate) return null;
+    const mutableCandidate = candidate as {
+      asMutable?: (options?: { deep?: boolean }) => unknown;
+    };
+    if (typeof mutableCandidate.asMutable === "function") {
+      return candidate as ImmutableObject<UseDataSource>;
+    }
+    return null;
+  })();
+  const ownerUseDataSource = (() => {
+    const candidate = dataSourceHelpers.findById(
+      props.useDataSources,
+      config.ownerDataSourceId
+    );
+    if (!candidate) return null;
+    const mutableCandidate = candidate as {
+      asMutable?: (options?: { deep?: boolean }) => unknown;
+    };
+    if (typeof mutableCandidate.asMutable === "function") {
+      return candidate as ImmutableObject<UseDataSource>;
+    }
+    return null;
+  })();
   const propertyUseDataSourceId = dataSourceHelpers.extractId(
     propertyUseDataSource
   );
@@ -318,11 +498,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const { getController, releaseController, abortAll } =
     useAbortControllerPool();
 
+  // ArcGIS resource refs: Singleton manager and query tracking
   const dsManagerRef = React.useRef<DataSourceManager | null>(null);
   if (!dsManagerRef.current) {
     dsManagerRef.current = DataSourceManager.getInstance();
   }
-  const requestIdRef = React.useRef(0);
+  const requestIdRef = React.useRef(0); // Increments for each query to detect stale requests
 
   const resetSelectionState = hooks.useEventCallback(
     (shouldTrackClear: boolean) => {
@@ -400,41 +581,35 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const highlightOpacityConfig = config.highlightOpacity;
   const outlineWidthConfig = config.outlineWidth;
 
-  // Hover query hook
+  // View ref for hover queries
+  const currentViewRef = React.useRef<__esri.MapView | null>(null);
+
+  // Hover hitTest hook (client-side, instant)
   const {
     hoverTooltipData,
-    isHoverQueryActive,
-    queryPropertyAtPoint,
+    isQuerying,
+    performHitTest,
     lastHoverQueryPointRef,
     cleanup: cleanupHoverQuery,
-  } = useHoverQuery({
-    config: {
-      propertyDataSourceId: config.propertyDataSourceId,
-      ownerDataSourceId: config.ownerDataSourceId,
-      allowedHosts: config.allowedHosts,
-    },
-    dsManager: dsManagerRef.current,
+    hasCompletedFirstHitTest,
+  } = useHitTestHover({
+    dataSourceId: config.propertyDataSourceId,
+    dsManagerRef: dsManagerRef,
+    viewRef: currentViewRef,
     enablePIIMasking: piiMaskingEnabled,
     translate,
   });
 
-  // Throttled hover query with spatial tolerance
-  const throttledHoverQuery = useThrottle(
-    (mapPoint: __esri.Point, screenPoint: { x: number; y: number }) => {
-      if (
-        shouldSkipHoverQuery(
-          screenPoint,
-          lastHoverQueryPointRef.current,
-          HOVER_QUERY_TOLERANCE_PX
-        )
-      ) {
-        return;
-      }
-      lastHoverQueryPointRef.current = screenPoint;
-      queryPropertyAtPoint(mapPoint);
-    },
-    100
-  );
+  // Use ref to avoid closure capture issues
+  const hoverTooltipDataRef = hooks.useLatest(hoverTooltipData);
+  const isQueryingRef = hooks.useLatest(isQuerying);
+  const hasCompletedFirstQueryRef = hooks.useLatest(hasCompletedFirstHitTest);
+
+  // Throttled hitTest function (50ms is standard for pointer-move)
+  const throttledHitTest = useThrottle((event: __esri.ViewPointerMoveEvent) => {
+    lastHoverQueryPointRef.current = { x: event.x, y: event.y };
+    performHitTest(event);
+  }, 50);
 
   hooks.useUpdateEffect(() => {
     const currentSelection = selectedPropertiesRef.current ?? [];
@@ -538,55 +713,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         }
       | undefined;
 
-    const appWidgets = (() => {
-      if (!state || typeof state !== "object") {
-        return null;
-      }
-
-      const baseState = state as {
-        appConfig?: unknown;
-        get?: (key: string) => unknown;
-      };
-
-      const readWidgets = (candidate: unknown): unknown => {
-        if (!candidate || typeof candidate !== "object") {
-          return null;
-        }
-
-        const source = candidate as {
-          widgets?: unknown;
-          get?: (key: string) => unknown;
-        };
-
-        if (typeof source.get === "function") {
-          const viaGetter = source.get("widgets");
-          if (viaGetter !== undefined) {
-            return viaGetter;
-          }
-        }
-
-        if ("widgets" in source) {
-          return source.widgets ?? null;
-        }
-
-        return null;
-      };
-
-      const directWidgets = readWidgets(baseState.appConfig);
-      if (directWidgets !== null) {
-        return directWidgets;
-      }
-
-      if (typeof baseState.get === "function") {
-        const configViaGetter = baseState.get("appConfig");
-        const widgetsFromGetter = readWidgets(configViaGetter);
-        if (widgetsFromGetter !== null) {
-          return widgetsFromGetter;
-        }
-      }
-
-      return null;
-    })();
+    const appWidgets = readAppWidgetsFromState(state);
     const targets = computeWidgetsToClose(runtimeInfo, widgetId, appWidgets);
     if (targets.length === 0) return;
 
@@ -606,90 +733,36 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   });
 
   const handleExport = hooks.useEventCallback((format: ExportFormat) => {
-    console.log("[Export] Starting export:", {
-      format,
-      hasSelectedProperties,
-      rawPropertyResults,
-    });
+    if (!hasSelectedProperties) return;
 
-    if (!hasSelectedProperties) {
-      console.log("[Export] No selected properties, aborting");
-      return;
-    }
+    const resultsMap = buildResultsMap(rawPropertyResults);
+    if (!resultsMap || resultsMap.size === 0) return;
 
-    if (!rawPropertyResults) {
-      console.log("[Export] No raw results available, aborting");
-      return;
-    }
-
-    // Convert rawPropertyResults to Map for consistent access
-    let resultsMap: Map<string, SerializedQueryResult>;
-    if (rawPropertyResults instanceof Map) {
-      resultsMap = rawPropertyResults;
-    } else if (isSerializedResultRecord(rawPropertyResults)) {
-      // Handle Redux immutable object or plain object
-      resultsMap = new Map();
-      Object.keys(rawPropertyResults).forEach((key) => {
-        const value = rawPropertyResults[key];
-        if (value !== null && value !== undefined) {
-          resultsMap.set(key, value);
-        }
-      });
-    } else {
-      console.log(
-        "[Export] Invalid rawPropertyResults type:",
-        typeof rawPropertyResults
-      );
-      return;
-    }
-
-    console.log("[Export] Results map size:", resultsMap.size);
-    if (resultsMap.size === 0) {
-      console.log("[Export] Results map is empty, aborting");
-      return;
-    }
-
-    const selectedRawData: SerializedQueryResult[] = [];
-    selectedProperties.forEach((row) => {
-      const rawData = resultsMap.get(row.id);
-      console.log("[Export] Looking up row:", row.id, "Found:", !!rawData);
-      if (rawData) selectedRawData.push(rawData);
-    });
-
-    console.log("[Export] Selected raw data count:", selectedRawData.length);
-    if (selectedRawData.length === 0) {
-      console.log("[Export] No raw data found for selected rows, aborting");
-      return;
-    }
-
-    const selectedRows = Array.from(selectedProperties);
-
-    // Apply current table sorting to selected rows
-    const sortedRows = applySortingToProperties(selectedRows, tableSorting);
+    const selectedRows = [...selectedProperties];
+    const selectedRawData = collectSelectedRawData(selectedRows, resultsMap);
+    if (selectedRawData.length === 0) return;
 
     try {
       exportData(
         selectedRawData,
-        sortedRows,
+        selectedRows,
         {
           format,
           filename: "property-export",
-          rowCount: sortedRows.length,
+          rowCount: selectedRows.length,
           definition: EXPORT_FORMATS.find((item) => item.id === format),
         },
         config.enablePIIMasking,
         translate("unknownOwner")
       );
 
-      // Track sorted vs unsorted exports
       trackEvent({
         category: "Export",
         action: `export_${format}`,
         label: tableSorting.length > 0 ? "sorted" : "unsorted",
-        value: sortedRows.length,
+        value: selectedRows.length,
       });
     } catch (error) {
-      console.error("Export failed", error);
       trackError(`export_${format}`, error);
     }
   });
@@ -707,60 +780,29 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     setUrlFeedback(null);
 
     const currentSelection = selectedPropertiesRef.current ?? [];
-    if (!currentSelection || currentSelection.length === 0) {
-      return;
-    }
+    if (!currentSelection || currentSelection.length === 0) return;
+
+    const selectionArray = [...currentSelection];
 
     try {
-      const sortedSelection = applySortingToProperties(
-        currentSelection,
-        tableSorting
-      );
-
-      const formattedText = formatPropertiesForClipboard(
-        sortedSelection,
+      const payload = buildClipboardPayload(
+        selectionArray,
+        tableSorting,
         piiMaskingEnabled,
-        translate("unknownOwner")
+        translate
       );
 
-      const copySucceeded = copyToClipboard(formattedText);
-      const selectionCount = currentSelection.length;
+      if (!payload) return;
 
-      if (copySucceeded) {
-        const successTemplate = translate("copiedSuccess");
-        const successMessage =
-          typeof successTemplate === "string"
-            ? successTemplate.replace("{count}", String(selectionCount))
-            : "";
-
-        setUrlFeedback({
-          type: "success",
-          text:
-            successMessage ||
-            (typeof successTemplate === "string" ? successTemplate : ""),
-        });
-
-        trackEvent({
-          category: "Copy",
-          action: "copy_properties",
-          label: tableSorting.length > 0 ? "sorted" : "unsorted",
-          value: selectionCount,
-        });
-      } else {
-        setUrlFeedback({
-          type: "error",
-          text: translate("copyFailed"),
-        });
-
-        trackEvent({
-          category: "Copy",
-          action: "copy_properties",
-          label: "failed",
-          value: selectionCount,
-        });
-      }
+      const copySucceeded = copyToClipboard(payload.text);
+      notifyCopyOutcome(
+        copySucceeded,
+        payload,
+        translate,
+        setUrlFeedback,
+        trackEvent
+      );
     } catch (error) {
-      console.error("Copy failed:", error);
       setUrlFeedback({
         type: "error",
         text: translate("copyFailed"),
@@ -777,214 +819,58 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"));
   });
 
-  const handleMapClick = hooks.useEventCallback(
+  const handleMapClickCore = hooks.useEventCallback(
     async (event: __esri.ViewClickEvent) => {
       const perfStart = performance.now();
-      console.log("[PERF] Map click started at", perfStart);
-      // Don't abort all on every click - only abort when starting new query
-      // abortAll() removes ability to benefit from any caching
       const tracker = createPerformanceTracker("map_click_query");
 
-      const validation = validateMapClickPipeline({
-        event,
-        modules,
-        config,
-        dsManager: dsManagerRef.current,
-        translate,
-      });
+      const context = prepareQueryExecution(event, tracker);
 
-      if (isValidationFailure(validation)) {
-        const { error, failureReason } = validation;
-        setError(error.type as ErrorType, error.message);
-        tracker.failure(failureReason);
-        trackError("map_click_validation", failureReason);
+      if (!context) {
         return;
       }
 
-      const { mapPoint, manager } = validation.data;
-
-      const requestId = requestIdRef.current + 1;
-      requestIdRef.current = requestId;
-      const isStaleRequest = () => requestId !== requestIdRef.current;
-
-      propertyDispatchRef.current.clearError();
-      propertyDispatchRef.current.setQueryInFlight(true);
-
-      const currentSelection = selectedPropertiesRef.current ?? [];
-      const selectionForPipeline = Array.isArray(currentSelection)
-        ? currentSelection
-        : Array.from(currentSelection as Iterable<GridRowData>);
-
-      const controller = getController();
+      const { controller } = context;
 
       try {
-        const pipelineStart = performance.now();
-        console.log(
-          "[PERF] Pipeline started at",
-          pipelineStart - perfStart,
-          "ms"
-        );
-        const pipelineResult = await runPropertySelectionPipeline({
-          mapPoint,
-          propertyDataSourceId: config.propertyDataSourceId,
-          ownerDataSourceId: config.ownerDataSourceId,
-          dsManager: manager,
-          maxResults,
-          toggleEnabled,
-          enableBatchOwnerQuery: config.enableBatchOwnerQuery,
-          relationshipId: config.relationshipId,
-          enablePIIMasking: piiMaskingEnabled,
-          signal: controller.signal,
-          selectedProperties: selectionForPipeline,
-          translate,
+        const outcome = await runSelectionPipeline({
+          context,
+          perfStart,
         });
-        const pipelineEnd = performance.now();
-        console.log(
-          "[PERF] Pipeline completed at",
-          pipelineEnd - perfStart,
-          "ms",
-          "(took",
-          pipelineEnd - pipelineStart,
-          "ms)"
-        );
 
-        const abortStatus = abortHelpers.checkAbortedOrStale(
-          controller.signal,
-          isStaleRequest
-        );
-        if (abortStatus === "stale") {
+        if (outcome.status === "stale") {
           return;
         }
-        if (abortStatus === "aborted") {
+
+        if (outcome.status === "aborted") {
           tracker.failure("aborted");
+          propertyDispatchRef.current.setQueryInFlight(false);
           return;
         }
 
-        if (pipelineResult.status === "empty") {
-          if (!isStaleRequest()) {
-            propertyDispatchRef.current.setQueryInFlight(false);
-          }
+        if (outcome.status === "empty") {
+          propertyDispatchRef.current.setQueryInFlight(false);
           tracker.success();
           return;
         }
 
-        const removedRows = selectionForPipeline.filter((row) =>
-          pipelineResult.toRemove.has(normalizeFnrKey(row.FNR))
-        );
-
-        if (removedRows.length > 0) {
-          trackEvent({
-            category: "Property",
-            action: "toggle_remove",
-            value: removedRows.length,
-          });
-        }
-
-        if (!isStaleRequest()) {
-          const prevRawResults = rawPropertyResultsRef.current;
-          const prevResultsPlain: SerializedQueryResultMap =
-            prevRawResults ?? {};
-          const updatedRawResults = updateRawPropertyResults(
-            prevResultsPlain,
-            pipelineResult.rowsToProcess,
-            pipelineResult.propertyResults,
-            pipelineResult.toRemove,
-            selectionForPipeline,
-            normalizeFnrKey
-          );
-
-          // Store results but don't update UI yet
-          const dispatch = propertyDispatchRef.current;
-          const resultsToStore = updatedRawResults;
-          const rowsToStore = pipelineResult.updatedRows;
-
-          // Clean up removed graphics first
-          cleanupRemovedGraphics({
-            toRemove: pipelineResult.toRemove,
-            removeGraphicsForFnr,
-            normalizeFnrKey,
-          });
-
-          const highlightColor = buildHighlightColor(
-            highlightColorConfig,
-            highlightOpacityConfig
-          );
-          const outlineWidth = getValidatedOutlineWidth(outlineWidthConfig);
-
-          // Add graphics to map first (batch addition for better performance)
-          const graphicsHelpers = {
-            addGraphicsToMap,
-            addManyGraphicsToMap,
-            extractFnr,
-            normalizeFnrKey,
-          } satisfies SelectionGraphicsHelpers;
-
-          syncSelectionGraphics({
-            graphicsToAdd: pipelineResult.graphicsToAdd,
-            selectedRows: pipelineResult.updatedRows,
-            getCurrentView,
-            helpers: graphicsHelpers,
-            highlightColor,
-            outlineWidth,
-          });
-          const graphicsStart = performance.now();
-          console.log(
-            "[PERF] Graphics sync started at",
-            graphicsStart - perfStart,
-            "ms"
-          );
-
-          // Now update Redux state AFTER graphics are visible
-          const reduxStart = performance.now();
-          console.log(
-            "[PERF] Redux update started at",
-            reduxStart - perfStart,
-            "ms"
-          );
-          dispatch.setSelectedProperties(rowsToStore);
-          dispatch.setRawResults(resultsToStore);
-          dispatch.setQueryInFlight(false);
-          const reduxEnd = performance.now();
-          console.log(
-            "[PERF] Redux update completed at",
-            reduxEnd - perfStart,
-            "ms",
-            "(took",
-            reduxEnd - reduxStart,
-            "ms)"
-          );
-          console.log("[PERF] TOTAL TIME:", reduxEnd - perfStart, "ms");
-        }
+        const processedCount = finalizeSelection({
+          pipelineResult: outcome.pipelineResult,
+          context,
+          perfStart,
+        });
 
         tracker.success();
         trackEvent({
           category: "Query",
           action: "property_query",
           label: "success",
-          value: pipelineResult.rowsToProcess.length,
+          value: processedCount,
         });
         trackFeatureUsage("pii_masking", piiMaskingEnabled);
         trackFeatureUsage("toggle_removal", toggleEnabled);
       } catch (error) {
-        if (isStaleRequest()) {
-          return;
-        }
-
-        if (isAbortError(error)) {
-          tracker.failure("aborted");
-          propertyDispatchRef.current.setQueryInFlight(false);
-          return;
-        }
-
-        logger.error("Property query error:", error, {
-          message: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
-          propertyDsId: config.propertyDataSourceId,
-          ownerDsId: config.ownerDataSourceId,
-        });
-        setError(ErrorType.QUERY_ERROR, translate("errorQueryFailed"));
-        tracker.failure("query_error");
-        trackError("property_query", error);
+        handleSelectionError(error, tracker, context);
       } finally {
         releaseController(controller);
       }
@@ -998,10 +884,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       destroyGraphicsLayer,
       disablePopup,
       restorePopup,
-      onMapClick: handleMapClick,
+      onMapClick: handleMapClickCore,
     });
 
-  // Cursor point marker tracking
+  // Update view ref when view changes
+  hooks.useUpdateEffect(() => {
+    const view = getCurrentView();
+    currentViewRef.current = view;
+  }, [getCurrentView]);
+
+  // Cursor tracking state and refs
   const cursorGraphicsStateRef = React.useRef<CursorGraphicsState | null>(null);
   const pointerMoveHandleRef = React.useRef<__esri.Handle | null>(null);
   const pointerLeaveHandleRef = React.useRef<__esri.Handle | null>(null);
@@ -1015,7 +907,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const tooltipFormatRef = hooks.useLatest(cursorTooltipFormatText);
   const highlightColorConfigRef = hooks.useLatest(highlightColorConfig);
   const highlightOpacityConfigRef = hooks.useLatest(highlightOpacityConfig);
-  const outlineWidthConfigRef = hooks.useLatest(outlineWidthConfig);
 
   const clearCursorGraphics = hooks.useEventCallback(() => {
     // Cancel any pending RAF update
@@ -1025,17 +916,18 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
     pendingMapPointRef.current = null;
 
-    if (!cursorGraphicsStateRef.current) {
+    const state = cursorGraphicsStateRef.current;
+    if (!state) {
       return;
     }
 
     const layer = cachedLayerRef.current;
     if (layer) {
-      if (cursorGraphicsStateRef.current.pointGraphic) {
-        layer.remove(cursorGraphicsStateRef.current.pointGraphic);
+      if (state.pointGraphic) {
+        layer.remove(state.pointGraphic);
       }
-      if (cursorGraphicsStateRef.current.tooltipGraphic) {
-        layer.remove(cursorGraphicsStateRef.current.tooltipGraphic);
+      if (state.tooltipGraphic) {
+        layer.remove(state.tooltipGraphic);
       }
     }
 
@@ -1069,18 +961,23 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         highlightColorConfigRef.current,
         highlightOpacityConfigRef.current
       );
-      const currentOutlineWidth = getValidatedOutlineWidth(
-        outlineWidthConfigRef.current
-      );
 
       let tooltipText: string | null = null;
 
-      if (hoverTooltipData) {
+      const currentHoverData = hoverTooltipDataRef.current;
+      const hasCompleted = hasCompletedFirstQueryRef.current;
+      const isCurrentlyQuerying = isQueryingRef.current;
+
+      if (currentHoverData) {
         tooltipText = tooltipFormatRef.current.replace(
           "{fastighet}",
-          hoverTooltipData.fastighet
+          currentHoverData.fastighet
         );
-      } else if (!isHoverQueryActive) {
+      } else if (
+        hasCompleted &&
+        !isCurrentlyQuerying &&
+        lastCursorPointRef.current
+      ) {
         tooltipText = tooltipNoPropertyRef.current;
       }
 
@@ -1090,7 +987,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         mapPoint,
         tooltipText,
         highlightColor: currentHighlightColor,
-        outlineWidth: currentOutlineWidth,
         existing: cursorGraphicsStateRef.current,
         style: CURSOR_TOOLTIP_STYLE,
       });
@@ -1132,7 +1028,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         pendingMapPointRef,
         lastHoverQueryPointRef,
         updateCursorPoint,
-        throttledHoverQuery,
+        throttledHitTest,
         cleanupHoverQuery,
       });
     } else {
@@ -1185,7 +1081,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     // Update cursor point to refresh tooltip when hover data changes
     if (!lastCursorPointRef.current) return;
     updateCursorPoint(lastCursorPointRef.current);
-  }, [hoverTooltipData, isHoverQueryActive]);
+  }, [hoverTooltipData]);
 
   // Sync selection graphics when highlight config changes (incremental update)
   const debouncedSyncGraphics = useDebounce(() => {
@@ -1229,7 +1125,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         modules
       );
     });
-  }, 100);
+  }, 0);
 
   hooks.useUpdateEffect(() => {
     debouncedSyncGraphics();

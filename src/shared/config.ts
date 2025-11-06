@@ -1,18 +1,18 @@
 import {
   createColumnHelper,
   getCoreRowModel,
-  getSortedRowModel,
   getFilteredRowModel,
+  getSortedRowModel,
 } from "@tanstack/react-table";
 import type {
   ColumnDef,
-  SortingState,
   ColumnFiltersState,
-  Table,
   Row,
+  SortingState,
+  Table,
 } from "@tanstack/react-table";
-import type { GridRowData } from "../config/types";
 import { GRID_COLUMN_KEYS } from "../config/constants";
+import type { GridRowData } from "../config/types";
 
 const columnHelper = createColumnHelper<GridRowData>();
 
