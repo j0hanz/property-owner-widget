@@ -270,10 +270,7 @@ export const useGraphicsLayer = (params: {
       try {
         layer.remove(graphic);
       } catch (error) {
-        console.log("Failed to remove highlight graphic", {
-          error,
-          widgetId: widgetIdRef.current,
-        });
+        // Silently ignore removal errors
       }
     }
     highlightGraphicsMapRef.current.delete(key);
@@ -285,10 +282,7 @@ export const useGraphicsLayer = (params: {
       try {
         layer.removeAll();
       } catch (error) {
-        console.log("Failed to clear highlight graphics", {
-          error,
-          widgetId: widgetIdRef.current,
-        });
+        // Silently ignore clear errors
       }
     }
     highlightGraphicsMapRef.current.clear();
@@ -397,10 +391,6 @@ export const useGraphicsLayer = (params: {
 
       const geometry = graphic.geometry;
       if (!geometry) {
-        console.log("highlightGraphics: Graphic has no geometry", {
-          widgetId: widgetIdRef.current,
-          fnr: resolvedFnr,
-        });
         return false;
       }
 
@@ -411,10 +401,6 @@ export const useGraphicsLayer = (params: {
       );
 
       if (!symbol) {
-        console.log("highlightGraphics: Could not create symbol", {
-          widgetId: widgetIdRef.current,
-          geometryType: geometry.type,
-        });
         return false;
       }
 
@@ -427,18 +413,8 @@ export const useGraphicsLayer = (params: {
 
         layer.add(highlightGraphic);
         highlightGraphicsMapRef.current.set(key, highlightGraphic);
-
-        console.log("highlightGraphics: Added highlight", {
-          widgetId: widgetIdRef.current,
-          fnr: resolvedFnr,
-          geometryType: geometry.type,
-        });
         return true;
       } catch (error) {
-        console.log("Failed to highlight property feature", {
-          error,
-          widgetId: widgetIdRef.current,
-        });
         return false;
       }
     }
@@ -472,9 +448,6 @@ export const useGraphicsLayer = (params: {
 
       const layer = ensureHighlightLayer(view);
       if (!layer) {
-        console.log("highlightGraphics: Could not create highlight layer", {
-          widgetId: widgetIdRef.current,
-        });
         return;
       }
 
@@ -526,10 +499,7 @@ export const useGraphicsLayer = (params: {
           }
           layer.destroy();
         } catch (error) {
-          console.log("Failed to destroy highlight layer", {
-            error,
-            widgetId: widgetIdRef.current,
-          });
+          // Silently ignore destroy errors
         }
       }
 
@@ -547,10 +517,7 @@ export const useGraphicsLayer = (params: {
       try {
         layer.destroy();
       } catch (error) {
-        console.log("Failed to destroy highlight layer on unmount", {
-          error,
-          widgetId: widgetIdRef.current,
-        });
+        // Silently ignore destroy errors on unmount
       }
     }
 
@@ -950,51 +917,40 @@ export const useThrottle = <T extends (...args: unknown[]) => void>(
   const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0;
   const callbackRef = hooks.useLatest(callback);
 
-  // If delay is 0, return unthrottled callback for instant execution
+  // Performance: If delay is 0, return unthrottled callback for instant execution
   const unthrottled = hooks.useEventCallback((...args: Parameters<T>) => {
-    try {
-      callbackRef.current(...args);
-    } catch (error) {
-      if (!isAbortError(error)) {
-        console.error("Unthrottled function error:", error);
-      }
-    }
+    callbackRef.current(...args);
   });
 
-  const lastCallTimeRef = React.useRef<number>(0);
-  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingArgsRef = React.useRef<Parameters<T> | null>(null);
-  const mountedRef = React.useRef(true);
+  const stateRef = React.useRef({
+    lastCallTime: 0,
+    timeoutId: null as ReturnType<typeof setTimeout> | null,
+    pendingArgs: null as Parameters<T> | null,
+    mounted: true,
+  });
 
   const execute = hooks.useEventCallback((args: Parameters<T>) => {
-    if (!mountedRef.current) return;
-    lastCallTimeRef.current = Date.now();
-    pendingArgsRef.current = null;
-    try {
-      callbackRef.current(...args);
-    } catch (error) {
-      if (!isAbortError(error)) {
-        console.error("Throttled function error:", error);
-      }
-    }
+    if (!stateRef.current.mounted) return;
+    stateRef.current.lastCallTime = Date.now();
+    stateRef.current.pendingArgs = null;
+    callbackRef.current(...args);
   });
 
   const throttled = hooks.useEventCallback((...args: Parameters<T>) => {
+    const state = stateRef.current;
     const now = Date.now();
-    const timeSinceLastCall = now - lastCallTimeRef.current;
+    const timeSinceLastCall = now - state.lastCallTime;
 
     if (timeSinceLastCall >= safeDelay) {
-      // Execute immediately if enough time has passed
       execute(args);
     } else {
-      // Schedule execution for remaining time
-      pendingArgsRef.current = args;
-      if (!timeoutRef.current) {
+      state.pendingArgs = args;
+      if (!state.timeoutId) {
         const remainingTime = safeDelay - timeSinceLastCall;
-        timeoutRef.current = setTimeout(() => {
-          timeoutRef.current = null;
-          if (pendingArgsRef.current && mountedRef.current) {
-            execute(pendingArgsRef.current);
+        state.timeoutId = setTimeout(() => {
+          state.timeoutId = null;
+          if (state.pendingArgs && state.mounted) {
+            execute(state.pendingArgs);
           }
         }, remainingTime);
       }
@@ -1003,10 +959,11 @@ export const useThrottle = <T extends (...args: unknown[]) => void>(
 
   hooks.useEffectOnce(() => {
     return () => {
-      mountedRef.current = false;
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
+      const state = stateRef.current;
+      state.mounted = false;
+      if (state.timeoutId) {
+        clearTimeout(state.timeoutId);
+        state.timeoutId = null;
       }
     };
   });
@@ -1022,61 +979,56 @@ export const useDebounce = <T extends (...args: unknown[]) => void>(
   const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0;
   const callbackRef = hooks.useLatest(callback);
 
-  // If delay is 0, return undebounced callback for instant execution
+  // Performance: If delay is 0, return undebounced callback
   const undebounced = hooks.useEventCallback((...args: Parameters<T>) => {
-    try {
-      callbackRef.current(...args);
-    } catch (error) {
-      console.log("Undebounced function error:", { error });
-    }
+    callbackRef.current(...args);
   });
 
   const undebouncedWithCancelRef = React.useRef<DebouncedFn<T> | null>(null);
   if (!undebouncedWithCancelRef.current) {
     const fn = undebounced as DebouncedFn<T>;
-    fn.cancel = () => {
-      // No-op cancel for instant execution
-    };
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    fn.cancel = () => {}; // No-op cancel for instant execution
     undebouncedWithCancelRef.current = fn;
   }
 
-  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingRef = React.useRef(false);
-  const mountedRef = React.useRef(true);
+  const stateRef = React.useRef({
+    timeoutId: null as ReturnType<typeof setTimeout> | null,
+    pending: false,
+    mounted: true,
+  });
   const optionsRef = hooks.useLatest(options);
 
   const notifyPending = hooks.useEventCallback((next: boolean) => {
-    if (pendingRef.current === next) return;
-    pendingRef.current = next;
+    const state = stateRef.current;
+    if (state.pending === next) return;
+    state.pending = next;
     const handler = optionsRef.current?.onPendingChange;
     if (typeof handler === "function") {
-      try {
-        handler(next);
-      } catch (error) {
-        // Silently ignore callback errors to prevent breaking debounce mechanism
-        console.log("onPendingChange callback failed", { error });
-      }
+      handler(next);
     }
   });
 
   const cancel = hooks.useEventCallback(() => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
+    const state = stateRef.current;
+    if (state.timeoutId) {
+      clearTimeout(state.timeoutId);
+      state.timeoutId = null;
     }
-    if (pendingRef.current) {
+    if (state.pending) {
       notifyPending(false);
     }
   });
 
   const run = hooks.useEventCallback((...args: Parameters<T>) => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
+    const state = stateRef.current;
+    if (state.timeoutId) {
+      clearTimeout(state.timeoutId);
     }
     notifyPending(true);
-    timeoutRef.current = setTimeout(() => {
-      timeoutRef.current = null;
-      if (!mountedRef.current) return;
+    state.timeoutId = setTimeout(() => {
+      state.timeoutId = null;
+      if (!state.mounted) return;
       try {
         callbackRef.current(...args);
       } finally {
@@ -1099,7 +1051,8 @@ export const useDebounce = <T extends (...args: unknown[]) => void>(
 
   hooks.useEffectOnce(() => {
     return () => {
-      mountedRef.current = false;
+      const state = stateRef.current;
+      state.mounted = false;
       cancelRef.current();
     };
   });

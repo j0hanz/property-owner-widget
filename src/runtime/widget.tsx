@@ -45,9 +45,6 @@ import type {
   GridRowData,
   IMConfig,
   IMStateWithProperty,
-  PipelineExecutionContext,
-  PipelineRunResult,
-  PropertyPipelineSuccess,
   SelectionGraphicsHelpers,
   SelectionGraphicsParams,
   SerializedQueryResult,
@@ -250,11 +247,13 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const rawPropertyResultsRef =
     hooks.useLatest<SerializedQueryResultMap | null>(rawPropertyResults);
 
-  const prepareQueryExecution = hooks.useEventCallback(
-    (
+  // Consolidated property selection pipeline: Validation → Query → Finalize
+  const executePropertySelection = hooks.useEventCallback(
+    async (
       event: __esri.ViewClickEvent,
       tracker: ReturnType<typeof createPerformanceTracker>
-    ): PipelineExecutionContext | null => {
+    ): Promise<number> => {
+      // Step 1: Validate and prepare execution context
       const validation = validateMapClickRequest({
         event,
         modules,
@@ -268,7 +267,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         setError(error.type as ErrorType, error.message);
         tracker.failure(failureReason);
         trackError("map_click_validation", failureReason);
-        return null;
+        throw new Error(failureReason);
       }
 
       const { mapPoint, manager } = validation.data;
@@ -279,152 +278,92 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       dispatch(propertyActions.clearError(widgetId));
       dispatch(propertyActions.setQueryInFlight(true, widgetId));
 
-      const currentSelection = selectedPropertiesRef.current ?? [];
-      const selectionForPipeline = [...currentSelection];
-
+      const selectionForPipeline = [...(selectedPropertiesRef.current ?? [])];
       const controller = getController();
 
-      return {
-        mapPoint,
-        manager,
-        controller,
-        isStaleRequest,
-        selectionForPipeline,
-      };
-    }
-  );
-
-  const runSelectionPipeline = hooks.useEventCallback(
-    async (params: {
-      context: PipelineExecutionContext;
-      perfStart: number;
-    }): Promise<PipelineRunResult> => {
-      const { context } = params;
-
+      // Step 2: Run property query pipeline
       const pipelineResult = await executePropertyQueryPipeline({
-        mapPoint: context.mapPoint,
+        mapPoint,
         config,
-        dsManager: context.manager,
+        dsManager: manager,
         maxResults,
         toggleEnabled,
         enablePIIMasking: piiMaskingEnabled,
-        selectedProperties: context.selectionForPipeline,
-        signal: context.controller.signal,
+        selectedProperties: selectionForPipeline,
+        signal: controller.signal,
         translate,
         runPipeline: runPropertySelectionPipeline,
       });
 
       const abortStatus = abortHelpers.checkAbortedOrStale(
-        context.controller.signal,
-        context.isStaleRequest
+        controller.signal,
+        isStaleRequest
       );
 
-      if (abortStatus === "stale") {
-        return { status: "stale" };
-      }
-
-      if (abortStatus === "aborted") {
-        return { status: "aborted" };
+      if (abortStatus === "stale" || abortStatus === "aborted") {
+        dispatch(propertyActions.setQueryInFlight(false, widgetId));
+        tracker.failure(abortStatus);
+        releaseController(controller);
+        return 0;
       }
 
       if (pipelineResult.status === "empty") {
-        return { status: "empty" };
+        dispatch(propertyActions.setQueryInFlight(false, widgetId));
+        tracker.success();
+        releaseController(controller);
+        return 0;
       }
 
-      return {
-        status: "success",
-        pipelineResult,
-      };
-    }
-  );
-
-  const finalizeSelection = hooks.useEventCallback(
-    (params: {
-      pipelineResult: PropertyPipelineSuccess;
-      context: PipelineExecutionContext;
-      perfStart: number;
-    }): number => {
-      const { pipelineResult, context } = params;
-
-      const removedRows = context.selectionForPipeline.filter((row) =>
+      // Step 3: Finalize selection (track removals, update state, render graphics)
+      const removedCount = selectionForPipeline.filter((row) =>
         pipelineResult.toRemove.has(normalizeFnrKey(row.FNR))
-      );
+      ).length;
 
-      if (removedRows.length > 0) {
+      if (removedCount > 0) {
         trackEvent({
           category: "Property",
           action: "toggle_remove",
-          value: removedRows.length,
+          value: removedCount,
         });
       }
 
-      if (context.isStaleRequest()) {
-        return pipelineResult.rowsToProcess.length;
+      if (!isStaleRequest()) {
+        const stateUpdate = updatePropertySelectionState({
+          pipelineResult,
+          previousRawResults: rawPropertyResultsRef.current,
+          selectedProperties: selectionForPipeline,
+          dispatch,
+          widgetId,
+          removeHighlightForFnr,
+          normalizeFnrKey,
+          highlightColorConfig,
+          highlightOpacityConfig,
+          outlineWidthConfig,
+        });
+
+        rawPropertyResultsRef.current = stateUpdate.resultsToStore;
+
+        const graphicsHelpers = {
+          highlightGraphics,
+          clearHighlights,
+          removeHighlightForFnr,
+          extractFnr,
+          normalizeFnrKey,
+        } satisfies SelectionGraphicsHelpers;
+
+        scheduleGraphicsRendering({
+          pipelineResult,
+          highlightColor: stateUpdate.highlightColor,
+          outlineWidth: stateUpdate.outlineWidth,
+          graphicsHelpers,
+          getCurrentView,
+          isStaleRequest,
+          syncFn: syncSelectionGraphics,
+        });
       }
 
-      const stateUpdate = updatePropertySelectionState({
-        pipelineResult,
-        previousRawResults: rawPropertyResultsRef.current,
-        selectedProperties: context.selectionForPipeline,
-        dispatch,
-        widgetId,
-        removeHighlightForFnr,
-        normalizeFnrKey,
-        highlightColorConfig,
-        highlightOpacityConfig,
-        outlineWidthConfig,
-      });
-
-      rawPropertyResultsRef.current = stateUpdate.resultsToStore;
-
-      const graphicsHelpers = {
-        highlightGraphics,
-        clearHighlights,
-        removeHighlightForFnr,
-        extractFnr,
-        normalizeFnrKey,
-      } satisfies SelectionGraphicsHelpers;
-
-      scheduleGraphicsRendering({
-        pipelineResult,
-        highlightColor: stateUpdate.highlightColor,
-        outlineWidth: stateUpdate.outlineWidth,
-        graphicsHelpers,
-        getCurrentView,
-        isStaleRequest: context.isStaleRequest,
-        syncFn: syncSelectionGraphics,
-      });
-
+      releaseController(controller);
       return pipelineResult.rowsToProcess.length;
-    }
-  );
-
-  const handleSelectionError = hooks.useEventCallback(
-    (
-      error: unknown,
-      tracker: ReturnType<typeof createPerformanceTracker>,
-      context: PipelineExecutionContext
-    ) => {
-      if (context.isStaleRequest()) {
-        return;
-      }
-
-      if (isAbortError(error)) {
-        tracker.failure("aborted");
-        dispatch(propertyActions.setQueryInFlight(false, widgetId));
-        return;
-      }
-
-      console.log("Property query error:", error, {
-        message: error instanceof Error ? error.message : undefined,
-        stack: error instanceof Error ? error.stack : undefined,
-        propertyDsId: config.propertyDataSourceId,
-        ownerDsId: config.ownerDataSourceId,
-      });
-      setError(ErrorType.QUERY_ERROR, translate("errorQueryFailed"));
-      tracker.failure("query_error");
-      dispatch(propertyActions.setQueryInFlight(false, widgetId));
-      trackError("property_query", error);
     }
   );
 
@@ -882,44 +821,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   const handleMapClickCore = hooks.useEventCallback(
     async (event: __esri.ViewClickEvent) => {
-      const perfStart = performance.now();
       const tracker = createPerformanceTracker("map_click_query");
 
-      const context = prepareQueryExecution(event, tracker);
-
-      if (!context) {
-        return;
-      }
-
-      const { controller } = context;
-
       try {
-        const outcome = await runSelectionPipeline({
-          context,
-          perfStart,
-        });
-
-        if (outcome.status === "stale") {
-          return;
-        }
-
-        if (outcome.status === "aborted") {
-          tracker.failure("aborted");
-          dispatch(propertyActions.setQueryInFlight(false, widgetId));
-          return;
-        }
-
-        if (outcome.status === "empty") {
-          dispatch(propertyActions.setQueryInFlight(false, widgetId));
-          tracker.success();
-          return;
-        }
-
-        const processedCount = finalizeSelection({
-          pipelineResult: outcome.pipelineResult,
-          context,
-          perfStart,
-        });
+        const processedCount = await executePropertySelection(event, tracker);
 
         tracker.success();
         trackEvent({
@@ -931,9 +836,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         trackFeatureUsage("pii_masking", piiMaskingEnabled);
         trackFeatureUsage("toggle_removal", toggleEnabled);
       } catch (error) {
-        handleSelectionError(error, tracker, context);
-      } finally {
-        releaseController(controller);
+        if (isAbortError(error)) {
+          tracker.failure("aborted");
+          dispatch(propertyActions.setQueryInFlight(false, widgetId));
+          return;
+        }
+
+        setError(ErrorType.QUERY_ERROR, translate("errorQueryFailed"));
+        tracker.failure("query_error");
+        dispatch(propertyActions.setQueryInFlight(false, widgetId));
+        trackError("property_query", error);
       }
     }
   );

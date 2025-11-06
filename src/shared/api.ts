@@ -603,6 +603,8 @@ export const queryOwnersByRelationship = async (
     );
 
     const propertyRecords: FeatureDataRecord[] = [];
+
+    // Performance: Process batches with concurrency limit
     for (
       let index = 0;
       index < batchRequests.length;
@@ -613,25 +615,11 @@ export const queryOwnersByRelationship = async (
         slice.map((createRequest) => createRequest())
       );
 
-      // Performance: Pre-calculate total records to reduce array growth
-      let totalRecords = 0;
+      // Performance: Flatten results directly into target array
       for (let j = 0; j < settled.length; j++) {
         const result = settled[j];
         const records = ((result?.records ?? []) as FeatureDataRecord[]) || [];
-        totalRecords += records.length;
-      }
-
-      // Pre-allocate space for all records in this batch
-      const startLength = propertyRecords.length;
-      propertyRecords.length = startLength + totalRecords;
-
-      let writeIndex = startLength;
-      for (let j = 0; j < settled.length; j++) {
-        const result = settled[j];
-        const records = ((result?.records ?? []) as FeatureDataRecord[]) || [];
-        for (let k = 0; k < records.length; k++) {
-          propertyRecords[writeIndex++] = records[k];
-        }
+        propertyRecords.push(...records);
       }
 
       abortHelpers.throwIfAborted(options?.signal);
