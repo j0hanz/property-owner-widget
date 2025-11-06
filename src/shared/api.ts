@@ -136,47 +136,6 @@ const appendRowsForValidatedProperty = (
     fnr: validated.fnr,
   });
 };
-const validateSingleDataSource = (
-  dataSource: FeatureLayerDataSource | null,
-  role: "property" | "owner",
-  translate: (key: string) => string
-): ValidationResult<{ dataSource: FeatureLayerDataSource }> => {
-  if (!dataSource) {
-    return createValidationError(
-      "VALIDATION_ERROR",
-      translate("errorNoDataAvailable"),
-      `${role}_data_source_missing`
-    );
-  }
-
-  return { valid: true, data: { dataSource } };
-};
-
-const validateDataSourceUrl = (
-  dataSource: FeatureLayerDataSource,
-  role: "property" | "owner",
-  allowedHosts: readonly string[] | undefined,
-  translate: (key: string) => string
-): ValidationResult<{ url: string }> => {
-  const url = getDataSourceUrl(dataSource);
-  if (!url) {
-    return createValidationError(
-      "VALIDATION_ERROR",
-      translate("errorNoDataAvailable"),
-      `${role}_missing_url`
-    );
-  }
-
-  if (!isValidArcGISUrl(url, allowedHosts)) {
-    return createValidationError(
-      "VALIDATION_ERROR",
-      translate("errorHostNotAllowed"),
-      `${role}_disallowed_host`
-    );
-  }
-
-  return { valid: true, data: { url } };
-};
 
 const toOwnerAttributes = (
   graphic: __esri.Graphic | null | undefined
@@ -253,9 +212,7 @@ const fetchOwnerDataForProperty = async (
 ): Promise<OwnerFetchSuccess> => {
   const { dsManager, signal, helpers } = context;
   try {
-    if (signal?.aborted) {
-      throw new DOMException("Aborted", "AbortError");
-    }
+    abortHelpers.throwIfAborted(signal);
 
     const graphics = await helpers.queryOwnerByFnr(
       validated.fnr,
@@ -304,8 +261,6 @@ const processBatchOfProperties = async (params: {
   };
 
   for (let index = 0; index < ownerData.length; index += 1) {
-    const resolution = ownerData[index];
-    const validated = batch[index];
     if (
       shouldStopAccumulation(
         currentRowCount,
@@ -315,13 +270,18 @@ const processBatchOfProperties = async (params: {
     ) {
       break;
     }
+
+    const resolution = ownerData[index];
+    const validated = batch[index];
     const skip = shouldSkipOwnerResult(resolution, helpers);
 
-    if (skip.skip) {
-      if (skip.reason === "aborted" || skip.reason === "invalid_value") {
-        continue;
-      }
+    if (
+      skip.skip &&
+      (skip.reason === "aborted" || skip.reason === "invalid_value")
+    ) {
+      continue;
     }
+
     const shouldStop = processOwnerResult({
       resolution,
       validated,
@@ -331,6 +291,7 @@ const processBatchOfProperties = async (params: {
       currentRowCount,
       maxResults,
     });
+
     if (shouldStop) {
       break;
     }
@@ -363,6 +324,48 @@ export const validateDataSources = (
     dsManager: params.dsManager,
     allowedHosts: params.allowedHosts,
     translate: params.translate,
+  };
+
+  const validateSingleDataSource = (
+    dataSource: FeatureLayerDataSource | null,
+    role: "property" | "owner",
+    translate: (key: string) => string
+  ): ValidationResult<{ dataSource: FeatureLayerDataSource }> => {
+    if (!dataSource) {
+      return createValidationError(
+        "VALIDATION_ERROR",
+        translate("errorNoDataAvailable"),
+        `${role}_data_source_missing`
+      );
+    }
+
+    return { valid: true, data: { dataSource } };
+  };
+
+  const validateDataSourceUrl = (
+    dataSource: FeatureLayerDataSource,
+    role: "property" | "owner",
+    allowedHosts: readonly string[] | undefined,
+    translate: (key: string) => string
+  ): ValidationResult<{ url: string }> => {
+    const url = getDataSourceUrl(dataSource);
+    if (!url) {
+      return createValidationError(
+        "VALIDATION_ERROR",
+        translate("errorNoDataAvailable"),
+        `${role}_missing_url`
+      );
+    }
+
+    if (!isValidArcGISUrl(url, allowedHosts)) {
+      return createValidationError(
+        "VALIDATION_ERROR",
+        translate("errorHostNotAllowed"),
+        `${role}_disallowed_host`
+      );
+    }
+
+    return { valid: true, data: { url } };
   };
 
   const validateDataSourceIds = (
