@@ -1429,14 +1429,12 @@ describe("Property Widget - Utility Helper Functions", () => {
     const modules = createMockEsriModules();
     const layer = createMockGraphicsLayer();
     const mapPoint = createMockPoint(1, 2);
-    const highlightColor: [number, number, number, number] = [0, 180, 216, 0.4];
 
     const state = syncCursorGraphics({
       modules,
       layer,
       mapPoint,
       tooltipText: "<em>FAST-1</em>",
-      highlightColor,
       existing: null,
       style: CURSOR_TOOLTIP_STYLE,
     });
@@ -1445,8 +1443,7 @@ describe("Property Widget - Utility Helper Functions", () => {
       throw new Error("Expected cursor graphics state");
     }
 
-    expect(layer.add).toHaveBeenCalledTimes(2);
-    expect(state.pointGraphic).toBeInstanceOf(MockGraphic);
+    expect(layer.add).toHaveBeenCalledTimes(1);
     expect(state.tooltipGraphic).toBeInstanceOf(MockGraphic);
     expect(state.tooltipGraphic?.symbol).toBeInstanceOf(MockTextSymbol);
     expect(
@@ -1459,12 +1456,11 @@ describe("Property Widget - Utility Helper Functions", () => {
       layer,
       mapPoint: null,
       tooltipText: null,
-      highlightColor,
       existing: state,
       style: CURSOR_TOOLTIP_STYLE,
     });
 
-    expect(layer.remove).toHaveBeenCalledTimes(2);
+    expect(layer.remove).toHaveBeenCalledTimes(1);
     expect(clearedState).toBeNull();
   });
 
@@ -1473,7 +1469,6 @@ describe("Property Widget - Utility Helper Functions", () => {
     const layer = createMockGraphicsLayer();
     const mapPoint1 = createMockPoint(1, 2);
     const mapPoint2 = createMockPoint(3, 4);
-    const highlightColor: [number, number, number, number] = [0, 180, 216, 0.4];
 
     // Initial render with tooltip
     const state1 = syncCursorGraphics({
@@ -1481,7 +1476,6 @@ describe("Property Widget - Utility Helper Functions", () => {
       layer,
       mapPoint: mapPoint1,
       tooltipText: "Property A",
-      highlightColor,
       existing: null,
       style: CURSOR_TOOLTIP_STYLE,
     });
@@ -1495,7 +1489,6 @@ describe("Property Widget - Utility Helper Functions", () => {
       layer,
       mapPoint: mapPoint2,
       tooltipText: "Property A",
-      highlightColor,
       existing: state1,
       style: CURSOR_TOOLTIP_STYLE,
     });
@@ -1510,7 +1503,6 @@ describe("Property Widget - Utility Helper Functions", () => {
       layer,
       mapPoint: mapPoint2,
       tooltipText: "Property B",
-      highlightColor,
       existing: state2,
       style: CURSOR_TOOLTIP_STYLE,
     });

@@ -80,7 +80,6 @@ import {
 import {
   abortHelpers,
   buildClipboardPayload,
-  buildHighlightColor,
   buildResultsMap,
   collectSelectedRawData,
   computeWidgetsToClose,
@@ -97,7 +96,9 @@ import {
   normalizeFnrKey,
   notifyCopyOutcome,
   readAppWidgetsFromState,
+  restoreCursor,
   scheduleGraphicsRendering,
+  setCursor,
   syncCursorGraphics,
   syncGraphicsWithState,
   updatePropertySelectionState,
@@ -933,12 +934,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const cachedLayerRef = React.useRef<__esri.GraphicsLayer | null>(null);
   const rafIdRef = React.useRef<number | null>(null);
   const pendingMapPointRef = React.useRef<__esri.Point | null>(null);
+  const previousCursorRef = React.useRef<string | null>(null);
   const cursorTooltipNoPropertyText = translate("cursorTooltipNoProperty");
   const cursorTooltipFormatText = translate("cursorTooltipFormat");
   const tooltipNoPropertyRef = hooks.useLatest(cursorTooltipNoPropertyText);
   const tooltipFormatRef = hooks.useLatest(cursorTooltipFormatText);
-  const highlightColorConfigRef = hooks.useLatest(highlightColorConfig);
-  const highlightOpacityConfigRef = hooks.useLatest(highlightOpacityConfig);
 
   const clearCursorGraphics = hooks.useEventCallback(() => {
     // Cancel any pending RAF update
@@ -954,13 +954,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
 
     const layer = cachedLayerRef.current;
-    if (layer) {
-      if (state.pointGraphic) {
-        layer.remove(state.pointGraphic);
-      }
-      if (state.tooltipGraphic) {
-        layer.remove(state.tooltipGraphic);
-      }
+    if (layer && state.tooltipGraphic) {
+      layer.remove(state.tooltipGraphic);
     }
 
     cursorGraphicsStateRef.current = null;
@@ -989,11 +984,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         return;
       }
 
-      const currentHighlightColor = buildHighlightColor(
-        highlightColorConfigRef.current,
-        highlightOpacityConfigRef.current
-      );
-
       let tooltipText: string | null = null;
 
       const currentHoverData = hoverTooltipDataRef.current;
@@ -1018,7 +1008,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         layer,
         mapPoint,
         tooltipText,
-        highlightColor: currentHighlightColor,
         existing: cursorGraphicsStateRef.current,
         style: CURSOR_TOOLTIP_STYLE,
       });
@@ -1048,6 +1037,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       isActive && !!modules?.TextSymbol && !!modules?.Graphic;
 
     if (canTrackCursor) {
+      // Set custom CSS cursor when widget becomes active
+      setCursor(view, config.activeCursor || "crosshair", previousCursorRef);
+
       cursorLifecycleHelpers.setupCursorTracking({
         view,
         widgetId,
@@ -1064,6 +1056,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         cleanupHoverQuery,
       });
     } else {
+      // Restore previous cursor when widget becomes inactive
+      restoreCursor(view, previousCursorRef);
+
       cursorLifecycleHelpers.resetCursorState({
         lastCursorPointRef,
         pendingMapPointRef,
@@ -1085,8 +1080,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         clearGraphics: clearCursorGraphics,
         cleanupQuery: cleanupHoverQuery,
       });
+      // Restore cursor on cleanup
+      restoreCursor(view, previousCursorRef);
     };
-  }, [runtimeState, modules, widgetId]);
+  }, [runtimeState, modules, widgetId, config.activeCursor]);
 
   // Cleanup cursor point on unmount
   hooks.useUnmount(() => {

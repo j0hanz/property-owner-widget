@@ -63,6 +63,12 @@ System.register([], function (e) {
         runtimeStateQuerying: "Fråga pågår...",
         runtimeStateError: "Frågefel uppstod. Kontrollera widget för detaljer.",
         runtimeStateSelected: "{count} fastigheter valda för närvarande",
+        cursorStyleLabel: "Aktiv markörstil",
+        cursorStyleDescription:
+          "CSS-markör som visas när widgeten är aktiv. Stöder standardvärden (crosshair, pointer, grab) och anpassade url()-markörer.",
+        cursorStyleTooltip:
+          "Välj markörstil eller ange anpassat CSS-värde (t.ex. url(cursor.png), auto)",
+        cursorStylePlaceholder: "Ange CSS-markör värde...",
       });
     },
   };

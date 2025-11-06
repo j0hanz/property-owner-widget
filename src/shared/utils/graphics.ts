@@ -1,7 +1,4 @@
-import {
-  HEX_COLOR_PATTERN,
-  HIGHLIGHT_MARKER_SIZE,
-} from "../../config/constants";
+import { HEX_COLOR_PATTERN } from "../../config/constants";
 import type {
   HighlightSymbolJSON,
   SelectionGraphicsHelpers,
@@ -51,7 +48,7 @@ export const buildHighlightSymbolJSON = <
     return {
       style: "cross",
       color: [r, g, b, a],
-      size: HIGHLIGHT_MARKER_SIZE,
+      size: 12,
       outline: {
         style: "solid",
         color: [r, g, b, 1],

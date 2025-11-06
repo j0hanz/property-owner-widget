@@ -1,10 +1,6 @@
 import type { MutableRefObject } from "react";
 import type { DataSourceManager } from "jimu-core";
-import {
-  CURSOR_TOOLTIP_STYLE,
-  HIGHLIGHT_MARKER_SIZE,
-  SYMBOL_CACHE_MAX_SIZE,
-} from "../../config/constants";
+import { CURSOR_TOOLTIP_STYLE } from "../../config/constants";
 import type {
   CursorGraphicsState,
   CursorTooltipStyle,
@@ -16,31 +12,6 @@ import { abortHelpers, stripHtml } from "./helpers";
 import { formatOwnerInfo } from "./privacy";
 import { extractFnr } from "./processing";
 import { checkValidationFailure, validateDataSourcesCore } from "./validation";
-
-const createOpaqueColor = (
-  color: [number, number, number, number]
-): [number, number, number, number] => [color[0], color[1], color[2], 1];
-
-const createSymbolCache = () => {
-  const cache = new Map<string, __esri.SimpleMarkerSymbol>();
-  const maxSize = SYMBOL_CACHE_MAX_SIZE;
-
-  return {
-    get: (key: string): __esri.SimpleMarkerSymbol | undefined => cache.get(key),
-    set: (key: string, symbol: __esri.SimpleMarkerSymbol): void => {
-      if (cache.size >= maxSize) {
-        const firstKey = cache.keys().next().value;
-        cache.delete(firstKey);
-      }
-      cache.set(key, symbol);
-    },
-    clear: (): void => {
-      cache.clear();
-    },
-  };
-};
-
-const symbolCache = createSymbolCache();
 
 const sanitizeTooltipText = (
   text: string | null | undefined
@@ -99,38 +70,11 @@ const clearAllGraphics = (
   layer: __esri.GraphicsLayer,
   state: CursorGraphicsState
 ): void => {
-  if (state.pointGraphic) {
-    layer.remove(state.pointGraphic);
-    state.pointGraphic = null;
-  }
   if (state.tooltipGraphic) {
     layer.remove(state.tooltipGraphic);
     state.tooltipGraphic = null;
   }
   state.lastTooltipText = null;
-};
-
-const createPointGraphic = (
-  modules: EsriModules,
-  mapPoint: __esri.Point,
-  highlightColor: [number, number, number, number]
-): __esri.Graphic => {
-  const cacheKey = highlightColor.join(",");
-  let symbol = symbolCache.get(cacheKey);
-
-  if (!symbol) {
-    symbol = new modules.SimpleMarkerSymbol({
-      style: "cross",
-      size: HIGHLIGHT_MARKER_SIZE,
-      color: highlightColor,
-      outline: { color: createOpaqueColor(highlightColor), width: 2.5 },
-    });
-    symbolCache.set(cacheKey, symbol);
-  }
-  return new modules.Graphic({
-    geometry: mapPoint,
-    symbol,
-  });
 };
 
 const updateOrCreateGraphic = <T extends __esri.Graphic>(
@@ -146,23 +90,6 @@ const updateOrCreateGraphic = <T extends __esri.Graphic>(
   }
   update(existing);
   return existing;
-};
-
-const syncPointGraphic = (
-  modules: EsriModules,
-  layer: __esri.GraphicsLayer,
-  state: CursorGraphicsState,
-  mapPoint: __esri.Point,
-  highlightColor: [number, number, number, number]
-): void => {
-  state.pointGraphic = updateOrCreateGraphic(
-    layer,
-    state.pointGraphic,
-    () => createPointGraphic(modules, mapPoint, highlightColor),
-    (graphic) => {
-      graphic.geometry = mapPoint;
-    }
-  );
 };
 
 const syncTooltipGraphic = (
@@ -209,7 +136,6 @@ export const syncCursorGraphics = ({
   layer,
   mapPoint,
   tooltipText,
-  highlightColor,
   existing,
   style = CURSOR_TOOLTIP_STYLE,
 }: {
@@ -217,7 +143,6 @@ export const syncCursorGraphics = ({
   layer: __esri.GraphicsLayer | null;
   mapPoint: __esri.Point | null;
   tooltipText: string | null;
-  highlightColor: [number, number, number, number];
   existing: CursorGraphicsState | null;
   style?: CursorTooltipStyle;
 }): CursorGraphicsState | null => {
@@ -232,8 +157,6 @@ export const syncCursorGraphics = ({
 
   const state: CursorGraphicsState = existing || createCursorTrackingState();
 
-  syncPointGraphic(modules, layer, state, mapPoint, highlightColor);
-
   if (tooltipText) {
     syncTooltipGraphic(modules, layer, state, mapPoint, tooltipText, style);
     return state;
@@ -246,7 +169,6 @@ export const syncCursorGraphics = ({
 export const createCursorTrackingState = (
   overrides?: Partial<CursorGraphicsState>
 ): CursorGraphicsState => ({
-  pointGraphic: null,
   tooltipGraphic: null,
   lastTooltipText: null,
   ...overrides,
@@ -425,6 +347,112 @@ const resetRefState = (...refs: Array<MutableRefObject<unknown>>): void => {
   for (const ref of refs) {
     ref.current = null;
   }
+};
+
+const STANDARD_CURSOR_VALUES = [
+  "auto",
+  "default",
+  "none",
+  "context-menu",
+  "help",
+  "pointer",
+  "progress",
+  "wait",
+  "cell",
+  "crosshair",
+  "text",
+  "vertical-text",
+  "alias",
+  "copy",
+  "move",
+  "no-drop",
+  "not-allowed",
+  "grab",
+  "grabbing",
+  "all-scroll",
+  "col-resize",
+  "row-resize",
+  "n-resize",
+  "e-resize",
+  "s-resize",
+  "w-resize",
+  "ne-resize",
+  "nw-resize",
+  "se-resize",
+  "sw-resize",
+  "ew-resize",
+  "ns-resize",
+  "nesw-resize",
+  "nwse-resize",
+  "zoom-in",
+  "zoom-out",
+] as const;
+
+export const isValidCursorValue = (
+  cursor: string | null | undefined
+): boolean => {
+  if (!cursor || typeof cursor !== "string") return false;
+
+  const trimmed = cursor.trim();
+  if (trimmed.length === 0) return false;
+
+  // Check if it's a standard cursor keyword
+  if (
+    STANDARD_CURSOR_VALUES.includes(
+      trimmed as (typeof STANDARD_CURSOR_VALUES)[number]
+    )
+  ) {
+    return true;
+  }
+
+  if (trimmed.startsWith("url(")) {
+    return true;
+  }
+
+  return false;
+};
+
+export const setCursor = (
+  view: __esri.MapView | null,
+  cursor: string | null | undefined,
+  previousCursorRef: MutableRefObject<string | null>
+): boolean => {
+  if (!view?.container) return false;
+
+  const cursorValue = cursor || "crosshair";
+
+  if (!isValidCursorValue(cursorValue)) {
+    console.warn(`Invalid cursor value: ${cursorValue}`);
+    return false;
+  }
+
+  // Store previous cursor if not already stored
+  if (previousCursorRef.current === null) {
+    previousCursorRef.current = view.container.style.cursor || "";
+  }
+
+  // Set new cursor on container
+  view.container.style.cursor = cursorValue;
+  return true;
+};
+
+export const restoreCursor = (
+  view: __esri.MapView | null,
+  previousCursorRef: MutableRefObject<string | null>
+): boolean => {
+  if (!view?.container) return false;
+  if (previousCursorRef.current === null) return false;
+
+  view.container.style.cursor = previousCursorRef.current;
+  previousCursorRef.current = null;
+  return true;
+};
+
+export const getCurrentCursor = (
+  view: __esri.MapView | null
+): string | null => {
+  if (!view?.container) return null;
+  return view.container.style.cursor || null;
 };
 
 export const cursorLifecycleHelpers = {

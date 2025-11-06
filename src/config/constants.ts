@@ -28,7 +28,6 @@ export const MAX_MASK_ASTERISKS = 3;
 export const DEFAULT_MAX_RESULTS = 100;
 export const OWNER_QUERY_CONCURRENCY = 20;
 
-export const HIGHLIGHT_MARKER_SIZE = 12;
 export const SYMBOL_CACHE_MAX_SIZE = 100;
 
 export const CURSOR_TOOLTIP_STYLE = {
@@ -146,3 +145,21 @@ export const DEFAULT_MASK = "***";
 export const LOCALHOST_PATTERNS = ["localhost", "127.0.0.1", "::1", "[::1]"];
 export const PRIVATE_IP_REGEX =
   /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[0-1])\.)/u;
+
+// Cursor management: Supported CSS cursor values
+export const CURSOR_STYLES = [
+  "auto",
+  "crosshair",
+  "pointer",
+  "move",
+  "grab",
+  "grabbing",
+  "wait",
+  "progress",
+  "not-allowed",
+  "help",
+  "text",
+  "cell",
+] as const;
+
+export const DEFAULT_ACTIVE_CURSOR = "crosshair";

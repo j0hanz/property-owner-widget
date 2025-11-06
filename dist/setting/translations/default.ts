@@ -53,4 +53,10 @@ export default {
   runtimeStateQuerying: "Query in progress...",
   runtimeStateError: "Query error occurred. Check widget for details.",
   runtimeStateSelected: "{count} properties currently selected",
+  cursorStyleLabel: "Active cursor style",
+  cursorStyleDescription:
+    "CSS cursor shown when widget is active. Supports standard values (crosshair, pointer, grab) and custom url() cursors.",
+  cursorStyleTooltip:
+    "Choose cursor style or enter custom CSS value (e.g., url(cursor.png), auto)",
+  cursorStylePlaceholder: "Enter CSS cursor value...",
 };

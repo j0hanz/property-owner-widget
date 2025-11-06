@@ -42,6 +42,7 @@ export interface Config {
   highlightOpacity?: number;
   outlineWidth?: number;
   autoCloseOtherWidgets?: boolean;
+  activeCursor?: string;
 }
 
 export type IMConfig = ImmutableObject<Config>;
@@ -423,7 +424,6 @@ export interface WidgetStartupState {
 // =============================================================================
 
 export interface CursorGraphicsState {
-  pointGraphic: __esri.Graphic | null;
   tooltipGraphic: __esri.Graphic | null;
   lastTooltipText: string | null;
 }
