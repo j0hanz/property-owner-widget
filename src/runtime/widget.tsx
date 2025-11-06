@@ -95,6 +95,7 @@ import {
   notifyCopyOutcome,
   readAppWidgetsFromState,
   restoreCursor,
+  scheduleCursorUpdate,
   scheduleGraphicsRendering,
   setCursor,
   syncCursorGraphics,
@@ -605,27 +606,75 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     performHitTest(event);
   }, 50);
 
+  const handlePointerMove = hooks.useEventCallback(
+    (event: __esri.ViewPointerMoveEvent, view: __esri.MapView) => {
+      const mapPoint = view.toMap({ x: event.x, y: event.y });
+
+      if (!mapPoint) {
+        lastCursorPointRef.current = null;
+        scheduleCursorUpdate({
+          rafIdRef,
+          pendingMapPointRef,
+          nextPoint: null,
+          onUpdate: updateCursorPoint,
+        });
+        cleanupHoverQuery();
+        return;
+      }
+
+      lastCursorPointRef.current = mapPoint;
+      scheduleCursorUpdate({
+        rafIdRef,
+        pendingMapPointRef,
+        nextPoint: mapPoint,
+        onUpdate: updateCursorPoint,
+      });
+      throttledHitTest(event);
+    }
+  );
+
+  const handlePointerLeave = hooks.useEventCallback(() => {
+    lastCursorPointRef.current = null;
+    lastHoverQueryPointRef.current = null;
+    scheduleCursorUpdate({
+      rafIdRef,
+      pendingMapPointRef,
+      nextPoint: null,
+      onUpdate: updateCursorPoint,
+    });
+    cleanupHoverQuery();
+  });
+
   hooks.useUpdateEffect(() => {
     const currentSelection = selectedPropertiesRef.current ?? [];
     if (currentSelection.length === 0) return;
 
     trackFeatureUsage("pii_masking_toggled", piiMaskingEnabled);
 
-    const reformattedProperties = currentSelection.map((row) => {
+    // Performance: Pre-allocate result array
+    const reformattedProperties = new Array<GridRowData>(
+      currentSelection.length
+    );
+    const len = currentSelection.length;
+
+    for (let i = 0; i < len; i++) {
+      const row = currentSelection[i];
       if (!row.rawOwner || typeof row.rawOwner !== "object") {
-        return row;
+        reformattedProperties[i] = row;
+        continue;
       }
+
       const formattedOwner = formatOwnerInfo(
         row.rawOwner,
         piiMaskingEnabled,
         translate("unknownOwner")
       );
-      return {
+      reformattedProperties[i] = {
         ...row,
         BOSTADR: formattedOwner,
         ADDRESS: formattedOwner,
       };
-    });
+    }
 
     dispatch(
       propertyActions.setSelectedProperties(reformattedProperties, widgetId)
@@ -634,23 +683,27 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   hooks.useUpdateEffect(() => {
     const currentSelection = selectedPropertiesRef.current ?? [];
-    if (currentSelection.length <= maxResults) return;
+    const currentCount = currentSelection.length;
+
+    // Performance: Early exit if already under limit
+    if (currentCount <= maxResults) return;
 
     trackEvent({
       category: "Property",
       action: "max_results_trim",
-      value: currentSelection.length - maxResults,
+      value: currentCount - maxResults,
     });
 
     const trimmedProperties = currentSelection.slice(0, maxResults);
     const removedProperties = currentSelection.slice(maxResults);
 
-    removedProperties.forEach((prop) => {
-      const fnr = prop.FNR;
+    // Performance: Batch highlight removals
+    for (let i = 0; i < removedProperties.length; i++) {
+      const fnr = removedProperties[i].FNR;
       if (fnr != null) {
         removeHighlightForFnr(fnr, normalizeFnrKey);
       }
-    });
+    }
 
     dispatch(
       propertyActions.setSelectedProperties(trimmedProperties, widgetId)
@@ -658,9 +711,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
     const existingRaw = rawPropertyResultsRef.current;
     if (existingRaw && Object.keys(existingRaw).length > 0) {
+      // Performance: Pre-allocate result map
       const nextRaw: SerializedQueryResultMap = {};
+      const removedIds = new Set(removedProperties.map((prop) => prop.id));
+
       Object.keys(existingRaw).forEach((key) => {
-        if (!removedProperties.some((prop) => prop.id === key)) {
+        if (!removedIds.has(key)) {
           const rawValue = existingRaw[key];
           if (rawValue) {
             const clonedValue = JSON.parse(
@@ -1029,26 +1085,23 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       isActive && !!modules?.TextSymbol && !!modules?.Graphic;
 
     if (canTrackCursor) {
-      // Set custom CSS cursor when widget becomes active
       setCursor(view, config.activeCursor || "crosshair", previousCursorRef);
 
-      cursorLifecycleHelpers.setupCursorTracking({
-        view,
-        widgetId,
-        ensureGraphicsLayer,
-        cachedLayerRef,
-        pointerMoveHandleRef,
-        pointerLeaveHandleRef,
-        rafIdRef,
-        lastCursorPointRef,
-        pendingMapPointRef,
-        lastHoverQueryPointRef,
-        updateCursorPoint,
-        throttledHitTest,
-        cleanupHoverQuery,
+      ensureGraphicsLayer(view);
+      cachedLayerRef.current = view.map.findLayerById(
+        `property-${widgetId}-highlight-layer`
+      ) as __esri.GraphicsLayer | null;
+
+      // Performance: Use extracted handlers to reduce closure overhead
+      pointerMoveHandleRef.current = view.on("pointer-move", (event) => {
+        handlePointerMove(event, view);
       });
+
+      pointerLeaveHandleRef.current = view.on(
+        "pointer-leave",
+        handlePointerLeave
+      );
     } else {
-      // Restore previous cursor when widget becomes inactive
       restoreCursor(view, previousCursorRef);
 
       cursorLifecycleHelpers.resetCursorState({
@@ -1072,7 +1125,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         clearGraphics: clearCursorGraphics,
         cleanupQuery: cleanupHoverQuery,
       });
-      // Restore cursor on cleanup
       restoreCursor(view, previousCursorRef);
     };
   }, [runtimeState, modules, widgetId, config.activeCursor]);
@@ -1144,15 +1196,19 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     getCurrentView,
   ]);
 
+  const performWidgetCleanup = hooks.useEventCallback(() => {
+    handleWidgetReset();
+    cleanup();
+  });
+
   hooks.useUpdateEffect(() => {
     if (
       runtimeState === WidgetState.Closed &&
       prevRuntimeState !== WidgetState.Closed
     ) {
-      handleWidgetReset();
-      cleanup();
+      performWidgetCleanup();
     }
-  }, [runtimeState, prevRuntimeState, handleWidgetReset, cleanup]);
+  }, [runtimeState, prevRuntimeState, performWidgetCleanup]);
 
   hooks.useUpdateEffect(() => {
     const isOpening =

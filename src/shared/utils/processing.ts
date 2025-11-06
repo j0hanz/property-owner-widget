@@ -111,19 +111,26 @@ const createOwnerRows = (
   geometryType: string | null,
   serializedGeometry: SerializedRecord | null
 ): GridRowData[] => {
-  return deduplicateOwnerEntries(owners, {
+  // Deduplicate owner entries based on FNR and property ID
+  const deduplicated = deduplicateOwnerEntries(owners, {
     fnr: validated.fnr,
     propertyId: validated.attrs.UUID_FASTIGHET,
-  }).map((owner) =>
-    mapOwnerToGridRow(
-      owner,
+  });
+
+  const len = deduplicated.length;
+  const rows = new Array<GridRowData>(len);
+  for (let i = 0; i < len; i++) {
+    rows[i] = mapOwnerToGridRow(
+      deduplicated[i],
       validated,
       maskPII,
       context,
       geometryType,
       serializedGeometry
-    )
-  );
+    );
+  }
+
+  return rows;
 };
 
 const createFallbackRow = (
@@ -389,8 +396,12 @@ const buildFnrGroupMap = <T extends { FNR: string | number; id: string }>(
   const byFnr = new Map<string, T[]>();
   const seenIds = new Set<string>();
   const fnrKeys = new Map<T, string>();
+  // Performance: Pre-allocate capacity hints for large datasets
+  const len = properties.length;
 
-  for (const row of properties) {
+  for (let i = 0; i < len; i++) {
+    const row = properties[i];
+    // Cache normalized key to avoid repeated String() conversions
     const fnrKey = normalizeFnrKey(row.FNR);
     fnrKeys.set(row, fnrKey);
 
@@ -459,12 +470,24 @@ const applyRemovalsAndAdditions = <
   toAdd: T[],
   maxResults: number
 ): T[] => {
-  const filtered =
-    toRemove.size > 0
-      ? existingProperties.filter(
-          (row) => !toRemove.has(normalizeFnrKey(row.FNR))
-        )
-      : existingProperties;
+  // Performance: Early exit if no removals
+  if (toRemove.size === 0) {
+    const combined = [...existingProperties, ...toAdd];
+    return combined.length > maxResults
+      ? combined.slice(0, maxResults)
+      : combined;
+  }
+
+  // Pre-compute normalized keys once for all existing properties
+  const normalizedKeys = new Map<T, string>();
+  for (const row of existingProperties) {
+    normalizedKeys.set(row, normalizeFnrKey(row.FNR));
+  }
+
+  const filtered = existingProperties.filter((row) => {
+    const key = normalizedKeys.get(row);
+    return key !== undefined && !toRemove.has(key);
+  });
 
   const combined = [...filtered, ...toAdd];
   return combined.length > maxResults
@@ -551,9 +574,16 @@ const buildPropertyResultsLookup = (
   const lookup = new Map<string, SerializedQueryResult>();
   const len = propertyResults.length;
 
+  // Performance: Direct loop with early continue (faster than filter chains)
   for (let i = 0; i < len; i++) {
     const result = propertyResults[i];
-    const fnrValue = extractFnrFromFeature(result?.features?.[0]);
+    if (!result) continue;
+
+    const features = result.features;
+    if (!features || features.length === 0) continue;
+
+    const feature = features[0];
+    const fnrValue = extractFnrFromFeature(feature);
     if (fnrValue !== null) {
       lookup.set(normalize(fnrValue), serializePropertyResult(result));
     }

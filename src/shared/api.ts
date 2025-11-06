@@ -172,9 +172,17 @@ const validateAndDeduplicateProperties = (
   const limit =
     typeof maxResults === "number" ? maxResults : propertyResults.length;
   const seenFnrs = new Map<string, ValidatedProperty>();
+  const len = propertyResults.length;
 
-  for (let i = 0; i < propertyResults.length && seenFnrs.size < limit; i++) {
-    const feature = propertyResults[i]?.features?.[0];
+  // Performance: Direct indexed loop faster than for-of for large arrays
+  for (let i = 0; i < len && seenFnrs.size < limit; i++) {
+    const result = propertyResults[i];
+    const features = result?.features;
+    if (!features || features.length === 0) {
+      continue;
+    }
+
+    const feature = features[0];
     if (!feature?.attributes || !feature.geometry) {
       continue;
     }
@@ -604,12 +612,28 @@ export const queryOwnersByRelationship = async (
       const settled = await Promise.all(
         slice.map((createRequest) => createRequest())
       );
-      settled.forEach((result) => {
+
+      // Performance: Pre-calculate total records to reduce array growth
+      let totalRecords = 0;
+      for (let j = 0; j < settled.length; j++) {
+        const result = settled[j];
         const records = ((result?.records ?? []) as FeatureDataRecord[]) || [];
-        if (records.length > 0) {
-          propertyRecords.push(...records);
+        totalRecords += records.length;
+      }
+
+      // Pre-allocate space for all records in this batch
+      const startLength = propertyRecords.length;
+      propertyRecords.length = startLength + totalRecords;
+
+      let writeIndex = startLength;
+      for (let j = 0; j < settled.length; j++) {
+        const result = settled[j];
+        const records = ((result?.records ?? []) as FeatureDataRecord[]) || [];
+        for (let k = 0; k < records.length; k++) {
+          propertyRecords[writeIndex++] = records[k];
         }
-      });
+      }
+
       abortHelpers.throwIfAborted(options?.signal);
     }
 

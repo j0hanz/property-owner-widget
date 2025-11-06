@@ -219,29 +219,44 @@ export const useGraphicsLayer = (params: {
   const highlightGraphicsMapRef = React.useRef<Map<string, __esri.Graphic>>(
     new Map()
   );
+  const cachedLayerRef = React.useRef<__esri.GraphicsLayer | null>(null);
 
   const ensureHighlightLayer = hooks.useEventCallback(
     (view: __esri.MapView | null | undefined): __esri.GraphicsLayer | null => {
+      // Guard: Early exit if prerequisites missing
       if (!view || !modules) {
         return null;
       }
 
+      // Performance: Return existing layer if valid
       if (highlightLayerRef.current && !highlightLayerRef.current.destroyed) {
         return highlightLayerRef.current;
       }
 
-      const layer = new modules.GraphicsLayer({
-        listMode: "hide",
-        title: `Property Highlights - ${widgetId}`,
-      });
+      const layerId = `Property Highlights - ${widgetId}`;
+      const existing = view.map.findLayerById(layerId);
 
-      view.map.add(layer);
-      highlightLayerRef.current = layer;
+      if (existing) return existing as __esri.GraphicsLayer;
+
+      // Create and cache new layer
+      if (!cachedLayerRef.current) {
+        cachedLayerRef.current = new modules.GraphicsLayer({
+          id: layerId,
+          listMode: "hide",
+          title: layerId,
+        });
+      }
+
+      if (!view.map.findLayerById(cachedLayerRef.current.id)) {
+        view.map.add(cachedLayerRef.current);
+      }
+
+      highlightLayerRef.current = cachedLayerRef.current;
       console.log("Created highlight GraphicsLayer", {
         widgetId: widgetIdRef.current,
-        layerId: layer.id,
+        layerId: cachedLayerRef.current.id,
       });
-      return layer;
+      return cachedLayerRef.current;
     }
   );
 
@@ -280,6 +295,7 @@ export const useGraphicsLayer = (params: {
   });
 
   const symbolCacheRef = React.useRef<Map<string, __esri.Symbol>>(new Map());
+  const MAX_SYMBOL_CACHE_SIZE = 100;
 
   const createHighlightSymbol = hooks.useEventCallback(
     (
@@ -331,9 +347,100 @@ export const useGraphicsLayer = (params: {
       }
 
       if (symbol) {
+        // LRU eviction: Remove oldest entry if cache exceeds limit
+        if (symbolCacheRef.current.size >= MAX_SYMBOL_CACHE_SIZE) {
+          const firstKey = symbolCacheRef.current.keys().next().value;
+          if (firstKey) symbolCacheRef.current.delete(firstKey);
+        }
         symbolCacheRef.current.set(cacheKey, symbol);
       }
       return symbol;
+    }
+  );
+
+  const processHighlightEntry = hooks.useEventCallback(
+    (params: {
+      graphic: __esri.Graphic;
+      fnr: FnrValue | null | undefined;
+      extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null;
+      normalizeFnrKey: (fnr: FnrValue | null | undefined) => string;
+      highlightColor: [number, number, number, number];
+      outlineWidth: number;
+      layer: __esri.GraphicsLayer;
+      processedKeys: Set<string>;
+    }): boolean => {
+      const {
+        graphic,
+        fnr,
+        extractFnr,
+        normalizeFnrKey,
+        highlightColor,
+        outlineWidth,
+        layer,
+        processedKeys,
+      } = params;
+
+      const attributes = (graphic.attributes ?? null) as AttributeMap | null;
+      const resolvedFnr = fnr ?? extractFnr(attributes);
+
+      if (resolvedFnr === null || resolvedFnr === undefined) {
+        return false;
+      }
+
+      const key = normalizeFnrKey(resolvedFnr);
+      if (processedKeys.has(key)) {
+        return false;
+      }
+
+      processedKeys.add(key);
+      removeHighlightForKey(key);
+
+      const geometry = graphic.geometry;
+      if (!geometry) {
+        console.log("highlightGraphics: Graphic has no geometry", {
+          widgetId: widgetIdRef.current,
+          fnr: resolvedFnr,
+        });
+        return false;
+      }
+
+      const symbol = createHighlightSymbol(
+        geometry,
+        highlightColor,
+        outlineWidth
+      );
+
+      if (!symbol) {
+        console.log("highlightGraphics: Could not create symbol", {
+          widgetId: widgetIdRef.current,
+          geometryType: geometry.type,
+        });
+        return false;
+      }
+
+      try {
+        const highlightGraphic = new modules.Graphic({
+          geometry,
+          symbol,
+          attributes: { fnr: resolvedFnr },
+        });
+
+        layer.add(highlightGraphic);
+        highlightGraphicsMapRef.current.set(key, highlightGraphic);
+
+        console.log("highlightGraphics: Added highlight", {
+          widgetId: widgetIdRef.current,
+          fnr: resolvedFnr,
+          geometryType: geometry.type,
+        });
+        return true;
+      } catch (error) {
+        console.log("Failed to highlight property feature", {
+          error,
+          widgetId: widgetIdRef.current,
+        });
+        return false;
+      }
     }
   );
 
@@ -358,6 +465,7 @@ export const useGraphicsLayer = (params: {
         outlineWidth,
       } = params;
 
+      // Guard: Early exit if preconditions not met
       if (!view || entries.length === 0 || !modules) {
         return;
       }
@@ -372,66 +480,20 @@ export const useGraphicsLayer = (params: {
 
       const processedKeys = new Set<string>();
 
-      entries.forEach(({ graphic, fnr }) => {
-        const attributes = (graphic.attributes ?? null) as AttributeMap | null;
-        const resolvedFnr = fnr ?? extractFnr(attributes);
-
-        if (resolvedFnr === null || resolvedFnr === undefined) {
-          return;
-        }
-
-        const key = normalizeFnrKey(resolvedFnr);
-        if (processedKeys.has(key)) {
-          return;
-        }
-
-        processedKeys.add(key);
-        removeHighlightForKey(key);
-        try {
-          const geometry = graphic.geometry;
-          if (!geometry) {
-            console.log("highlightGraphics: Graphic has no geometry", {
-              widgetId: widgetIdRef.current,
-              fnr: resolvedFnr,
-            });
-            return;
-          }
-
-          const symbol = createHighlightSymbol(
-            geometry,
-            highlightColor,
-            outlineWidth
-          );
-
-          if (!symbol) {
-            console.log("highlightGraphics: Could not create symbol", {
-              widgetId: widgetIdRef.current,
-              geometryType: geometry.type,
-            });
-            return;
-          }
-
-          const highlightGraphic = new modules.Graphic({
-            geometry,
-            symbol,
-            attributes: { fnr: resolvedFnr },
-          });
-
-          layer.add(highlightGraphic);
-          highlightGraphicsMapRef.current.set(key, highlightGraphic);
-
-          console.log("highlightGraphics: Added highlight", {
-            widgetId: widgetIdRef.current,
-            fnr: resolvedFnr,
-            geometryType: geometry.type,
-          });
-        } catch (error) {
-          console.log("Failed to highlight property feature", {
-            error,
-            widgetId: widgetIdRef.current,
-          });
-        }
-      });
+      // Performance: Process entries with indexed loop (reduces closure overhead)
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        processHighlightEntry({
+          graphic: entry.graphic,
+          fnr: entry.fnr,
+          extractFnr,
+          normalizeFnrKey,
+          highlightColor,
+          outlineWidth,
+          layer,
+          processedKeys,
+        });
+      }
     }
   );
 

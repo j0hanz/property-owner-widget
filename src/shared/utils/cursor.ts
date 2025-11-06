@@ -111,6 +111,13 @@ const updateOrCreateGraphic = <T extends __esri.Graphic>(
   return existing;
 };
 
+const shouldUpdateTooltipText = (
+  state: CursorGraphicsState,
+  sanitizedText: string
+): boolean => {
+  return state.lastTooltipText !== sanitizedText;
+};
+
 const syncTooltipGraphic = (
   modules: EsriModules,
   layer: __esri.GraphicsLayer,
@@ -125,7 +132,8 @@ const syncTooltipGraphic = (
     return;
   }
 
-  if (state.lastTooltipText === sanitized) {
+  // Performance: Skip symbol creation if text unchanged (reduces DOM updates)
+  if (!shouldUpdateTooltipText(state, sanitized)) {
     if (state.tooltipGraphic) {
       state.tooltipGraphic.geometry = mapPoint;
     }
@@ -165,10 +173,12 @@ export const syncCursorGraphics = ({
   existing: CursorGraphicsState | null;
   style?: CursorTooltipStyle;
 }): CursorGraphicsState | null => {
+  // Guard: Early exit if required modules/layer unavailable
   if (!modules?.Graphic || !modules.TextSymbol || !layer) {
     return existing || null;
   }
 
+  // Guard: Clear state if no map point
   if (!mapPoint) {
     if (existing) clearAllGraphics(layer, existing);
     return null;
@@ -209,6 +219,14 @@ export const scheduleCursorUpdate = (params: {
   onUpdate: (mapPoint: __esri.Point | null) => void;
 }): void => {
   const { rafIdRef, pendingMapPointRef, nextPoint, onUpdate } = params;
+
+  // Avoid scheduling if the point hasn't changed
+  if (nextPoint && pendingMapPointRef.current) {
+    const prev = pendingMapPointRef.current;
+    if (prev.x === nextPoint.x && prev.y === nextPoint.y) {
+      return;
+    }
+  }
 
   pendingMapPointRef.current = nextPoint;
 
