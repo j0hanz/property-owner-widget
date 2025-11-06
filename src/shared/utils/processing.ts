@@ -55,7 +55,7 @@ export const accumulatePropertyRows = (
   currentTotal: number,
   maxResults: number
 ): boolean => {
-  if (!rows || rows.length === 0) {
+  if (rows.length === 0) {
     return currentTotal >= maxResults;
   }
 
@@ -65,9 +65,7 @@ export const accumulatePropertyRows = (
   }
 
   const shouldTruncate = remaining < rows.length;
-  const rowsToAdd = shouldTruncate ? rows.slice(0, remaining) : rows;
-
-  accumulator.rows.push(...rowsToAdd);
+  accumulator.rows.push(...(shouldTruncate ? rows.slice(0, remaining) : rows));
   accumulator.graphics.push({ graphic, fnr });
 
   return shouldTruncate;
@@ -113,12 +111,10 @@ const createOwnerRows = (
   geometryType: string | null,
   serializedGeometry: SerializedRecord | null
 ): GridRowData[] => {
-  const uniqueOwners = deduplicateOwnerEntries(owners, {
+  return deduplicateOwnerEntries(owners, {
     fnr: validated.fnr,
     propertyId: validated.attrs.UUID_FASTIGHET,
-  });
-
-  return uniqueOwners.map((owner) =>
+  }).map((owner) =>
     mapOwnerToGridRow(
       owner,
       validated,
@@ -205,10 +201,7 @@ export const shouldStopAccumulation = (
   accumulatedRows: number,
   maxResults: number
 ): boolean => {
-  if (maxResults <= 0) {
-    return true;
-  }
-  return currentRowCount + accumulatedRows >= maxResults;
+  return maxResults <= 0 || currentRowCount + accumulatedRows >= maxResults;
 };
 
 const extractFeatureFnr = (
@@ -285,28 +278,23 @@ export const deriveToggleState = (params: {
   }
 
   const selectedFnrKeys = buildSelectedFnrSet(selectedProperties, normalize);
-  if (selectedFnrKeys.size === 0) {
-    return null;
-  }
-
   const keysToRemove = collectKeysToRemove(
     propertyResults,
     selectedFnrKeys,
     extract,
     normalize
   );
-  if (!keysToRemove) {
+
+  if (!keysToRemove || keysToRemove.size === 0) {
     return null;
   }
-
-  const updatedRows = selectedProperties.filter(
-    (row) => !keysToRemove.has(normalize(row.FNR))
-  );
 
   return {
     status: "remove_only",
     keysToRemove,
-    updatedRows,
+    updatedRows: selectedProperties.filter(
+      (row) => !keysToRemove.has(normalize(row.FNR))
+    ),
   };
 };
 
@@ -373,7 +361,13 @@ export const isDuplicateProperty = (
   existingProperties: Array<{ FNR: string | number }>
 ): boolean => {
   const fnrKey = normalizeFnrKey(fnr);
-  return existingProperties.some((row) => normalizeFnrKey(row.FNR) === fnrKey);
+  const len = existingProperties.length;
+  for (let i = 0; i < len; i++) {
+    if (normalizeFnrKey(existingProperties[i].FNR) === fnrKey) {
+      return true;
+    }
+  }
+  return false;
 };
 
 export const shouldToggleRemove = (
@@ -390,14 +384,14 @@ const buildFnrGroupMap = <T extends { FNR: string | number; id: string }>(
 ): { byFnr: Map<string, T[]>; seenIds: Set<string> } => {
   const byFnr = new Map<string, T[]>();
   const seenIds = new Set<string>();
-  const propertiesLen = properties.length;
+  const len = properties.length;
 
-  for (let i = 0; i < propertiesLen; i++) {
+  for (let i = 0; i < len; i++) {
     const row = properties[i];
     const fnrKey = normalizeFnrKey(row.FNR);
-    const existingGroup = byFnr.get(fnrKey);
-    if (existingGroup) {
-      existingGroup.push(row);
+    const group = byFnr.get(fnrKey);
+    if (group) {
+      group.push(row);
     } else {
       byFnr.set(fnrKey, [row]);
     }
@@ -413,9 +407,8 @@ const shouldRemoveForToggle = <T extends { FNR: string | number }>(
   toggleEnabled: boolean
 ): boolean => {
   if (!toggleEnabled) return false;
-  const fnrKey = normalizeFnrKey(row.FNR);
-  const existingGroup = existingByFnr.get(fnrKey);
-  return existingGroup != null && existingGroup.length > 0;
+  const existingGroup = existingByFnr.get(normalizeFnrKey(row.FNR));
+  return existingGroup !== undefined && existingGroup.length > 0;
 };
 
 const processRowsForToggleAndDedup = <
@@ -460,28 +453,17 @@ const applyRemovalsAndAdditions = <
   toAdd: T[],
   maxResults: number
 ): T[] => {
-  let updatedRows: T[];
-  const existingLen = existingProperties.length;
+  const filtered =
+    toRemove.size > 0
+      ? existingProperties.filter(
+          (row) => !toRemove.has(normalizeFnrKey(row.FNR))
+        )
+      : existingProperties;
 
-  if (toRemove.size > 0) {
-    updatedRows = [];
-    for (let i = 0; i < existingLen; i++) {
-      const row = existingProperties[i];
-      if (!toRemove.has(normalizeFnrKey(row.FNR))) {
-        updatedRows.push(row);
-      }
-    }
-  } else {
-    updatedRows = existingProperties.slice();
-  }
-
-  updatedRows.push(...toAdd);
-
-  if (updatedRows.length > maxResults) {
-    updatedRows.length = maxResults;
-  }
-
-  return updatedRows;
+  const combined = [...filtered, ...toAdd];
+  return combined.length > maxResults
+    ? combined.slice(0, maxResults)
+    : combined;
 };
 
 export const calculatePropertyUpdates = <
@@ -551,12 +533,9 @@ const extractFnrFromFeature = (
     | undefined;
 
   const fnrValue = attributes?.FNR ?? attributes?.fnr;
-
-  if (typeof fnrValue === "string" || typeof fnrValue === "number") {
-    return fnrValue;
-  }
-
-  return null;
+  return typeof fnrValue === "string" || typeof fnrValue === "number"
+    ? fnrValue
+    : null;
 };
 
 const buildPropertyResultsLookup = (
@@ -564,13 +543,12 @@ const buildPropertyResultsLookup = (
   normalize: (fnr: FnrValue | null | undefined) => string
 ): Map<string, SerializedQueryResult> => {
   const lookup = new Map<string, SerializedQueryResult>();
-  const resultsLen = propertyResults.length;
+  const len = propertyResults.length;
 
-  for (let i = 0; i < resultsLen; i++) {
+  for (let i = 0; i < len; i++) {
     const result = propertyResults[i];
     const fnrValue = extractFnrFromFeature(result?.features?.[0]);
-
-    if (fnrValue != null) {
+    if (fnrValue !== null) {
       lookup.set(normalize(fnrValue), serializePropertyResult(result));
     }
   }
@@ -583,9 +561,9 @@ const buildSelectedPropertiesLookup = (
   normalize: (fnr: FnrValue | null | undefined) => string
 ): Map<string, string> => {
   const lookup = new Map<string, string>();
-  const selectedLen = selectedProperties.length;
+  const len = selectedProperties.length;
 
-  for (let i = 0; i < selectedLen; i++) {
+  for (let i = 0; i < len; i++) {
     const row = selectedProperties[i];
     lookup.set(normalize(row.FNR), row.id);
   }
@@ -855,13 +833,9 @@ export const scheduleGraphicsRendering = (params: {
       outlineWidth,
     });
 
-    if (
-      result &&
-      typeof result === "object" &&
-      "catch" in result &&
-      typeof result.catch === "function"
-    ) {
-      result.catch((error: unknown) => {
+    if (result && typeof result === "object" && "catch" in result) {
+      const promise = result as { catch: (fn: (err: unknown) => void) => void };
+      promise.catch((error: unknown) => {
         console.log("Failed to render selection highlights", error, {
           selectionSize: pipelineResult.updatedRows.length,
         });
@@ -870,11 +844,8 @@ export const scheduleGraphicsRendering = (params: {
   };
 
   if (typeof requestAnimationFrame === "function") {
-    requestAnimationFrame(() => {
-      renderGraphics();
-    });
-    return;
+    requestAnimationFrame(renderGraphics);
+  } else {
+    renderGraphics();
   }
-
-  renderGraphics();
 };

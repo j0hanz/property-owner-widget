@@ -1452,7 +1452,7 @@ describe("Property Widget - Utility Helper Functions", () => {
     expect(
       (state.tooltipGraphic?.symbol as unknown as MockTextSymbol).text
     ).toBe("FAST-1");
-    expect(state.lastTooltipText).toBe("<em>FAST-1</em>");
+    expect(state.lastTooltipText).toBe("FAST-1");
 
     const clearedState = syncCursorGraphics({
       modules,

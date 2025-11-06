@@ -42,17 +42,21 @@ const createSymbolCache = () => {
 
 const symbolCache = createSymbolCache();
 
-export const buildTooltipSymbol = (
-  modules: EsriModules,
-  text: string,
-  style: CursorTooltipStyle
-): __esri.TextSymbol | null => {
+const sanitizeTooltipText = (
+  text: string | null | undefined
+): string | null => {
   if (!text) return null;
-  const sanitized = stripHtml(text);
-  if (!sanitized) return null;
+  const sanitized = stripHtml(text).trim();
+  return sanitized.length > 0 ? sanitized : null;
+};
 
-  return new modules.TextSymbol({
-    text: sanitized,
+const createTooltipTextSymbol = (
+  modules: EsriModules,
+  sanitizedText: string,
+  style: CursorTooltipStyle
+): __esri.TextSymbol =>
+  new modules.TextSymbol({
+    text: sanitizedText,
     color: style.textColor,
     backgroundColor: style.backgroundColor,
     horizontalAlignment: style.horizontalAlignment,
@@ -68,6 +72,16 @@ export const buildTooltipSymbol = (
     },
     kerning: style.kerning,
   } as __esri.TextSymbolProperties);
+
+export const buildTooltipSymbol = (
+  modules: EsriModules,
+  text: string,
+  style: CursorTooltipStyle
+): __esri.TextSymbol | null => {
+  const sanitized = sanitizeTooltipText(text);
+  if (!sanitized) return null;
+
+  return createTooltipTextSymbol(modules, sanitized, style);
 };
 
 const clearTooltipGraphic = (
@@ -85,8 +99,15 @@ const clearAllGraphics = (
   layer: __esri.GraphicsLayer,
   state: CursorGraphicsState
 ): void => {
-  if (state.pointGraphic) layer.remove(state.pointGraphic);
-  if (state.tooltipGraphic) layer.remove(state.tooltipGraphic);
+  if (state.pointGraphic) {
+    layer.remove(state.pointGraphic);
+    state.pointGraphic = null;
+  }
+  if (state.tooltipGraphic) {
+    layer.remove(state.tooltipGraphic);
+    state.tooltipGraphic = null;
+  }
+  state.lastTooltipText = null;
 };
 
 const createPointGraphic = (
@@ -151,18 +172,24 @@ const syncTooltipGraphic = (
   mapPoint: __esri.Point,
   tooltipText: string,
   style: CursorTooltipStyle
-): boolean => {
-  if (state.lastTooltipText === tooltipText) {
+): void => {
+  const sanitized = sanitizeTooltipText(tooltipText);
+  if (!sanitized) {
+    clearTooltipGraphic(layer, state);
+    return;
+  }
+
+  if (state.lastTooltipText === sanitized) {
     if (state.tooltipGraphic) {
       state.tooltipGraphic.geometry = mapPoint;
     }
-    return true;
+    return;
   }
 
-  const symbol = buildTooltipSymbol(modules, tooltipText, style);
+  const symbol = createTooltipTextSymbol(modules, sanitized, style);
   if (!symbol) {
     clearTooltipGraphic(layer, state);
-    return false;
+    return;
   }
 
   state.tooltipGraphic = updateOrCreateGraphic(
@@ -174,8 +201,7 @@ const syncTooltipGraphic = (
       graphic.symbol = symbol;
     }
   );
-  state.lastTooltipText = tooltipText;
-  return true;
+  state.lastTooltipText = sanitized;
 };
 
 export const syncCursorGraphics = ({
@@ -208,12 +234,12 @@ export const syncCursorGraphics = ({
 
   syncPointGraphic(modules, layer, state, mapPoint, highlightColor);
 
-  if (!tooltipText) {
-    clearTooltipGraphic(layer, state);
+  if (tooltipText) {
+    syncTooltipGraphic(modules, layer, state, mapPoint, tooltipText, style);
     return state;
   }
 
-  syncTooltipGraphic(modules, layer, state, mapPoint, tooltipText, style);
+  clearTooltipGraphic(layer, state);
   return state;
 };
 
@@ -409,14 +435,21 @@ export const cursorLifecycleHelpers = {
     clearGraphics: () => void;
     cleanupQuery: () => void;
   }) => {
-    const { pointerMoveHandle, pointerLeaveHandle, rafId, clearGraphics } =
-      refs;
+    const {
+      pointerMoveHandle,
+      pointerLeaveHandle,
+      rafId,
+      clearGraphics,
+      cleanupQuery,
+    } = refs;
 
     // Cancel RAF first to prevent any pending frame from executing
     cancelScheduledUpdate(rafId);
     // Then remove event handles
     removeEventHandle(pointerMoveHandle);
     removeEventHandle(pointerLeaveHandle);
+    // Cancel any ongoing hover work before wiping graphics
+    cleanupQuery();
     // Finally clear graphics
     clearGraphics();
   },
