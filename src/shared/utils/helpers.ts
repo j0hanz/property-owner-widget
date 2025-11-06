@@ -268,16 +268,16 @@ export const buildFnrWhereClause = (
 
 export const cleanupRemovedGraphics = (params: {
   toRemove: Set<string>;
-  removeGraphicsForFnr: (
+  removeHighlightForFnr: (
     fnr: FnrValue,
     normalize: (fnr: FnrValue | null | undefined) => string
   ) => void;
   normalizeFnrKey: (fnr: FnrValue | null | undefined) => string;
 }): void => {
-  const { toRemove, removeGraphicsForFnr, normalizeFnrKey: normalize } = params;
+  const { toRemove, removeHighlightForFnr, normalizeFnrKey: normalize } = params;
 
   toRemove.forEach((fnrKey) => {
-    removeGraphicsForFnr(fnrKey, normalize);
+    removeHighlightForFnr(fnrKey, normalize);
   });
 };
 

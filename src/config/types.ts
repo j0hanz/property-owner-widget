@@ -121,19 +121,24 @@ export interface ExportOptions {
 // =============================================================================
 
 export interface SelectionGraphicsHelpers {
-  addGraphicsToMap: (
-    graphic: __esri.Graphic | null | undefined,
-    view: __esri.MapView | null | undefined,
-    extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null,
-    normalizeFnrKey: (fnr: FnrValue | null | undefined) => NormalizedFnr,
-    highlightColor: [number, number, number, number],
-    outlineWidth: number
+  highlightGraphics: (params: {
+    entries: Array<{ graphic: __esri.Graphic; fnr: FnrValue | null | undefined }>;
+    view: __esri.MapView | null | undefined;
+    extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null;
+    normalizeFnrKey: (fnr: FnrValue | null | undefined) => NormalizedFnr;
+    highlightColor: [number, number, number, number];
+    outlineWidth: number;
+  }) => Promise<void>;
+  removeHighlightForFnr: (
+    fnr: FnrValue | null | undefined,
+    normalizeFnrKey: (fnr: FnrValue | null | undefined) => NormalizedFnr
   ) => void;
-  addManyGraphicsToMap?: (
-    graphics: Array<{ graphic: __esri.Graphic; fnr: FnrValue }>,
+  clearHighlights: () => void;
+  ensureLayerView: (
+    view: __esri.MapView | null | undefined
+  ) => Promise<__esri.FeatureLayerView | null>;
+  applyHighlightOptions: (
     view: __esri.MapView | null | undefined,
-    extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null,
-    normalizeFnrKey: (fnr: FnrValue | null | undefined) => NormalizedFnr,
     highlightColor: [number, number, number, number],
     outlineWidth: number
   ) => void;

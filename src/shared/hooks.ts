@@ -1,4 +1,9 @@
-import { hooks, React, type DataSourceManager } from "jimu-core";
+import {
+  hooks,
+  React,
+  type DataSourceManager,
+  type FeatureLayerDataSource,
+} from "jimu-core";
 import { loadArcGISJSAPIModules } from "jimu-arcgis";
 import type { JimuMapView } from "jimu-arcgis";
 import {
@@ -17,8 +22,6 @@ import type {
 } from "../config/types";
 import { queryPropertyByPoint } from "./api";
 import {
-  batchGraphicsRenderer,
-  createSymbolCache,
   isAbortError,
   logger,
   popupSuppressionManager,
@@ -191,240 +194,424 @@ export const useAbortControllerPool = () => {
   return { getController, releaseController, abortAll };
 };
 
-export const useGraphicsLayer = (
-  modules: EsriModules | null,
-  widgetId: string
-) => {
-  const modulesRef = hooks.useLatest(modules);
+export const useGraphicsLayer = (params: {
+  widgetId: string;
+  propertyDataSourceId?: string;
+  dsManagerRef: React.MutableRefObject<DataSourceManager | null>;
+}) => {
+  const { widgetId, propertyDataSourceId, dsManagerRef } = params;
   const widgetIdRef = hooks.useLatest(widgetId);
-  const graphicsLayerRef = React.useRef<__esri.GraphicsLayer | null>(null);
-  const graphicsMapRef = React.useRef<Map<string | number, __esri.Graphic[]>>(
+  const dataSourceIdRef = hooks.useLatest(propertyDataSourceId ?? null);
+
+  const propertyLayerRef = React.useRef<__esri.FeatureLayer | null>(null);
+  const layerViewRef = React.useRef<__esri.FeatureLayerView | null>(null);
+  const activeViewRef = React.useRef<__esri.MapView | null>(null);
+  const highlightHandlesRef = React.useRef<Map<string, __esri.Handle>>(
     new Map()
   );
-  const symbolCacheRef = React.useRef(createSymbolCache());
 
-  const ensureGraphicsLayer = hooks.useEventCallback(
-    (view: __esri.MapView | null | undefined): boolean => {
-      const currentModules = modulesRef.current;
-      const currentWidgetId = widgetIdRef.current;
-      if (!currentModules || !view || !currentWidgetId) return false;
-
-      const desiredLayerId = `property-${currentWidgetId}-highlight-layer`;
-      const existingLayer = graphicsLayerRef.current;
-
-      if (existingLayer && existingLayer.id !== desiredLayerId) {
-        view.map?.remove(existingLayer);
-        existingLayer.destroy();
-        graphicsLayerRef.current = null;
-      }
-
-      if (!graphicsLayerRef.current) {
-        // Check if layer already exists in map (from previous widget instance)
-        const existingLayerInMap = view.map.findLayerById(
-          desiredLayerId
-        ) as __esri.GraphicsLayer | null;
-        if (existingLayerInMap) {
-          graphicsLayerRef.current = existingLayerInMap;
-          return true;
-        }
-
-        // Only create if truly missing
-        const shortId =
-          currentWidgetId.length > 16
-            ? `${currentWidgetId.substring(0, 16)}...`
-            : currentWidgetId;
-        const layer = new currentModules.GraphicsLayer({
-          id: desiredLayerId,
-          listMode: "hide",
-          title: `Property Highlights (${shortId})`,
-        });
-        view.map.add(layer);
-        graphicsLayerRef.current = layer;
-        return true;
-      }
-
-      if (!view.map.findLayerById(graphicsLayerRef.current.id)) {
-        view.map.add(graphicsLayerRef.current);
-        return true;
-      }
-
-      return false;
+  const normalizeUrl = (value: string | null | undefined): string | null => {
+    if (!value || typeof value !== "string") {
+      return null;
     }
-  );
+    return value.trim().replace(/\/+$/, "").toLowerCase();
+  };
 
-  const clearGraphics = hooks.useEventCallback(() => {
-    if (graphicsLayerRef.current) {
-      graphicsLayerRef.current.removeAll();
+  const isFeatureLayer = (
+    layer: unknown
+  ): layer is __esri.FeatureLayer =>
+    Boolean(layer && typeof layer === "object" && (layer as __esri.Layer).type === "feature");
+
+  const removeHandleForKey = hooks.useEventCallback((key: string) => {
+    const handle = highlightHandlesRef.current.get(key);
+    if (!handle) {
+      return;
     }
-    graphicsMapRef.current.clear();
-    symbolCacheRef.current.clear();
+    try {
+      handle.remove();
+    } catch (error) {
+      logger.debug("Failed to remove highlight handle", {
+        error,
+        widgetId: widgetIdRef.current,
+      });
+    }
+    highlightHandlesRef.current.delete(key);
   });
 
-  const removeGraphicsForFnr = hooks.useEventCallback(
-    (
-      fnr: FnrValue | null | undefined,
-      normalizeFnrKey: (fnr: FnrValue | null | undefined) => string
-    ) => {
-      const layer = graphicsLayerRef.current;
-      if (!layer || fnr == null) return;
-      const fnrKey = normalizeFnrKey(fnr);
-      const graphics = graphicsMapRef.current.get(fnrKey);
-      if (graphics && graphics.length > 0) {
-        layer.removeMany(graphics);
-        graphicsMapRef.current.delete(fnrKey);
+  const clearHighlights = hooks.useEventCallback(() => {
+    highlightHandlesRef.current.forEach((handle) => {
+      try {
+        handle.remove();
+      } catch (error) {
+        logger.debug("Failed to clear highlight handle", {
+          error,
+          widgetId: widgetIdRef.current,
+        });
       }
+    });
+    highlightHandlesRef.current.clear();
+  });
+
+  const collectCandidateUrls = (
+    dataSource: FeatureLayerDataSource | null | undefined
+  ): string[] => {
+    if (!dataSource) {
+      return [];
+    }
+
+    const urls = new Set<string>();
+    const pushUrl = (value: unknown) => {
+      const normalized = normalizeUrl(
+        typeof value === "string" ? value : undefined
+      );
+      if (normalized) {
+        urls.add(normalized);
+      }
+    };
+
+    pushUrl((dataSource as { url?: string }).url);
+
+    const dsJson = (dataSource as {
+      getDataSourceJson?: () => { url?: string } | null;
+    }).getDataSourceJson?.();
+    pushUrl(dsJson?.url);
+
+    const layerDefinition = (dataSource as {
+      getLayerDefinition?: () => { url?: string } | null;
+    }).getLayerDefinition?.();
+    pushUrl(layerDefinition?.url);
+
+    return Array.from(urls);
+  };
+
+  const extractLayerFromDataSource = hooks.useEventCallback(
+    async (
+      dataSource: FeatureLayerDataSource | null | undefined
+    ): Promise<__esri.FeatureLayer | null> => {
+      if (!dataSource) {
+        return null;
+      }
+
+      const directLayer = (dataSource as { layer?: __esri.FeatureLayer }).layer;
+      if (isFeatureLayer(directLayer)) {
+        return directLayer;
+      }
+
+      const getLayer = (dataSource as {
+        getLayer?: () => __esri.FeatureLayer | Promise<__esri.FeatureLayer>;
+      }).getLayer;
+
+      if (typeof getLayer === "function") {
+        try {
+          const result = await getLayer();
+          if (isFeatureLayer(result)) {
+            return result;
+          }
+        } catch (error) {
+          logger.error("Failed to resolve feature layer from data source", {
+            error,
+            widgetId: widgetIdRef.current,
+          });
+        }
+      }
+
+      return null;
     }
   );
 
-  const addGraphicsToMap = hooks.useEventCallback(
+  const findLayerInView = hooks.useEventCallback(
     (
-      graphic: __esri.Graphic | null | undefined,
       view: __esri.MapView | null | undefined,
-      extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null,
-      normalizeFnrKey: (fnr: FnrValue | null | undefined) => string,
-      highlightColor: [number, number, number, number],
-      outlineWidth: number
-    ) => {
-      const currentModules = modulesRef.current;
-      if (!currentModules || !graphic || !view) return;
-      ensureGraphicsLayer(view);
-
-      const layer = graphicsLayerRef.current;
-      if (!layer) return;
-
-      const attributes = (graphic.attributes ?? null) as AttributeMap | null;
-      const fnr = extractFnr(attributes);
-      const symbol = symbolCacheRef.current.getSymbolForGraphic({
-        modules: currentModules,
-        graphic,
-        highlightColor,
-        outlineWidth,
-      });
-      if (!symbol) return;
-
-      // Create a new graphic with the highlight symbol
-      const highlightGraphic = new currentModules.Graphic({
-        geometry: graphic.geometry,
-        symbol,
-        attributes: graphic.attributes
-          ? { ...graphic.attributes, FNR: fnr }
-          : { FNR: fnr },
-      });
-
-      removeGraphicsForFnr(fnr, normalizeFnrKey);
-      layer.add(highlightGraphic);
-
-      if (!fnr) return;
-
-      const fnrKey = normalizeFnrKey(fnr);
-      // Store reference for future removal
-      const existing = graphicsMapRef.current.get(fnrKey);
-      if (existing) {
-        existing.push(highlightGraphic);
-      } else {
-        graphicsMapRef.current.set(fnrKey, [highlightGraphic]);
+      targetUrls: string[]
+    ): __esri.FeatureLayer | null => {
+      if (!view?.map || !targetUrls.length) {
+        return null;
       }
+
+      const urls = new Set(targetUrls);
+      const toArray = <T>(collection: { toArray?: () => T[] } | undefined) =>
+        typeof collection?.toArray === "function" ? collection.toArray() : [];
+
+      const map = view.map as unknown as {
+        allLayers?: { toArray?: () => __esri.Layer[] };
+        layers?: { toArray?: () => __esri.Layer[] };
+      };
+
+      const layers = [
+        ...toArray(map.allLayers),
+        ...toArray(map.layers),
+      ];
+
+      for (const layer of layers) {
+        if (!isFeatureLayer(layer)) {
+          continue;
+        }
+        const layerUrl = normalizeUrl(layer.url ?? "");
+        if (layerUrl && urls.has(layerUrl)) {
+          return layer;
+        }
+      }
+
+      return null;
     }
   );
 
-  const addManyGraphicsToMap = hooks.useEventCallback(
-    (
-      graphics: Array<{
+  const resolveFeatureLayer = hooks.useEventCallback(
+    async (
+      view: __esri.MapView | null | undefined,
+      graphics?: Array<{
         graphic: __esri.Graphic;
         fnr: FnrValue | null | undefined;
-      }>,
+      }>
+    ): Promise<__esri.FeatureLayer | null> => {
+      if (!view) {
+        return null;
+      }
+
+      if (propertyLayerRef.current && !propertyLayerRef.current.destroyed) {
+        return propertyLayerRef.current;
+      }
+
+      if (graphics) {
+        for (const entry of graphics) {
+          const candidate = (entry.graphic as { layer?: __esri.Layer }).layer;
+          if (isFeatureLayer(candidate)) {
+            propertyLayerRef.current = candidate;
+            return candidate;
+          }
+        }
+      }
+
+      const dsManager = dsManagerRef.current;
+      const dataSourceId = dataSourceIdRef.current;
+      let layer: __esri.FeatureLayer | null = null;
+
+      if (dsManager && dataSourceId) {
+        const dataSource = dsManager.getDataSource(
+          dataSourceId
+        ) as FeatureLayerDataSource | null;
+
+        layer = await extractLayerFromDataSource(dataSource);
+        if (!layer) {
+          const candidateUrls = collectCandidateUrls(dataSource);
+          layer = findLayerInView(view, candidateUrls);
+        }
+      }
+
+      if (!layer && graphics) {
+        const graphicUrls = graphics
+          .map((entry) =>
+            normalizeUrl(
+              isFeatureLayer((entry.graphic as { layer?: __esri.Layer }).layer)
+                ? ((entry.graphic as { layer?: __esri.FeatureLayer }).layer
+                    ?.url ?? null)
+                : null
+            )
+          )
+          .filter((url): url is string => Boolean(url));
+
+        layer = findLayerInView(view, graphicUrls);
+      }
+
+      if (layer) {
+        propertyLayerRef.current = layer;
+      } else {
+        logger.warn("Property layer unavailable for highlight", {
+          widgetId: widgetIdRef.current,
+        });
+      }
+
+      return layer;
+    }
+  );
+
+  const ensureLayerView = hooks.useEventCallback(
+    async (
       view: __esri.MapView | null | undefined,
-      extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null,
-      normalizeFnrKey: (fnr: FnrValue | null | undefined) => string,
+      graphics?: Array<{
+        graphic: __esri.Graphic;
+        fnr: FnrValue | null | undefined;
+      }>
+    ): Promise<__esri.FeatureLayerView | null> => {
+      if (!view) {
+        return null;
+      }
+
+      const storedView = activeViewRef.current;
+      if (storedView && storedView !== view) {
+        clearHighlights();
+        layerViewRef.current = null;
+        activeViewRef.current = null;
+      }
+
+      if (layerViewRef.current && !layerViewRef.current.destroyed) {
+        activeViewRef.current = view;
+        return layerViewRef.current;
+      }
+
+      const layer = await resolveFeatureLayer(view, graphics);
+      if (!layer) {
+        return null;
+      }
+
+      try {
+        const layerView = (await view.whenLayerView(layer)) as __esri.LayerView;
+        if (!layerView || layerView.layer?.type !== "feature") {
+          return null;
+        }
+        layerViewRef.current = layerView as __esri.FeatureLayerView;
+        activeViewRef.current = view;
+        return layerViewRef.current;
+      } catch (error) {
+        logger.error("Failed to resolve feature layer view", {
+          error,
+          widgetId: widgetIdRef.current,
+        });
+        return null;
+      }
+    }
+  );
+
+  const applyHighlightOptions = hooks.useEventCallback(
+    (
+      view: __esri.MapView | null | undefined,
       highlightColor: [number, number, number, number],
       outlineWidth: number
     ) => {
-      const currentModules = modulesRef.current;
-      if (!currentModules || !graphics.length || !view) return;
-      ensureGraphicsLayer(view);
+      if (!view) {
+        return;
+      }
 
-      const layer = graphicsLayerRef.current;
-      if (!layer) return;
+      const [r, g, b, a] = highlightColor;
+      const current = view.highlightOptions ?? {};
+      const desiredColor: [number, number, number] = [r, g, b];
+      const needsUpdate =
+        !Array.isArray(current.color) ||
+        current.color.length !== 3 ||
+        current.color.some((value, index) => value !== desiredColor[index]) ||
+        current.fillOpacity !== a;
 
-      const highlightGraphics: __esri.Graphic[] = [];
+      if (needsUpdate) {
+        view.highlightOptions = {
+          ...current,
+          color: desiredColor,
+          fillOpacity: a,
+          haloOpacity:
+            typeof current.haloOpacity === "number"
+              ? current.haloOpacity
+              : Math.min(1, a + 0.25),
+        };
+      }
 
-      graphics.forEach(({ graphic, fnr }) => {
+      // Outline width customization is not supported by highlight handles,
+      // but we keep the parameter to preserve configuration compatibility.
+      void outlineWidth;
+    }
+  );
+
+  const highlightGraphics = hooks.useEventCallback(
+    async (params: {
+      entries: Array<{
+        graphic: __esri.Graphic;
+        fnr: FnrValue | null | undefined;
+      }>;
+      view: __esri.MapView | null | undefined;
+      extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null;
+      normalizeFnrKey: (fnr: FnrValue | null | undefined) => string;
+      highlightColor: [number, number, number, number];
+      outlineWidth: number;
+    }) => {
+      const {
+        entries,
+        view,
+        extractFnr,
+        normalizeFnrKey,
+        highlightColor,
+        outlineWidth,
+      } = params;
+
+      if (!view || entries.length === 0) {
+        return;
+      }
+
+      const layerView = await ensureLayerView(view, entries);
+      if (!layerView) {
+        return;
+      }
+
+      applyHighlightOptions(view, highlightColor, outlineWidth);
+
+      const processedKeys = new Set<string>();
+
+      entries.forEach(({ graphic, fnr }) => {
         const attributes = (graphic.attributes ?? null) as AttributeMap | null;
         const resolvedFnr = fnr ?? extractFnr(attributes);
+
         if (resolvedFnr === null || resolvedFnr === undefined) {
           return;
         }
 
-        const symbol = symbolCacheRef.current.getSymbolForGraphic({
-          modules: currentModules,
-          graphic,
-          highlightColor,
-          outlineWidth,
-        });
-        if (!symbol) return;
+        const key = normalizeFnrKey(resolvedFnr);
+        if (processedKeys.has(key)) {
+          return;
+        }
 
-        const highlightGraphic = new currentModules.Graphic({
-          geometry: graphic.geometry,
-          symbol,
-          attributes: graphic.attributes
-            ? { ...graphic.attributes, FNR: resolvedFnr }
-            : { FNR: resolvedFnr },
-        });
+        processedKeys.add(key);
+        removeHandleForKey(key);
 
-        removeGraphicsForFnr(resolvedFnr, normalizeFnrKey);
-        highlightGraphics.push(highlightGraphic);
-
-        const fnrKey = normalizeFnrKey(resolvedFnr);
-        const existing = graphicsMapRef.current.get(fnrKey);
-        if (existing) {
-          existing.push(highlightGraphic);
-        } else {
-          graphicsMapRef.current.set(fnrKey, [highlightGraphic]);
+        try {
+          const handle = layerView.highlight(graphic);
+          highlightHandlesRef.current.set(key, handle);
+        } catch (error) {
+          logger.error("Failed to highlight property feature", {
+            error,
+            widgetId: widgetIdRef.current,
+          });
         }
       });
+    }
+  );
 
-      if (highlightGraphics.length > 0) {
-        batchGraphicsRenderer({
-          layer,
-          graphics: highlightGraphics,
-          chunkSize: 10,
-        });
+  const removeHighlightForFnr = hooks.useEventCallback(
+    (
+      fnr: FnrValue | null | undefined,
+      normalizeFnrKey: (fnr: FnrValue | null | undefined) => string
+    ) => {
+      if (fnr === null || fnr === undefined) {
+        return;
       }
+      const key =
+        typeof fnr === "string" ? fnr : normalizeFnrKey(fnr as FnrValue);
+      removeHandleForKey(key);
     }
   );
 
   const destroyGraphicsLayer = hooks.useEventCallback(
     (view: __esri.MapView | null | undefined) => {
-      if (!graphicsLayerRef.current) return;
-      const layer = graphicsLayerRef.current;
-      graphicsLayerRef.current = null;
-      graphicsMapRef.current.clear();
-      if (view) {
-        view.map?.remove(layer);
+      if (view && activeViewRef.current === view) {
+        activeViewRef.current = null;
       }
-      layer.destroy();
+      clearHighlights();
+      propertyLayerRef.current = null;
+      layerViewRef.current = null;
     }
   );
 
   hooks.useUnmount(() => {
-    if (graphicsLayerRef.current) {
-      graphicsLayerRef.current.destroy?.();
-      graphicsLayerRef.current = null;
-    }
-    graphicsMapRef.current.clear();
-    symbolCacheRef.current.clear();
+    clearHighlights();
+    propertyLayerRef.current = null;
+    layerViewRef.current = null;
+    activeViewRef.current = null;
   });
 
   return {
-    graphicsLayerRef,
-    graphicsMapRef,
-    ensureGraphicsLayer,
-    clearGraphics,
-    removeGraphicsForFnr,
-    addGraphicsToMap,
-    addManyGraphicsToMap,
+    ensureLayerView,
+    clearHighlights,
+    removeHighlightForFnr,
+    highlightGraphics,
+    applyHighlightOptions,
     destroyGraphicsLayer,
-  };
+  } as const;
 };
 
 export const usePopupManager = (widgetId: string) => {
@@ -485,7 +672,9 @@ export const usePopupManager = (widgetId: string) => {
 
 export const useMapViewLifecycle = (params: {
   modules: EsriModules | null;
-  ensureGraphicsLayer: (view: __esri.MapView) => void;
+  ensureLayerView: (
+    view: __esri.MapView
+  ) => Promise<__esri.FeatureLayerView | null> | null | undefined;
   destroyGraphicsLayer: (view: __esri.MapView) => void;
   disablePopup: (view: __esri.MapView | undefined) => void;
   restorePopup: (view: __esri.MapView | undefined) => void;
@@ -493,7 +682,7 @@ export const useMapViewLifecycle = (params: {
 }) => {
   const {
     modules,
-    ensureGraphicsLayer,
+    ensureLayerView,
     destroyGraphicsLayer,
     disablePopup,
     restorePopup,
@@ -510,7 +699,7 @@ export const useMapViewLifecycle = (params: {
 
   const setupMapView = hooks.useEventCallback((view: __esri.MapView) => {
     disablePopup(view);
-    ensureGraphicsLayer(view);
+    void ensureLayerView(view);
 
     if (mapClickHandleRef.current) {
       mapClickHandleRef.current.remove();

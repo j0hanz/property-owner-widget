@@ -29,6 +29,7 @@ import {
   createRowId,
   extractFnr,
   normalizeFnrKey,
+  logger,
 } from "./helpers";
 import { deduplicateOwnerEntries } from "./privacy";
 import { serializeGeometry, serializePropertyResult } from "./serialization";
@@ -766,7 +767,7 @@ export const updatePropertySelectionState = (params: {
     | null;
   selectedProperties: GridRowData[];
   dispatch: PropertyDispatcher;
-  removeGraphicsForFnr: (
+  removeHighlightForFnr: (
     fnr: FnrValue,
     normalize: (fnr: FnrValue | null | undefined) => string
   ) => void;
@@ -785,7 +786,7 @@ export const updatePropertySelectionState = (params: {
     previousRawResults,
     selectedProperties,
     dispatch,
-    removeGraphicsForFnr,
+    removeHighlightForFnr,
     normalizeFnrKey: normalize,
     highlightColorConfig,
     highlightOpacityConfig,
@@ -804,7 +805,7 @@ export const updatePropertySelectionState = (params: {
 
   cleanupRemovedGraphics({
     toRemove: update.fnrKeysToRemove,
-    removeGraphicsForFnr,
+    removeHighlightForFnr,
     normalizeFnrKey: normalize,
   });
 
@@ -827,7 +828,7 @@ export const scheduleGraphicsRendering = (params: {
   graphicsHelpers: SelectionGraphicsHelpers;
   getCurrentView: () => __esri.MapView | null | undefined;
   isStaleRequest: () => boolean;
-  syncFn: (params: SelectionGraphicsParams) => void;
+  syncFn: (params: SelectionGraphicsParams) => void | Promise<unknown>;
 }): void => {
   const {
     pipelineResult,
@@ -844,7 +845,7 @@ export const scheduleGraphicsRendering = (params: {
       return;
     }
 
-    syncFn({
+    const result = syncFn({
       graphicsToAdd: pipelineResult.graphicsToAdd,
       selectedRows: pipelineResult.updatedRows,
       getCurrentView,
@@ -852,6 +853,14 @@ export const scheduleGraphicsRendering = (params: {
       highlightColor,
       outlineWidth,
     });
+
+    if (result && typeof (result as Promise<unknown>).then === "function") {
+      (result as Promise<unknown>).catch((error) => {
+        logger.error("Failed to render selection highlights", error, {
+          selectionSize: pipelineResult.updatedRows.length,
+        });
+      });
+    }
   };
 
   if (typeof requestAnimationFrame === "function") {
