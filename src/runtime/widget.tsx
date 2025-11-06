@@ -971,14 +971,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         highlightOpacityConfigRef.current
       );
 
-      let tooltipText: string | null = null;
+      let tooltipText: string;
 
       if (hoverTooltipData) {
         tooltipText = tooltipFormatRef.current.replace(
           "{fastighet}",
           hoverTooltipData.fastighet
         );
-      } else if (!isHoverQueryActive) {
+      } else {
         tooltipText = tooltipNoPropertyRef.current;
       }
 

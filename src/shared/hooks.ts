@@ -978,7 +978,6 @@ export const useHoverQuery = (params: HoverQueryParams) => {
         setHoverTooltipData(result);
         setIsHoverQueryActive(false);
       } catch (error) {
-        setHoverTooltipData(null);
         setIsHoverQueryActive(false);
         if (!isAbortError(error)) {
           logger.error("hover_query_error", error);
