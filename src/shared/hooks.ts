@@ -437,14 +437,40 @@ export const useGraphicsLayer = (params: {
       }
 
       if (layer) {
-        propertyLayerRef.current = layer;
-      } else {
-        logger.warn("Property layer unavailable for highlight", {
+        const map = view.map as
+          | (__esri.Map & { findLayerById?: (id: string) => __esri.Layer })
+          | undefined;
+        const layerId = typeof layer.id === "string" ? layer.id : null;
+        const layerFromMap = layerId
+          ? map?.findLayerById?.(layerId)
+          : undefined;
+
+        if (layerFromMap && isFeatureLayer(layerFromMap)) {
+          propertyLayerRef.current = layerFromMap;
+          return layerFromMap;
+        }
+
+        const normalizedUrl = normalizeUrl(layer.url ?? "");
+        if (normalizedUrl) {
+          const located = findLayerInView(view, [normalizedUrl]);
+          if (located) {
+            propertyLayerRef.current = located;
+            return located;
+          }
+        }
+
+        logger.warn("Feature layer resolved outside current map view", {
           widgetId: widgetIdRef.current,
         });
+        propertyLayerRef.current = null;
+        return null;
       }
 
-      return layer;
+      logger.warn("Property layer unavailable for highlight", {
+        widgetId: widgetIdRef.current,
+      });
+      propertyLayerRef.current = null;
+      return null;
     }
   );
 
@@ -490,6 +516,7 @@ export const useGraphicsLayer = (params: {
           error,
           widgetId: widgetIdRef.current,
         });
+        propertyLayerRef.current = null;
         return null;
       }
     }
