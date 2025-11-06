@@ -33,6 +33,7 @@ import {
   CURSOR_TOOLTIP_STYLE,
   EXPORT_FORMATS,
   HOVER_QUERY_TOLERANCE_PX,
+  MAP_CLICK_DEBOUNCE_MS,
 } from "../config/constants";
 import { ErrorType } from "../config/enums";
 import { useWidgetStyles } from "../config/style";
@@ -835,7 +836,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     setError(ErrorType.VALIDATION_ERROR, translate("errorNoDataAvailable"));
   });
 
-  const handleMapClick = hooks.useEventCallback(
+  const handleMapClickCore = hooks.useEventCallback(
     async (event: __esri.ViewClickEvent) => {
       const perfStart = performance.now();
       const tracker = createPerformanceTracker("map_click_query");
@@ -890,6 +891,17 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       } finally {
         releaseController(controller);
       }
+    }
+  );
+
+  const debouncedMapClick = useDebounce(
+    handleMapClickCore,
+    MAP_CLICK_DEBOUNCE_MS
+  );
+
+  const handleMapClick = hooks.useEventCallback(
+    (event: __esri.ViewClickEvent) => {
+      debouncedMapClick(event);
     }
   );
 

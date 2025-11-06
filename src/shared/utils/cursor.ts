@@ -3,6 +3,7 @@ import type { DataSourceManager } from "jimu-core";
 import {
   CURSOR_TOOLTIP_STYLE,
   HIGHLIGHT_MARKER_SIZE,
+  SYMBOL_CACHE_MAX_SIZE,
 } from "../../config/constants";
 import type {
   CursorGraphicsState,
@@ -22,7 +23,7 @@ const createOpaqueColor = (
 
 const createSymbolCache = () => {
   const cache = new Map<string, __esri.SimpleMarkerSymbol>();
-  const maxSize = 10;
+  const maxSize = SYMBOL_CACHE_MAX_SIZE;
 
   return {
     get: (key: string): __esri.SimpleMarkerSymbol | undefined => cache.get(key),

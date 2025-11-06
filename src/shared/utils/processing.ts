@@ -646,10 +646,7 @@ export const updateRawPropertyResults = (
   selectedProperties: Array<{ FNR: string | number; id: string }>,
   normalize: (fnr: FnrValue | null | undefined) => string
 ): Map<string, SerializedQueryResult> => {
-  const prevMap =
-    prev instanceof Map
-      ? prev
-      : new Map(Object.entries(prev || {}).map(([key, value]) => [key, value]));
+  const prevMap = prev instanceof Map ? prev : new Map();
 
   const updated = new Map(prevMap);
   const propertyResultsByFnr = buildPropertyResultsLookup(

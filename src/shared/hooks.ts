@@ -805,11 +805,23 @@ export const useThrottle = <T extends (...args: unknown[]) => void>(
   delay: number
 ): ((...args: Parameters<T>) => void) => {
   const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0;
+  const callbackRef = hooks.useLatest(callback);
+
+  // If delay is 0, return unthrottled callback for instant execution
+  const unthrottled = hooks.useEventCallback((...args: Parameters<T>) => {
+    try {
+      callbackRef.current(...args);
+    } catch (error) {
+      if (!isAbortError(error)) {
+        console.error("Unthrottled function error:", error);
+      }
+    }
+  });
+
   const lastCallTimeRef = React.useRef<number>(0);
   const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingArgsRef = React.useRef<Parameters<T> | null>(null);
   const mountedRef = React.useRef(true);
-  const callbackRef = hooks.useLatest(callback);
 
   const execute = hooks.useEventCallback((args: Parameters<T>) => {
     if (!mountedRef.current) return;
@@ -856,7 +868,7 @@ export const useThrottle = <T extends (...args: unknown[]) => void>(
     };
   });
 
-  return throttled;
+  return safeDelay === 0 ? unthrottled : throttled;
 };
 
 export const useDebounce = <T extends (...args: unknown[]) => void>(
@@ -865,10 +877,26 @@ export const useDebounce = <T extends (...args: unknown[]) => void>(
   options?: { onPendingChange?: (pending: boolean) => void }
 ): DebouncedFn<T> => {
   const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0;
+  const callbackRef = hooks.useLatest(callback);
+
+  // If delay is 0, return undebounced callback for instant execution
+  const undebounced = hooks.useEventCallback((...args: Parameters<T>) => {
+    try {
+      callbackRef.current(...args);
+    } catch (error) {
+      logger.debug("Undebounced function error:", { error });
+    }
+  });
+
+  const undebouncedWithCancel = React.useMemo(() => {
+    const fn = undebounced as DebouncedFn<T>;
+    fn.cancel = () => {}; // No-op cancel for instant execution
+    return fn;
+  }, [undebounced]);
+
   const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = React.useRef(false);
   const mountedRef = React.useRef(true);
-  const callbackRef = hooks.useLatest(callback);
   const optionsRef = hooks.useLatest(options);
 
   const notifyPending = hooks.useEventCallback((next: boolean) => {
@@ -930,7 +958,7 @@ export const useDebounce = <T extends (...args: unknown[]) => void>(
     };
   });
 
-  return debouncedRef.current;
+  return safeDelay === 0 ? undebouncedWithCancel : debouncedRef.current;
 };
 
 export const useHoverQuery = (params: HoverQueryParams) => {
