@@ -97,3 +97,23 @@ export const CSV_HEADERS = [
 
 // Hover query settings
 export const HOVER_QUERY_THROTTLE_MS = 50;
+
+// Redux store action types
+export const PROPERTY_ACTION_TYPES = [
+  "PROPERTY_WIDGET/SET_ERROR",
+  "PROPERTY_WIDGET/CLEAR_ERROR",
+  "PROPERTY_WIDGET/SET_SELECTED_PROPERTIES",
+  "PROPERTY_WIDGET/CLEAR_ALL",
+  "PROPERTY_WIDGET/SET_QUERY_IN_FLIGHT",
+  "PROPERTY_WIDGET/SET_RAW_RESULTS",
+  "PROPERTY_WIDGET/REMOVE_WIDGET_STATE",
+] as const;
+
+// HTML sanitization patterns
+export const HTML_WHITESPACE_PATTERN = /[\s\u00A0\u200B]+/g;
+
+// Sorting and comparison options
+export const SORT_COMPARE_OPTIONS: Intl.CollatorOptions = {
+  numeric: true,
+  sensitivity: "base",
+} as const;

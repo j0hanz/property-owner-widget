@@ -18,6 +18,8 @@ import {
   HEX_COLOR_PATTERN,
   MAX_MASK_ASTERISKS,
   MIN_MASK_LENGTH,
+  HTML_WHITESPACE_PATTERN,
+  SORT_COMPARE_OPTIONS,
 } from "../config/constants";
 import type {
   OwnerAttributes,
@@ -52,12 +54,6 @@ import type {
   CreateGridRowParams,
   HighlightSymbolJSON,
 } from "../config/types";
-
-const HTML_WHITESPACE_PATTERN = /[\s\u00A0\u200B]+/g;
-const SORT_COMPARE_OPTIONS: Intl.CollatorOptions = {
-  numeric: true,
-  sensitivity: "base",
-};
 
 const sanitizeWhitespace = (value: string): string =>
   value.replace(HTML_WHITESPACE_PATTERN, " ").trim();

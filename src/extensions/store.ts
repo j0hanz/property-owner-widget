@@ -14,10 +14,7 @@ import type {
   PropertySubStateMap,
 } from "../config/types";
 import { PropertyActionType } from "../config/enums";
-
-export const PROPERTY_ACTION_TYPES = Object.values(
-  PropertyActionType
-) as PropertyActionType[];
+import { PROPERTY_ACTION_TYPES } from "../config/constants";
 
 export const propertyActions = {
   setError: (error: ErrorState | null, widgetId: string): PropertyAction => ({
