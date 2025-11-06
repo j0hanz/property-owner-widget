@@ -945,9 +945,21 @@ export const useHoverQuery = (params: HoverQueryParams) => {
     null
   );
   const hasCompletedFirstQueryRef = React.useRef(false);
+  const queryResultCacheRef = React.useRef<
+    Map<string, { fastighet: string; bostadr: string } | null>
+  >(new Map());
 
   const queryPropertyAtPoint = hooks.useEventCallback(
     async (mapPoint: __esri.Point) => {
+      const cacheKey = `${Math.round(mapPoint.x / 10) * 10},${Math.round(mapPoint.y / 10) * 10}`;
+      const cachedResult = queryResultCacheRef.current.get(cacheKey);
+
+      if (cachedResult !== undefined) {
+        hasCompletedFirstQueryRef.current = true;
+        setHoverTooltipData(cachedResult);
+        return;
+      }
+
       if (hoverQueryAbortRef.current) {
         hoverQueryAbortRef.current.abort();
         hoverQueryAbortRef.current = null;
@@ -977,6 +989,13 @@ export const useHoverQuery = (params: HoverQueryParams) => {
         }
 
         hasCompletedFirstQueryRef.current = true;
+        queryResultCacheRef.current.set(cacheKey, result);
+
+        if (queryResultCacheRef.current.size > 100) {
+          const firstKey = queryResultCacheRef.current.keys().next().value;
+          queryResultCacheRef.current.delete(firstKey);
+        }
+
         setHoverTooltipData(result);
         setIsHoverQueryActive(false);
       } catch (error) {
@@ -1001,6 +1020,7 @@ export const useHoverQuery = (params: HoverQueryParams) => {
     setIsHoverQueryActive(false);
     lastHoverQueryPointRef.current = null;
     hasCompletedFirstQueryRef.current = false;
+    queryResultCacheRef.current.clear();
   });
 
   hooks.useUnmount(() => {
