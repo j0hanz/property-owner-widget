@@ -6,7 +6,12 @@ import type {
   IMConfig,
   MapClickValidationParams,
   EsriModules,
+  ValidationPipelineExecutor,
 } from "../../config/types";
+import { LOCALHOST_PATTERNS, PRIVATE_IP_REGEX } from "../../config/constants";
+import { validateNumericRange } from "./helpers";
+
+export { validateNumericRange };
 
 export const checkValidationFailure = <T>(
   result: ValidationResult<T>
@@ -22,6 +27,22 @@ export const createValidationError = (
   failureReason,
 });
 
+const extractUrlFromObject = (obj: unknown): string | null => {
+  if (!obj || typeof obj !== "object") {
+    return null;
+  }
+  const candidate = (obj as { url?: string | null }).url;
+  return typeof candidate === "string" && candidate ? candidate : null;
+};
+
+const urlRetrievalStrategies = [
+  (ds: FeatureLayerDataSource) => extractUrlFromObject(ds),
+  (ds: FeatureLayerDataSource) =>
+    extractUrlFromObject(ds.getLayerDefinition?.()),
+  (ds: FeatureLayerDataSource) =>
+    extractUrlFromObject(ds.getDataSourceJson?.()),
+];
+
 export const getDataSourceUrl = (
   dataSource: FeatureLayerDataSource | null | undefined
 ): string | null => {
@@ -29,23 +50,10 @@ export const getDataSourceUrl = (
     return null;
   }
 
-  if (typeof (dataSource as { url?: string }).url === "string") {
-    return (dataSource as { url?: string }).url ?? null;
-  }
-
-  const layerDefinition = dataSource.getLayerDefinition?.();
-  if (layerDefinition && typeof layerDefinition === "object") {
-    const candidate = (layerDefinition as { url?: string | null }).url;
-    if (typeof candidate === "string" && candidate) {
-      return candidate;
-    }
-  }
-
-  const dsJson = dataSource.getDataSourceJson?.();
-  if (dsJson && typeof dsJson === "object") {
-    const candidate = (dsJson as { url?: string | null }).url;
-    if (typeof candidate === "string" && candidate) {
-      return candidate;
+  for (const strategy of urlRetrievalStrategies) {
+    const url = strategy(dataSource);
+    if (url) {
+      return url;
     }
   }
 
@@ -60,20 +68,9 @@ const isQueryableDataSource = (
 
 const isPrivateHost = (hostname: string): boolean => {
   const normalized = hostname.trim().toLowerCase();
-  if (
-    normalized === "localhost" ||
-    normalized === "127.0.0.1" ||
-    normalized === "::1" ||
-    normalized === "[::1]"
-  ) {
-    return true;
-  }
-
-  if (/^10\./u.test(normalized) || /^192\.168\./u.test(normalized)) {
-    return true;
-  }
-
-  return /^172\.(1[6-9]|2\d|3[0-1])\./u.test(normalized);
+  return (
+    LOCALHOST_PATTERNS.includes(normalized) || PRIVATE_IP_REGEX.test(normalized)
+  );
 };
 
 const isValidHttpsUrl = (url: URL): boolean => {
@@ -168,6 +165,39 @@ const validateDataSourceUrl = (
   return { valid: true, data: { url } };
 };
 
+const validateDataSourcePair = (
+  dsManager: DataSourceManager,
+  dsId: string,
+  role: "property" | "owner",
+  allowedHosts: readonly string[] | undefined,
+  translate: (key: string) => string
+): ValidationResult<FeatureLayerDataSource> => {
+  const dataSource = dsManager.getDataSource(
+    dsId
+  ) as FeatureLayerDataSource | null;
+
+  const sourceValidation = validateSingleDataSource(
+    dataSource,
+    role,
+    translate
+  );
+  if (!sourceValidation.valid) {
+    return sourceValidation as ValidationResult<FeatureLayerDataSource>;
+  }
+
+  const urlValidation = validateDataSourceUrl(
+    sourceValidation.data.dataSource,
+    role,
+    allowedHosts,
+    translate
+  );
+  if (!urlValidation.valid) {
+    return urlValidation as ValidationResult<FeatureLayerDataSource>;
+  }
+
+  return { valid: true, data: sourceValidation.data.dataSource };
+};
+
 export const validateDataSourcesCore = (params: {
   propertyDsId: string | undefined;
   ownerDsId: string | undefined;
@@ -194,16 +224,11 @@ export const validateDataSourcesCore = (params: {
     );
   }
 
-  const propertyDs = dsManager.getDataSource(
-    propertyDsId
-  ) as FeatureLayerDataSource | null;
-  const ownerDs = dsManager.getDataSource(
-    ownerDsId
-  ) as FeatureLayerDataSource | null;
-
-  const propertyValidation = validateSingleDataSource(
-    propertyDs,
+  const propertyValidation = validateDataSourcePair(
+    dsManager,
+    propertyDsId,
     "property",
+    allowedHosts,
     translate
   );
   if (!propertyValidation.valid) {
@@ -212,44 +237,27 @@ export const validateDataSourcesCore = (params: {
     }>;
   }
 
-  const ownerValidation = validateSingleDataSource(ownerDs, "owner", translate);
-  if (!ownerValidation.valid) {
-    return ownerValidation as ValidationResult<{ manager: DataSourceManager }>;
-  }
-
-  const propertyDataSource = propertyValidation.data.dataSource;
-  const ownerDataSource = ownerValidation.data.dataSource;
-
-  const propertyUrlValidation = validateDataSourceUrl(
-    propertyDataSource,
-    "property",
-    allowedHosts,
-    translate
-  );
-  if (!propertyUrlValidation.valid) {
-    return propertyUrlValidation as ValidationResult<{
-      manager: DataSourceManager;
-    }>;
-  }
-
-  const ownerUrlValidation = validateDataSourceUrl(
-    ownerDataSource,
+  const ownerValidation = validateDataSourcePair(
+    dsManager,
+    ownerDsId,
     "owner",
     allowedHosts,
     translate
   );
-  if (!ownerUrlValidation.valid) {
-    return ownerUrlValidation as ValidationResult<{
-      manager: DataSourceManager;
-    }>;
+  if (!ownerValidation.valid) {
+    return ownerValidation as ValidationResult<{ manager: DataSourceManager }>;
   }
 
   return { valid: true, data: { manager: dsManager } };
 };
 
+type ValidationStep<TContext> = (
+  context: TContext
+) => ValidationResult<TContext>;
+
 export const createValidationPipeline = <TContext>(
-  initialSteps: Array<(context: TContext) => ValidationResult<TContext>> = []
-) => {
+  initialSteps: Array<ValidationStep<TContext>> = []
+): ValidationPipelineExecutor<TContext> => {
   const steps = initialSteps.slice();
 
   const run = (initialContext: TContext): ValidationResult<TContext> => {
@@ -264,14 +272,8 @@ export const createValidationPipeline = <TContext>(
     return { valid: true, data: current };
   };
 
-  const executor = ((context: TContext) => run(context)) as ((
-    context: TContext
-  ) => ValidationResult<TContext>) & {
-    addStep: (
-      step: (context: TContext) => ValidationResult<TContext>
-    ) => typeof executor;
-    run: (context: TContext) => ValidationResult<TContext>;
-  };
+  const executor = ((context: TContext) =>
+    run(context)) as ValidationPipelineExecutor<TContext>;
 
   executor.addStep = (step) => {
     steps.push(step);
@@ -309,7 +311,7 @@ export const validateMapClickInputs = (
   return { valid: true, data: { mapPoint: event.mapPoint } };
 };
 
-export const validateMapClickPipeline = (params: {
+export const validateMapClickRequest = (params: {
   event: __esri.ViewClickEvent | null | undefined;
   modules: EsriModules | null;
   config: IMConfig;
@@ -347,60 +349,15 @@ export const validateMapClickPipeline = (params: {
     }>;
   }
 
-  const validatedMap = mapValidation as {
-    valid: true;
-    data: { mapPoint: __esri.Point };
-  };
-  const validatedDs = dsValidation as {
-    valid: true;
-    data: { manager: DataSourceManager };
-  };
-
   return {
     valid: true,
     data: {
-      mapPoint: validatedMap.data.mapPoint,
-      manager: validatedDs.data.manager,
+      mapPoint: (
+        mapValidation as { valid: true; data: { mapPoint: __esri.Point } }
+      ).data.mapPoint,
+      manager: (
+        dsValidation as { valid: true; data: { manager: DataSourceManager } }
+      ).data.manager,
     },
   };
-};
-
-export const validateMapClickRequest = (params: {
-  event: __esri.ViewClickEvent | null | undefined;
-  modules: EsriModules | null;
-  config: IMConfig;
-  dsManager: DataSourceManager | null;
-  translate: (key: string) => string;
-}): ValidationResult<{
-  mapPoint: __esri.Point;
-  manager: DataSourceManager;
-}> => {
-  const validation = validateMapClickPipeline(params);
-  if (checkValidationFailure(validation)) {
-    return validation;
-  }
-
-  return {
-    valid: true,
-    data: {
-      mapPoint: validation.data.mapPoint,
-      manager: validation.data.manager,
-    },
-  };
-};
-
-export const validateNumericRange = (params: {
-  value: string | number;
-  min: number;
-  max: number;
-  errorMessage: string;
-}): { valid: boolean; normalized?: number; error?: string } => {
-  const { value, min, max, errorMessage } = params;
-  const num = typeof value === "string" ? parseInt(value, 10) : value;
-
-  if (Number.isNaN(num) || num < min || num > max) {
-    return { valid: false, error: errorMessage };
-  }
-
-  return { valid: true, normalized: num };
 };

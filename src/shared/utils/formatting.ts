@@ -1,9 +1,6 @@
-const clampNumber = (value: number, min: number, max: number): number => {
-  if (!Number.isFinite(value)) return min;
-  if (value < min) return min;
-  if (value > max) return max;
-  return value;
-};
+import { clampNumber, numberHelpers } from "./helpers";
+
+export { numberHelpers };
 
 export const formatPropertyWithShare = (
   property: string,
@@ -14,29 +11,6 @@ export const formatPropertyWithShare = (
   return trimmedShare
     ? `${propertyWithNbsp}(${trimmedShare})`
     : propertyWithNbsp;
-};
-
-export const numberHelpers = {
-  isFiniteNumber: (value: unknown): value is number => {
-    return typeof value === "number" && Number.isFinite(value);
-  },
-
-  clamp: (value: number, min: number, max: number): number => {
-    if (!Number.isFinite(value)) return min;
-    if (value < min) return min;
-    if (value > max) return max;
-    return value;
-  },
-
-  clampWithDefault: (
-    value: unknown,
-    min: number,
-    max: number,
-    defaultValue: number
-  ): number => {
-    if (!numberHelpers.isFiniteNumber(value)) return defaultValue;
-    return numberHelpers.clamp(value, min, max);
-  },
 };
 
 export const opacityHelpers = {

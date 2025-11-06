@@ -1,59 +1,15 @@
 import type { ImmutableArray, UseDataSource } from "jimu-core";
 import type { UseDataSourceCandidate } from "../../config/types";
-
-const hasGetter = (
-  value: unknown
-): value is { get: (key: string) => unknown } => {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as { get?: unknown };
-  return typeof candidate.get === "function";
-};
-
-const hasAsMutable = (
-  value: unknown
-): value is {
-  asMutable: (options?: { deep?: boolean }) => UseDataSource | UseDataSource[];
-} => {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as { asMutable?: unknown };
-  return typeof candidate.asMutable === "function";
-};
-
-const isIndexedCollection = (
-  collection: unknown
-): collection is {
-  readonly length?: number;
-  readonly [index: number]: UseDataSourceCandidate;
-} => {
-  if (!collection || typeof collection !== "object") {
-    return false;
-  }
-
-  const candidate = collection as { length?: unknown };
-  return typeof candidate.length === "number";
-};
+import {
+  hasAsMutable,
+  isIndexedCollection,
+  hasFind,
+  extractStringFromImmutable,
+} from "./helpers";
 
 export const dataSourceHelpers = {
   extractId: (useDataSource: UseDataSourceCandidate | null | undefined) => {
-    if (!useDataSource || typeof useDataSource !== "object") {
-      return null;
-    }
-
-    if (hasGetter(useDataSource)) {
-      const value = useDataSource.get("dataSourceId");
-      return typeof value === "string" ? value : null;
-    }
-
-    if ("dataSourceId" in useDataSource) {
-      const value = (useDataSource as { dataSourceId?: unknown }).dataSourceId;
-      return typeof value === "string" ? value : null;
-    }
-
-    return null;
+    return extractStringFromImmutable(useDataSource, "dataSourceId");
   },
 
   findById: (
@@ -69,14 +25,8 @@ export const dataSourceHelpers = {
       return null;
     }
 
-    const collection = useDataSources as {
-      readonly find?: (
-        predicate: (candidate: UseDataSourceCandidate) => boolean
-      ) => UseDataSourceCandidate | undefined;
-    };
-
-    if (typeof collection.find === "function") {
-      const match = collection.find((candidate) => {
+    if (hasFind<UseDataSourceCandidate>(useDataSources)) {
+      const match = useDataSources.find((candidate) => {
         if (!candidate) {
           return false;
         }

@@ -961,22 +961,11 @@ export const runPropertySelectionPipeline = async (
     translate,
   } = params;
 
-  const propQueryStart = performance.now();
-  console.log("[PERF-API] Property query started");
   const propertyResults = await queryPropertyByPoint(
     mapPoint,
     propertyDataSourceId,
     dsManager,
     { signal }
-  );
-  const propQueryEnd = performance.now();
-  console.log(
-    "[PERF-API] Property query completed in",
-    propQueryEnd - propQueryStart,
-    "ms",
-    "(returned",
-    propertyResults.length,
-    "results)"
   );
 
   if (propertyResults.length === 0) {
@@ -1004,8 +993,6 @@ export const runPropertySelectionPipeline = async (
     };
   }
 
-  const processStart = performance.now();
-  console.log("[PERF-API] Processing property results started");
   const processingResult = await processPropertyQueryResults({
     propertyResults,
     config: {
@@ -1039,15 +1026,6 @@ export const runPropertySelectionPipeline = async (
       processIndividual: propertyQueryService.processIndividual,
     },
   });
-  const processEnd = performance.now();
-  console.log(
-    "[PERF-API] Processing completed in",
-    processEnd - processStart,
-    "ms",
-    "(produced",
-    processingResult.rowsToProcess.length,
-    "rows)"
-  );
 
   abortHelpers.throwIfAborted(signal);
 

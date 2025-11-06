@@ -2,63 +2,43 @@ import type { OwnerAttributes, FnrValue } from "../../config/types";
 import {
   MAX_MASK_ASTERISKS,
   MIN_MASK_LENGTH,
-  HTML_WHITESPACE_PATTERN,
+  IDENTITY_KEY_PREFIXES,
+  SPACE_CHAR_CODE,
+  DEFAULT_MASK,
 } from "../../config/constants";
+import { sanitizeTextContent } from "./helpers";
 
-const sanitizeWhitespace = (value: string): string =>
-  value.replace(HTML_WHITESPACE_PATTERN, " ").trim();
+const createMasker = (maskFn: (normalized: string) => string) => {
+  return (value: string): string => {
+    const normalized = sanitizeTextContent(value);
+    if (normalized.length < MIN_MASK_LENGTH) return DEFAULT_MASK;
+    return maskFn(normalized);
+  };
+};
 
-const sanitizeTextContent = (value: string): string => {
-  if (!value) {
-    return "";
-  }
+const maskNameInternal = createMasker((normalized: string): string => {
+  const parts: string[] = [];
+  let start = 0;
+  const len = normalized.length;
 
-  const text = String(value);
-
-  try {
-    if (typeof DOMParser === "undefined") {
-      return sanitizeWhitespace(text);
+  for (let i = 0; i <= len; i += 1) {
+    if (i === len || normalized.charCodeAt(i) === SPACE_CHAR_CODE) {
+      if (i > start) {
+        const part = normalized.substring(start, i);
+        const asterisks = Math.min(MAX_MASK_ASTERISKS, part.length - 1);
+        parts.push(part.charAt(0) + "*".repeat(asterisks));
+      }
+      start = i + 1;
     }
-
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(text, "text/html");
-    const content = doc.body?.textContent ?? "";
-    return sanitizeWhitespace(content);
-  } catch (_error) {
-    return sanitizeWhitespace(text);
   }
-};
 
-export const stripHtml = (value: string): string => sanitizeTextContent(value);
+  return parts.length > 0 ? parts.join(" ") : DEFAULT_MASK;
+});
 
-const stripHtmlInternal = (value: string): string => sanitizeTextContent(value);
-
-const maskText = (text: string, minLength: number): string => {
-  const normalized = stripHtmlInternal(text);
-  if (normalized.length < minLength) return "***";
-  return normalized;
-};
-
-const maskNameInternal = (name: string): string => {
-  const normalized = maskText(name, MIN_MASK_LENGTH);
-  if (normalized === "***") return normalized;
-
-  return normalized
-    .split(" ")
-    .filter(Boolean)
-    .map(
-      (part) =>
-        `${part.charAt(0)}${"*".repeat(Math.min(MAX_MASK_ASTERISKS, part.length - 1))}`
-    )
-    .join(" ");
-};
-
-const maskAddressInternal = (address: string): string => {
-  const normalized = maskText(address, MIN_MASK_LENGTH);
-  if (normalized === "***") return normalized;
-
-  return `${normalized.substring(0, 2)}${"*".repeat(Math.min(5, normalized.length - 2))}`;
-};
+const maskAddressInternal = createMasker((normalized: string): string => {
+  const asteriskCount = Math.min(5, normalized.length - 2);
+  return normalized.substring(0, 2) + "*".repeat(asteriskCount);
+});
 
 export const ownerPrivacy = {
   maskName: maskNameInternal,
@@ -70,55 +50,74 @@ export const maskAddress = ownerPrivacy.maskAddress;
 
 const normalizeOwnerValue = (value: unknown): string => {
   if (value === null || value === undefined) return "";
-  if (typeof value === "number") return stripHtmlInternal(String(value));
-  if (typeof value === "string") return stripHtmlInternal(value);
+  if (typeof value === "number") return sanitizeTextContent(String(value));
+  if (typeof value === "string") return sanitizeTextContent(value);
   return "";
 };
 
+const tryOwnerListStrategy = (
+  owner: Partial<OwnerAttributes>
+): string | null => {
+  const agarLista = normalizeOwnerValue(owner.AGARLISTA);
+  return agarLista
+    ? `${IDENTITY_KEY_PREFIXES.OWNER_LIST}:${agarLista.toLowerCase()}`
+    : null;
+};
+
+const tryAttributeCompositeStrategy = (
+  owner: Partial<OwnerAttributes>
+): string | null => {
+  const parts = [
+    owner.NAMN &&
+      `${IDENTITY_KEY_PREFIXES.NAME}:${normalizeOwnerValue(owner.NAMN)}`,
+    owner.BOSTADR &&
+      `${IDENTITY_KEY_PREFIXES.ADDRESS}:${normalizeOwnerValue(owner.BOSTADR)}`,
+    owner.POSTNR &&
+      `${IDENTITY_KEY_PREFIXES.POSTAL_CODE}:${normalizeOwnerValue(owner.POSTNR)}`,
+    owner.POSTADR &&
+      `${IDENTITY_KEY_PREFIXES.CITY}:${normalizeOwnerValue(owner.POSTADR)}`,
+    owner.ORGNR &&
+      `${IDENTITY_KEY_PREFIXES.ORG_NUMBER}:${normalizeOwnerValue(owner.ORGNR)}`,
+    owner.ANDEL &&
+      `${IDENTITY_KEY_PREFIXES.SHARE}:${normalizeOwnerValue(owner.ANDEL)}`,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join("|").toLowerCase() : null;
+};
+
+const tryIdentifierFallbackStrategy = (
+  owner: Partial<OwnerAttributes>,
+  context: { fnr?: string | number; propertyId?: string }
+): string | null => {
+  const fallback = [
+    context.propertyId &&
+      `${IDENTITY_KEY_PREFIXES.PROPERTY}:${normalizeOwnerValue(context.propertyId)}`,
+    context.fnr !== undefined &&
+      context.fnr !== null &&
+      `${IDENTITY_KEY_PREFIXES.FNR}:${String(context.fnr)}`,
+    owner.OBJECTID !== undefined &&
+      owner.OBJECTID !== null &&
+      `${IDENTITY_KEY_PREFIXES.OBJECT_ID}:${String(owner.OBJECTID)}`,
+    owner.UUID_FASTIGHET &&
+      `${IDENTITY_KEY_PREFIXES.UUID}:${normalizeOwnerValue(owner.UUID_FASTIGHET)}`,
+  ].filter(Boolean);
+  return fallback.length > 0 ? fallback.join("|").toLowerCase() : null;
+};
+
+const getIndexStrategy = (sequence?: number): string => {
+  return `${IDENTITY_KEY_PREFIXES.INDEX}:${sequence ?? 0}`;
+};
+
 const buildOwnerIdentityKey = (
-  owner: Partial<OwnerAttributes> & { [key: string]: unknown },
+  owner: Partial<OwnerAttributes>,
   context: { fnr?: string | number; propertyId?: string },
   sequence?: number
 ): string => {
-  const strategies = [
-    () => {
-      const agarLista = normalizeOwnerValue(owner.AGARLISTA);
-      return agarLista ? `A:${agarLista.toLowerCase()}` : null;
-    },
-    () => {
-      const parts = [
-        owner.NAMN && `N:${normalizeOwnerValue(owner.NAMN)}`,
-        owner.BOSTADR && `B:${normalizeOwnerValue(owner.BOSTADR)}`,
-        owner.POSTNR && `P:${normalizeOwnerValue(owner.POSTNR)}`,
-        owner.POSTADR && `C:${normalizeOwnerValue(owner.POSTADR)}`,
-        owner.ORGNR && `O:${normalizeOwnerValue(owner.ORGNR)}`,
-        owner.ANDEL && `S:${normalizeOwnerValue(owner.ANDEL)}`,
-      ].filter(Boolean);
-      return parts.length > 0 ? parts.join("|").toLowerCase() : null;
-    },
-    () => {
-      const fallback = [
-        context.propertyId && `PR:${normalizeOwnerValue(context.propertyId)}`,
-        context.fnr !== undefined &&
-          context.fnr !== null &&
-          `FN:${String(context.fnr)}`,
-        owner.OBJECTID !== undefined &&
-          owner.OBJECTID !== null &&
-          `OB:${String(owner.OBJECTID)}`,
-        owner.UUID_FASTIGHET &&
-          `UU:${normalizeOwnerValue(owner.UUID_FASTIGHET)}`,
-      ].filter(Boolean);
-      return fallback.length > 0 ? fallback.join("|").toLowerCase() : null;
-    },
-    () => `IX:${sequence ?? 0}`,
-  ];
-
-  for (const strategy of strategies) {
-    const key = strategy();
-    if (key) return key;
-  }
-
-  return `IX:${sequence ?? 0}`;
+  return (
+    tryOwnerListStrategy(owner) ??
+    tryAttributeCompositeStrategy(owner) ??
+    tryIdentifierFallbackStrategy(owner, context) ??
+    getIndexStrategy(sequence)
+  );
 };
 
 export const ownerIdentity = {
@@ -145,30 +144,24 @@ const maskOwnerListEntry = (entry: string): string => {
   return `${ownerPrivacy.maskName(name.trim())} (${orgNr.trim()})`;
 };
 
+const formatPostalCity = (postalCode: string, city: string): string => {
+  if (!postalCode && !city) return "";
+  if (postalCode && city) return `${postalCode} ${city}`;
+  return postalCode || city;
+};
+
 const formatOwnerList = (agarLista: string, maskPII: boolean): string => {
-  const sanitized = stripHtmlInternal(String(agarLista));
+  const sanitized = sanitizeTextContent(String(agarLista));
   const uniqueEntries = deduplicateEntries(sanitized.split(";"));
 
   if (!maskPII) return uniqueEntries.join("; ");
 
-  return uniqueEntries
-    .map((entry) => maskOwnerListEntry(entry))
-    .filter(Boolean)
-    .join("; ");
-};
-
-const ownerInfoCache = new WeakMap<OwnerAttributes, Map<string, string>>();
-
-const getOwnerCacheKey = (maskPII: boolean, unknownOwnerText: string): string =>
-  `${maskPII ? "1" : "0"}|${unknownOwnerText}`;
-
-const getOwnerFormatCache = (owner: OwnerAttributes): Map<string, string> => {
-  let cache = ownerInfoCache.get(owner);
-  if (!cache) {
-    cache = new Map();
-    ownerInfoCache.set(owner, cache);
+  const masked: string[] = [];
+  for (let i = 0; i < uniqueEntries.length; i += 1) {
+    const entry = uniqueEntries[i];
+    if (entry) masked.push(maskOwnerListEntry(entry));
   }
-  return cache;
+  return masked.join("; ");
 };
 
 const formatIndividualOwner = (
@@ -176,27 +169,31 @@ const formatIndividualOwner = (
   maskPII: boolean,
   unknownOwnerText: string
 ): string => {
-  const rawName = stripHtmlInternal(owner.NAMN || "") || unknownOwnerText;
+  const rawName = sanitizeTextContent(owner.NAMN || "") || unknownOwnerText;
   const namePart =
     maskPII && rawName !== unknownOwnerText
       ? ownerPrivacy.maskName(rawName)
       : rawName;
 
-  const rawAddress = stripHtmlInternal(owner.BOSTADR || "");
+  const rawAddress = sanitizeTextContent(owner.BOSTADR || "");
   const addressPart =
     maskPII && rawAddress ? ownerPrivacy.maskAddress(rawAddress) : rawAddress;
 
-  const postalCode = stripHtmlInternal(owner.POSTNR || "").replace(/\s+/g, "");
-  const city = stripHtmlInternal(owner.POSTADR || "");
-  const orgNr = stripHtmlInternal(owner.ORGNR || "");
+  const postalCode = sanitizeTextContent(owner.POSTNR || "").replace(
+    /\s+/g,
+    ""
+  );
+  const city = sanitizeTextContent(owner.POSTADR || "");
+  const orgNr = sanitizeTextContent(owner.ORGNR || "");
 
-  const parts = [
-    namePart,
-    addressPart,
-    postalCode && city ? `${postalCode} ${city}` : postalCode || city,
-  ].filter(Boolean);
+  let result = namePart;
+  if (addressPart) result += result ? ", " + addressPart : addressPart;
 
-  const result = `${parts.join(", ")}${orgNr ? ` (${orgNr})` : ""}`.trim();
+  const postalCity = formatPostalCity(postalCode, city);
+  if (postalCity) result += result ? ", " + postalCity : postalCity;
+
+  if (orgNr) result += " (" + orgNr + ")";
+
   return result || unknownOwnerText;
 };
 
@@ -205,71 +202,57 @@ export const formatOwnerInfo = (
   maskPII: boolean,
   unknownOwnerText: string
 ): string => {
-  const cacheKey = getOwnerCacheKey(maskPII, unknownOwnerText);
-  const cache = getOwnerFormatCache(owner);
-  const cached = cache.get(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
   if (owner.AGARLISTA && typeof owner.AGARLISTA === "string") {
-    const formattedList = formatOwnerList(owner.AGARLISTA, maskPII);
-    cache.set(cacheKey, formattedList);
-    return formattedList;
+    return formatOwnerList(owner.AGARLISTA, maskPII);
   }
-  const formattedOwner = formatIndividualOwner(
-    owner,
-    maskPII,
-    unknownOwnerText
-  );
-  cache.set(cacheKey, formattedOwner);
-  return formattedOwner;
+  return formatIndividualOwner(owner, maskPII, unknownOwnerText);
 };
 
 export const formatAddressOnly = (
   owner: OwnerAttributes,
   maskPII: boolean
 ): string => {
-  const rawAddress = stripHtmlInternal(owner.BOSTADR || "");
+  const rawAddress = sanitizeTextContent(owner.BOSTADR || "");
   const addressPart =
     maskPII && rawAddress ? ownerPrivacy.maskAddress(rawAddress) : rawAddress;
 
-  const postalCode = stripHtmlInternal(owner.POSTNR || "").replace(/\s+/g, "");
-  const city = stripHtmlInternal(owner.POSTADR || "");
+  const postalCode = sanitizeTextContent(owner.POSTNR || "").replace(
+    /\s+/g,
+    ""
+  );
+  const city = sanitizeTextContent(owner.POSTADR || "");
 
-  const parts: string[] = [];
+  let result = addressPart;
+  const postalCity = formatPostalCity(postalCode, city);
+  if (postalCity) result += result ? ", " + postalCity : postalCity;
 
-  if (addressPart) parts.push(addressPart);
-
-  const postalCity = [postalCode, city].filter(Boolean).join(" ");
-  if (postalCity) parts.push(postalCity);
-
-  return parts.join(", ");
+  return result;
 };
 
 export const deduplicateOwnerEntries = (
   owners: OwnerAttributes[],
   context: { fnr: FnrValue; propertyId: string }
 ): OwnerAttributes[] => {
+  if (!owners || owners.length === 0) return [];
+  if (owners.length === 1) return [owners[0]];
+
   const seen = new Set<string>();
   const unique: OwnerAttributes[] = [];
 
-  owners.forEach((owner, index) => {
-    if (!owner || typeof owner !== "object") {
-      return;
-    }
+  for (let i = 0; i < owners.length; i += 1) {
+    const owner = owners[i];
+    if (!owner || typeof owner !== "object") continue;
 
     try {
-      const key = ownerIdentity.buildKey(owner, context, index);
-      if (seen.has(key)) {
-        return;
+      const key = ownerIdentity.buildKey(owner, context, i);
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(owner);
       }
-      seen.add(key);
-      unique.push(owner);
     } catch (_error) {
       unique.push(owner);
     }
-  });
+  }
 
   return unique;
 };

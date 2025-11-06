@@ -16,38 +16,24 @@ import type {
   FnrValue,
   SerializedQueryResult,
   SerializedQueryResultMap,
-  SerializedQueryFeature,
   SerializedRecord,
-  UnknownRecord,
   SelectionGraphicsParams,
   SelectionGraphicsHelpers,
   IMConfig,
   PropertyDispatcher,
 } from "../../config/types";
 import { deduplicateOwnerEntries } from "./privacy";
-import { cleanupRemovedGraphics, isRecord } from "./helpers";
+import {
+  cleanupRemovedGraphics,
+  createRowId,
+  extractFnr,
+  normalizeFnrKey,
+} from "./helpers";
 import { buildHighlightColor } from "./graphics";
 import { getValidatedOutlineWidth } from "./formatting";
+import { serializeGeometry, serializePropertyResult } from "./serialization";
 
-export const createRowId = (fnr: string | number, objectId: number): string =>
-  `${fnr}_${objectId}`;
-
-export const extractFnr = (
-  attributes: { [key: string]: unknown } | null | undefined
-): string | number | null => {
-  if (!attributes) return null;
-  const fnr = attributes.FNR ?? attributes.fnr;
-  if (typeof fnr === "string" || typeof fnr === "number") {
-    return fnr;
-  }
-  return null;
-};
-
-export const normalizeFnrKey = (
-  fnr: string | number | null | undefined
-): string => {
-  return fnr != null ? String(fnr) : "";
-};
+export { createRowId, extractFnr, normalizeFnrKey };
 
 export const createGridRow = (params: CreateGridRowParams): GridRowData => ({
   id: params.createRowId(params.fnr, params.objectId),
@@ -69,67 +55,88 @@ export const accumulatePropertyRows = (
   currentTotal: number,
   maxResults: number
 ): boolean => {
-  if (rows.length === 0) {
+  if (!rows || rows.length === 0) {
     return currentTotal >= maxResults;
   }
 
-  const remaining = Math.max(maxResults - currentTotal, 0);
-  const rowsToAdd = remaining > 0 ? rows.slice(0, remaining) : [];
+  const remaining = maxResults - currentTotal;
+  if (remaining <= 0) {
+    return true;
+  }
+
+  const shouldTruncate = remaining < rows.length;
+  const rowsToAdd = shouldTruncate ? rows.slice(0, remaining) : rows;
 
   accumulator.rows.push(...rowsToAdd);
+  accumulator.graphics.push({ graphic, fnr });
 
-  if (rowsToAdd.length > 0) {
-    accumulator.graphics.push({ graphic, fnr });
-  }
-
-  return currentTotal + rowsToAdd.length >= maxResults;
+  return shouldTruncate;
 };
 
-export const buildPropertyRows = (
+const mapOwnerToGridRow = (
+  owner: OwnerAttributes,
+  validated: ValidatedProperty,
+  maskPII: boolean,
+  context: PropertyProcessingContext,
+  geometryType: string | null,
+  serializedGeometry: SerializedRecord | null
+): GridRowData => {
+  const { fnr, attrs } = validated;
+  const { createRowId, formatOwnerInfo, formatPropertyWithShare } =
+    context.helpers;
+  const { unknownOwner } = context.messages;
+
+  const formattedOwner = formatOwnerInfo(owner, maskPII, unknownOwner);
+
+  return createGridRow({
+    fnr,
+    objectId: owner.OBJECTID ?? attrs.OBJECTID,
+    uuidFastighet: owner.UUID_FASTIGHET ?? attrs.UUID_FASTIGHET,
+    fastighet: formatPropertyWithShare(
+      owner.FASTIGHET ?? attrs.FASTIGHET,
+      owner.ANDEL
+    ),
+    bostadr: formattedOwner,
+    address: formattedOwner,
+    geometryType,
+    geometry: serializedGeometry,
+    createRowId,
+    rawOwner: owner,
+  });
+};
+
+const createOwnerRows = (
   validated: ValidatedProperty,
   owners: OwnerAttributes[],
-  queryFailed: boolean,
   maskPII: boolean,
-  context: PropertyProcessingContext
+  context: PropertyProcessingContext,
+  geometryType: string | null,
+  serializedGeometry: SerializedRecord | null
 ): GridRowData[] => {
-  const geometry = validated.graphic.geometry;
-  const geometryType = geometry?.type ?? null;
-  const serializedGeometry =
-    geometry && typeof geometry.toJSON === "function"
-      ? geometry.toJSON()
-      : null;
+  const uniqueOwners = deduplicateOwnerEntries(owners, {
+    fnr: validated.fnr,
+    propertyId: validated.attrs.UUID_FASTIGHET,
+  });
 
-  if (owners.length > 0) {
-    const uniqueOwners = deduplicateOwnerEntries(owners, {
-      fnr: validated.fnr,
-      propertyId: validated.attrs.UUID_FASTIGHET,
-    });
+  return uniqueOwners.map((owner) =>
+    mapOwnerToGridRow(
+      owner,
+      validated,
+      maskPII,
+      context,
+      geometryType,
+      serializedGeometry
+    )
+  );
+};
 
-    return uniqueOwners.map((owner) => {
-      const formattedOwner = context.helpers.formatOwnerInfo(
-        owner,
-        maskPII,
-        context.messages.unknownOwner
-      );
-
-      return createGridRow({
-        fnr: validated.fnr,
-        objectId: owner.OBJECTID ?? validated.attrs.OBJECTID,
-        uuidFastighet: owner.UUID_FASTIGHET ?? validated.attrs.UUID_FASTIGHET,
-        fastighet: context.helpers.formatPropertyWithShare(
-          owner.FASTIGHET ?? validated.attrs.FASTIGHET,
-          owner.ANDEL
-        ),
-        bostadr: formattedOwner,
-        address: formattedOwner,
-        geometryType,
-        geometry: serializedGeometry,
-        createRowId: context.helpers.createRowId,
-        rawOwner: owner,
-      });
-    });
-  }
-
+const createFallbackRow = (
+  validated: ValidatedProperty,
+  queryFailed: boolean,
+  context: PropertyProcessingContext,
+  geometryType: string | null,
+  serializedGeometry: SerializedRecord | null
+): GridRowData[] => {
   const fallbackMessage = queryFailed
     ? context.messages.errorOwnerQueryFailed
     : context.messages.unknownOwner;
@@ -162,6 +169,37 @@ export const buildPropertyRows = (
   ];
 };
 
+export const buildPropertyRows = (
+  validated: ValidatedProperty,
+  owners: OwnerAttributes[],
+  queryFailed: boolean,
+  maskPII: boolean,
+  context: PropertyProcessingContext
+): GridRowData[] => {
+  const geometry = validated.graphic.geometry;
+  const geometryType = geometry?.type ?? null;
+  const serializedGeometry = serializeGeometry(geometry);
+
+  if (owners.length > 0) {
+    return createOwnerRows(
+      validated,
+      owners,
+      maskPII,
+      context,
+      geometryType,
+      serializedGeometry
+    );
+  }
+
+  return createFallbackRow(
+    validated,
+    queryFailed,
+    context,
+    geometryType,
+    serializedGeometry
+  );
+};
+
 export const shouldStopAccumulation = (
   currentRowCount: number,
   accumulatedRows: number,
@@ -171,6 +209,54 @@ export const shouldStopAccumulation = (
     return true;
   }
   return currentRowCount + accumulatedRows >= maxResults;
+};
+
+const extractFeatureFnr = (
+  result: QueryResult,
+  extract: (
+    attrs: { [key: string]: unknown } | null | undefined
+  ) => FnrValue | null,
+  normalize: (fnr: FnrValue | null | undefined) => string
+): string | null => {
+  const feature = result?.features?.[0];
+  if (!feature?.attributes) {
+    return null;
+  }
+
+  const attributes = feature.attributes as {
+    [key: string]: unknown;
+  };
+  const fnr = extract(attributes);
+
+  return fnr != null ? normalize(fnr) : null;
+};
+
+const buildSelectedFnrSet = (
+  selectedProperties: GridRowData[],
+  normalize: (fnr: FnrValue | null | undefined) => string
+): Set<string> => {
+  return new Set(selectedProperties.map((row) => normalize(row.FNR)));
+};
+
+const collectKeysToRemove = (
+  propertyResults: QueryResult[],
+  selectedFnrKeys: Set<string>,
+  extract: (
+    attrs: { [key: string]: unknown } | null | undefined
+  ) => FnrValue | null,
+  normalize: (fnr: FnrValue | null | undefined) => string
+): Set<string> | null => {
+  const keysToRemove = new Set<string>();
+
+  for (const result of propertyResults) {
+    const key = extractFeatureFnr(result, extract, normalize);
+    if (key == null || !selectedFnrKeys.has(key)) {
+      return null;
+    }
+    keysToRemove.add(key);
+  }
+
+  return keysToRemove.size > 0 ? keysToRemove : null;
 };
 
 export const deriveToggleState = (params: {
@@ -198,39 +284,24 @@ export const deriveToggleState = (params: {
     return null;
   }
 
-  const selectedFnrKeys = new Set(
-    selectedProperties.map((row) => normalize(row.FNR))
-  );
+  const selectedFnrKeys = buildSelectedFnrSet(selectedProperties, normalize);
   if (selectedFnrKeys.size === 0) {
     return null;
   }
 
-  const keysToRemove = new Set<string>();
-
-  for (const result of propertyResults) {
-    const feature = result?.features?.[0] ?? null;
-    const attributes = (feature?.attributes ?? null) as {
-      [key: string]: unknown;
-    } | null;
-    const fnr = extract(attributes);
-    if (fnr == null) {
-      return null;
-    }
-
-    const key = normalize(fnr);
-    if (!selectedFnrKeys.has(key)) {
-      return null;
-    }
-    keysToRemove.add(key);
-  }
-
-  if (keysToRemove.size === 0) {
+  const keysToRemove = collectKeysToRemove(
+    propertyResults,
+    selectedFnrKeys,
+    extract,
+    normalize
+  );
+  if (!keysToRemove) {
     return null;
   }
 
-  const updatedRows = selectedProperties.filter((row) => {
-    return !keysToRemove.has(normalize(row.FNR));
-  });
+  const updatedRows = selectedProperties.filter(
+    (row) => !keysToRemove.has(normalize(row.FNR))
+  );
 
   return {
     status: "remove_only",
@@ -314,6 +385,105 @@ export const shouldToggleRemove = (
   return isDuplicateProperty(fnr, existingProperties);
 };
 
+const buildFnrGroupMap = <T extends { FNR: string | number; id: string }>(
+  properties: T[]
+): { byFnr: Map<string, T[]>; seenIds: Set<string> } => {
+  const byFnr = new Map<string, T[]>();
+  const seenIds = new Set<string>();
+  const propertiesLen = properties.length;
+
+  for (let i = 0; i < propertiesLen; i++) {
+    const row = properties[i];
+    const fnrKey = normalizeFnrKey(row.FNR);
+    const existingGroup = byFnr.get(fnrKey);
+    if (existingGroup) {
+      existingGroup.push(row);
+    } else {
+      byFnr.set(fnrKey, [row]);
+    }
+    seenIds.add(row.id);
+  }
+
+  return { byFnr, seenIds };
+};
+
+const shouldRemoveForToggle = <T extends { FNR: string | number }>(
+  row: T,
+  existingByFnr: Map<string, T[]>,
+  toggleEnabled: boolean
+): boolean => {
+  if (!toggleEnabled) return false;
+  const fnrKey = normalizeFnrKey(row.FNR);
+  const existingGroup = existingByFnr.get(fnrKey);
+  return existingGroup != null && existingGroup.length > 0;
+};
+
+const processRowsForToggleAndDedup = <
+  T extends { FNR: string | number; id: string },
+>(
+  rowsToProcess: T[],
+  existingByFnr: Map<string, T[]>,
+  seenIds: Set<string>,
+  toggleEnabled: boolean
+): { toRemove: Set<string>; toAdd: T[] } => {
+  const toRemove = new Set<string>();
+  const toAdd: T[] = [];
+
+  for (const row of rowsToProcess) {
+    if (shouldRemoveForToggle(row, existingByFnr, toggleEnabled)) {
+      const fnrKey = normalizeFnrKey(row.FNR);
+      const existingGroup = existingByFnr.get(fnrKey);
+      if (existingGroup) {
+        for (const existingRow of existingGroup) {
+          toRemove.add(existingRow.id);
+        }
+      }
+      continue;
+    }
+
+    if (seenIds.has(row.id)) {
+      continue;
+    }
+
+    toAdd.push(row);
+    seenIds.add(row.id);
+  }
+
+  return { toRemove, toAdd };
+};
+
+const applyRemovalsAndAdditions = <
+  T extends { FNR: string | number; id: string },
+>(
+  existingProperties: T[],
+  toRemove: Set<string>,
+  toAdd: T[],
+  maxResults: number
+): T[] => {
+  let updatedRows: T[];
+  const existingLen = existingProperties.length;
+
+  if (toRemove.size > 0) {
+    updatedRows = [];
+    for (let i = 0; i < existingLen; i++) {
+      const row = existingProperties[i];
+      if (!toRemove.has(normalizeFnrKey(row.FNR))) {
+        updatedRows.push(row);
+      }
+    }
+  } else {
+    updatedRows = existingProperties.slice();
+  }
+
+  updatedRows.push(...toAdd);
+
+  if (updatedRows.length > maxResults) {
+    updatedRows.length = maxResults;
+  }
+
+  return updatedRows;
+};
+
 export const calculatePropertyUpdates = <
   T extends { FNR: string | number; id: string },
 >(
@@ -322,54 +492,20 @@ export const calculatePropertyUpdates = <
   toggleEnabled: boolean,
   maxResults: number
 ): { toRemove: Set<string>; toAdd: T[]; updatedRows: T[] } => {
-  const existingByFnr = new Map<string, T[]>();
-  const seenIds = new Set<string>();
-
-  existingProperties.forEach((row) => {
-    const fnrKey = normalizeFnrKey(row.FNR);
-    const existingGroup = existingByFnr.get(fnrKey);
-    if (existingGroup) {
-      existingGroup.push(row);
-    } else {
-      existingByFnr.set(fnrKey, [row]);
-    }
-    seenIds.add(row.id);
-  });
-
-  const toRemove = new Set<string>();
-  const toAdd: T[] = [];
-
-  rowsToProcess.forEach((row) => {
-    const fnrKey = normalizeFnrKey(row.FNR);
-
-    if (toggleEnabled && !toRemove.has(fnrKey)) {
-      const existingGroup = existingByFnr.get(fnrKey);
-      if (existingGroup && existingGroup.length > 0) {
-        toRemove.add(fnrKey);
-        return;
-      }
-    }
-
-    if (seenIds.has(row.id)) {
-      return;
-    }
-
-    toAdd.push(row);
-    seenIds.add(row.id);
-  });
-
-  const updatedRows =
-    toRemove.size > 0
-      ? existingProperties.filter(
-          (row) => !toRemove.has(normalizeFnrKey(row.FNR))
-        )
-      : existingProperties.slice();
-
-  updatedRows.push(...toAdd);
-
-  if (updatedRows.length > maxResults) {
-    updatedRows.length = maxResults;
-  }
+  const { byFnr: existingByFnr, seenIds } =
+    buildFnrGroupMap(existingProperties);
+  const { toRemove, toAdd } = processRowsForToggleAndDedup(
+    rowsToProcess,
+    existingByFnr,
+    seenIds,
+    toggleEnabled
+  );
+  const updatedRows = applyRemovalsAndAdditions(
+    existingProperties,
+    toRemove,
+    toAdd,
+    maxResults
+  );
 
   return { toRemove, toAdd, updatedRows };
 };
@@ -407,6 +543,99 @@ export const processPropertyQueryResults = async (
   });
 };
 
+const extractFnrFromFeature = (
+  feature: __esri.Graphic | undefined
+): string | number | null => {
+  const attributes = feature?.attributes as
+    | { FNR?: unknown; fnr?: unknown }
+    | undefined;
+
+  const fnrValue = attributes?.FNR ?? attributes?.fnr;
+
+  if (typeof fnrValue === "string" || typeof fnrValue === "number") {
+    return fnrValue;
+  }
+
+  return null;
+};
+
+const buildPropertyResultsLookup = (
+  propertyResults: QueryResult[],
+  normalize: (fnr: FnrValue | null | undefined) => string
+): Map<string, SerializedQueryResult> => {
+  const lookup = new Map<string, SerializedQueryResult>();
+  const resultsLen = propertyResults.length;
+
+  for (let i = 0; i < resultsLen; i++) {
+    const result = propertyResults[i];
+    const fnrValue = extractFnrFromFeature(result?.features?.[0]);
+
+    if (fnrValue != null) {
+      lookup.set(normalize(fnrValue), serializePropertyResult(result));
+    }
+  }
+
+  return lookup;
+};
+
+const buildSelectedPropertiesLookup = (
+  selectedProperties: Array<{ FNR: string | number; id: string }>,
+  normalize: (fnr: FnrValue | null | undefined) => string
+): Map<string, string> => {
+  const lookup = new Map<string, string>();
+  const selectedLen = selectedProperties.length;
+
+  for (let i = 0; i < selectedLen; i++) {
+    const row = selectedProperties[i];
+    lookup.set(normalize(row.FNR), row.id);
+  }
+
+  return lookup;
+};
+
+const addProcessedRows = (
+  updated: Map<string, SerializedQueryResult>,
+  rowsToProcess: Array<{ FNR: string | number; id: string }>,
+  propertyResultsByFnr: Map<string, SerializedQueryResult>,
+  propertyResults: QueryResult[],
+  normalize: (fnr: FnrValue | null | undefined) => string
+): void => {
+  let fallbackIndex = 0;
+  const resultsLen = propertyResults.length;
+  const rowsLen = rowsToProcess.length;
+
+  for (let i = 0; i < rowsLen; i++) {
+    const row = rowsToProcess[i];
+    const fnrKey = normalize(row.FNR);
+    let propertyResult = propertyResultsByFnr.get(fnrKey);
+
+    if (!propertyResult && resultsLen > 0) {
+      const fallback = serializePropertyResult(
+        propertyResults[Math.min(fallbackIndex, resultsLen - 1)]
+      );
+      fallbackIndex += 1;
+      propertyResult = fallback;
+    }
+
+    if (propertyResult) {
+      updated.set(row.id, propertyResult);
+    }
+  }
+};
+
+const removeDeletedProperties = (
+  updated: Map<string, SerializedQueryResult>,
+  toRemove: Set<string>,
+  selectedByFnr: Map<string, string>
+): void => {
+  toRemove.forEach((removedKey) => {
+    const removedId = selectedByFnr.get(removedKey);
+    if (removedId) {
+      updated.delete(removedId);
+    }
+  });
+};
+
 export const updateRawPropertyResults = (
   prev:
     | Map<string, SerializedQueryResult>
@@ -422,162 +651,24 @@ export const updateRawPropertyResults = (
       ? prev
       : new Map(Object.entries(prev || {}).map(([key, value]) => [key, value]));
 
-  const structuredCloneFn = (
-    globalThis as unknown as {
-      structuredClone?: (value: unknown) => unknown;
-    }
-  ).structuredClone;
-
-  const clonePlainValue = (value: unknown): unknown => {
-    if (value == null) {
-      return null;
-    }
-
-    if (
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "boolean"
-    ) {
-      return value;
-    }
-
-    if (typeof structuredCloneFn === "function") {
-      try {
-        return structuredCloneFn(value);
-      } catch (_error) {
-        // Fall back to manual cloning when structuredClone is unavailable
-      }
-    }
-
-    if (Array.isArray(value)) {
-      return value.map((item) => clonePlainValue(item));
-    }
-
-    if (isRecord(value)) {
-      const withToJSON = value as UnknownRecord & {
-        toJSON?: () => unknown;
-      };
-      if (typeof withToJSON.toJSON === "function") {
-        return clonePlainValue(withToJSON.toJSON());
-      }
-
-      try {
-        return JSON.parse(JSON.stringify(value)) as unknown;
-      } catch (_error) {
-        const result: UnknownRecord = {};
-        Object.entries(value).forEach(([key, entryValue]) => {
-          result[key] = clonePlainValue(entryValue);
-        });
-        return result;
-      }
-    }
-
-    return null;
-  };
-
-  type GraphicWithAggregates = __esri.Graphic & {
-    aggregateGeometries?: unknown;
-  };
-
-  const serializeFeature = (
-    feature: __esri.Graphic | undefined | null
-  ): SerializedQueryFeature => {
-    if (!feature) {
-      return {
-        attributes: null,
-        geometry: null,
-        aggregateGeometries: null,
-        symbol: null,
-        popupTemplate: null,
-      };
-    }
-
-    const geometry = feature.geometry as __esri.Geometry | undefined;
-    const geometryJson = geometry
-      ? typeof geometry.toJSON === "function"
-        ? (geometry.toJSON() as SerializedRecord)
-        : (clonePlainValue(geometry) as SerializedRecord | null)
-      : null;
-
-    const aggregateGeometries = (feature as GraphicWithAggregates)
-      .aggregateGeometries;
-
-    return {
-      attributes:
-        feature.attributes && typeof feature.attributes === "object"
-          ? {
-              ...(feature.attributes as UnknownRecord),
-            }
-          : null,
-      geometry: geometryJson ?? null,
-      aggregateGeometries: clonePlainValue(
-        aggregateGeometries ?? null
-      ) as SerializedRecord | null,
-      symbol: clonePlainValue(
-        feature.symbol ?? null
-      ) as SerializedRecord | null,
-      popupTemplate: clonePlainValue(
-        feature.popupTemplate ?? null
-      ) as SerializedRecord | null,
-    };
-  };
-
-  const serializePropertyResult = (
-    result: QueryResult
-  ): SerializedQueryResult => ({
-    propertyId: result?.propertyId ?? "",
-    features: Array.isArray(result?.features)
-      ? result.features.map((feature) => serializeFeature(feature))
-      : [],
-  });
-
   const updated = new Map(prevMap);
+  const propertyResultsByFnr = buildPropertyResultsLookup(
+    propertyResults,
+    normalize
+  );
+  const selectedByFnr = buildSelectedPropertiesLookup(
+    selectedProperties,
+    normalize
+  );
 
-  const propertyResultsByFnr = new Map<string, SerializedQueryResult>();
-  propertyResults.forEach((result) => {
-    const feature = result?.features?.[0];
-    const attributes = feature?.attributes as
-      | { FNR?: string | number; fnr?: string | number }
-      | undefined;
-    const fnrValue = attributes?.FNR ?? attributes?.fnr;
-    if (fnrValue != null) {
-      propertyResultsByFnr.set(
-        normalize(fnrValue),
-        serializePropertyResult(result)
-      );
-    }
-  });
-
-  let fallbackIndex = 0;
-
-  const selectedByFnr = new Map<string, string>();
-  selectedProperties.forEach((row) => {
-    selectedByFnr.set(normalize(row.FNR), row.id);
-  });
-
-  rowsToProcess.forEach((row) => {
-    const fnrKey = normalize(row.FNR);
-    let propertyResult = propertyResultsByFnr.get(fnrKey);
-
-    if (!propertyResult && propertyResults.length > 0) {
-      const fallback = serializePropertyResult(
-        propertyResults[Math.min(fallbackIndex, propertyResults.length - 1)]
-      );
-      fallbackIndex += 1;
-      propertyResult = fallback;
-    }
-
-    if (propertyResult) {
-      updated.set(row.id, propertyResult);
-    }
-  });
-
-  toRemove.forEach((removedKey) => {
-    const removedId = selectedByFnr.get(removedKey);
-    if (removedId) {
-      updated.delete(removedId);
-    }
-  });
+  addProcessedRows(
+    updated,
+    rowsToProcess,
+    propertyResultsByFnr,
+    propertyResults,
+    normalize
+  );
+  removeDeletedProperties(updated, toRemove, selectedByFnr);
 
   return updated;
 };
@@ -592,54 +683,82 @@ export const executePropertyQueryPipeline = async (params: {
   selectedProperties: GridRowData[];
   signal: AbortSignal;
   translate: (key: string) => string;
-  perfStart: number;
   runPipeline: (
     input: PropertySelectionPipelineParams
   ) => Promise<PropertySelectionPipelineResult>;
 }): Promise<PropertySelectionPipelineResult> => {
+  return params.runPipeline({
+    mapPoint: params.mapPoint,
+    propertyDataSourceId: params.config.propertyDataSourceId,
+    ownerDataSourceId: params.config.ownerDataSourceId,
+    dsManager: params.dsManager,
+    maxResults: params.maxResults,
+    toggleEnabled: params.toggleEnabled,
+    enableBatchOwnerQuery: params.config.enableBatchOwnerQuery,
+    relationshipId: params.config.relationshipId,
+    enablePIIMasking: params.enablePIIMasking,
+    signal: params.signal,
+    selectedProperties: params.selectedProperties,
+    translate: params.translate,
+  });
+};
+
+export const computePropertySelectionUpdate = (params: {
+  pipelineResult: PropertyPipelineSuccess;
+  previousRawResults:
+    | SerializedQueryResultMap
+    | Map<string, SerializedQueryResult>
+    | null;
+  selectedProperties: GridRowData[];
+  normalizeFnrKey: (fnr: FnrValue | null | undefined) => string;
+  highlightColorConfig: string;
+  highlightOpacityConfig: number;
+  outlineWidthConfig: number;
+}): {
+  rowsToStore: GridRowData[];
+  resultsToStore: SerializedQueryResultMap;
+  highlightColor: [number, number, number, number];
+  outlineWidth: number;
+  fnrKeysToRemove: Set<string>;
+} => {
   const {
-    mapPoint,
-    config,
-    dsManager,
-    maxResults,
-    toggleEnabled,
-    enablePIIMasking,
+    pipelineResult,
+    previousRawResults,
     selectedProperties,
-    signal,
-    translate,
-    perfStart,
-    runPipeline,
+    normalizeFnrKey: normalize,
+    highlightColorConfig,
+    highlightOpacityConfig,
+    outlineWidthConfig,
   } = params;
 
-  const pipelineStart = performance.now();
-  console.log("[PERF] Pipeline started at", pipelineStart - perfStart, "ms");
-
-  const pipelineResult = await runPipeline({
-    mapPoint,
-    propertyDataSourceId: config.propertyDataSourceId,
-    ownerDataSourceId: config.ownerDataSourceId,
-    dsManager,
-    maxResults,
-    toggleEnabled,
-    enableBatchOwnerQuery: config.enableBatchOwnerQuery,
-    relationshipId: config.relationshipId,
-    enablePIIMasking,
-    signal,
+  const prevPlain = previousRawResults ?? {};
+  const updatedRawResults = updateRawPropertyResults(
+    prevPlain,
+    pipelineResult.rowsToProcess,
+    pipelineResult.propertyResults,
+    pipelineResult.toRemove,
     selectedProperties,
-    translate,
-  });
-
-  const pipelineEnd = performance.now();
-  console.log(
-    "[PERF] Pipeline completed at",
-    pipelineEnd - perfStart,
-    "ms",
-    "(took",
-    pipelineEnd - pipelineStart,
-    "ms)"
+    normalize
   );
 
-  return pipelineResult;
+  const resultsToStore =
+    updatedRawResults instanceof Map
+      ? (Object.fromEntries(updatedRawResults) as SerializedQueryResultMap)
+      : updatedRawResults;
+
+  const highlightColor = buildHighlightColor(
+    highlightColorConfig,
+    highlightOpacityConfig
+  );
+  const outlineWidth = getValidatedOutlineWidth(outlineWidthConfig);
+
+  return {
+    rowsToStore: pipelineResult.updatedRows,
+    resultsToStore,
+    highlightColor,
+    outlineWidth,
+    fnrKeysToRemove: pipelineResult.toRemove,
+  };
 };
 
 export const updatePropertySelectionState = (params: {
@@ -658,7 +777,6 @@ export const updatePropertySelectionState = (params: {
   highlightColorConfig: string;
   highlightOpacityConfig: number;
   outlineWidthConfig: number;
-  perfStart: number;
 }): {
   rowsToStore: GridRowData[];
   resultsToStore: SerializedQueryResultMap;
@@ -675,59 +793,33 @@ export const updatePropertySelectionState = (params: {
     highlightColorConfig,
     highlightOpacityConfig,
     outlineWidthConfig,
-    perfStart,
   } = params;
 
-  const prevPlain = previousRawResults ?? {};
-  const updatedRawResults = updateRawPropertyResults(
-    prevPlain,
-    pipelineResult.rowsToProcess,
-    pipelineResult.propertyResults,
-    pipelineResult.toRemove,
+  const update = computePropertySelectionUpdate({
+    pipelineResult,
+    previousRawResults,
     selectedProperties,
-    normalize
-  );
+    normalizeFnrKey: normalize,
+    highlightColorConfig,
+    highlightOpacityConfig,
+    outlineWidthConfig,
+  });
 
   cleanupRemovedGraphics({
-    toRemove: pipelineResult.toRemove,
+    toRemove: update.fnrKeysToRemove,
     removeGraphicsForFnr,
     normalizeFnrKey: normalize,
   });
 
-  const resultsToStore =
-    updatedRawResults instanceof Map
-      ? (Object.fromEntries(updatedRawResults) as SerializedQueryResultMap)
-      : updatedRawResults;
-
-  const highlightColor = buildHighlightColor(
-    highlightColorConfig,
-    highlightOpacityConfig
-  );
-  const outlineWidth = getValidatedOutlineWidth(outlineWidthConfig);
-
-  const reduxStart = performance.now();
-  console.log("[PERF] Redux update started at", reduxStart - perfStart, "ms");
-
-  dispatch.setSelectedProperties(pipelineResult.updatedRows);
-  dispatch.setRawResults(resultsToStore);
+  dispatch.setSelectedProperties(update.rowsToStore);
+  dispatch.setRawResults(update.resultsToStore);
   dispatch.setQueryInFlight(false);
 
-  const reduxEnd = performance.now();
-  console.log(
-    "[PERF] Redux update completed at",
-    reduxEnd - perfStart,
-    "ms",
-    "(took",
-    reduxEnd - reduxStart,
-    "ms)"
-  );
-  console.log("[PERF] UI VISIBLE TIME:", reduxEnd - perfStart, "ms");
-
   return {
-    rowsToStore: pipelineResult.updatedRows,
-    resultsToStore,
-    highlightColor,
-    outlineWidth,
+    rowsToStore: update.rowsToStore,
+    resultsToStore: update.resultsToStore,
+    highlightColor: update.highlightColor,
+    outlineWidth: update.outlineWidth,
   };
 };
 
@@ -738,7 +830,6 @@ export const scheduleGraphicsRendering = (params: {
   graphicsHelpers: SelectionGraphicsHelpers;
   getCurrentView: () => __esri.MapView | null | undefined;
   isStaleRequest: () => boolean;
-  perfStart: number;
   syncFn: (params: SelectionGraphicsParams) => void;
 }): void => {
   const {
@@ -748,7 +839,6 @@ export const scheduleGraphicsRendering = (params: {
     graphicsHelpers,
     getCurrentView,
     isStaleRequest,
-    perfStart,
     syncFn,
   } = params;
 
@@ -756,13 +846,6 @@ export const scheduleGraphicsRendering = (params: {
     if (isStaleRequest()) {
       return;
     }
-
-    const graphicsStart = performance.now();
-    console.log(
-      "[PERF] Graphics rendering started at",
-      graphicsStart - perfStart,
-      "ms"
-    );
 
     syncFn({
       graphicsToAdd: pipelineResult.graphicsToAdd,
@@ -772,21 +855,6 @@ export const scheduleGraphicsRendering = (params: {
       highlightColor,
       outlineWidth,
     });
-
-    const graphicsEnd = performance.now();
-    console.log(
-      "[PERF] Graphics rendering completed at",
-      graphicsEnd - perfStart,
-      "ms",
-      "(took",
-      graphicsEnd - graphicsStart,
-      "ms)"
-    );
-    console.log(
-      "[PERF] TOTAL TIME (with async graphics):",
-      graphicsEnd - perfStart,
-      "ms"
-    );
   };
 
   if (typeof requestAnimationFrame === "function") {

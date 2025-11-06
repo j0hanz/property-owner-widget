@@ -324,7 +324,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       return resultsMap;
     }
 
-    console.log("[Export] Invalid rawPropertyResults type:", typeof rawResults);
     return null;
   };
 
@@ -335,7 +334,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     const selectedRawData: SerializedQueryResult[] = [];
     rows.forEach((row) => {
       const rawData = resultsMap.get(row.id);
-      console.log("[Export] Looking up row:", row.id, "Found:", !!rawData);
       if (rawData) {
         selectedRawData.push(rawData);
       }
@@ -372,7 +370,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         value: sortedRows.length,
       });
     } catch (error) {
-      console.error("Export failed", error);
       trackError(`export_${format}`, error);
     }
   };
@@ -491,7 +488,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       context: PipelineExecutionContext;
       perfStart: number;
     }): Promise<PipelineRunResult> => {
-      const { context, perfStart } = params;
+      const { context } = params;
 
       const pipelineResult = await executePropertyQueryPipeline({
         mapPoint: context.mapPoint,
@@ -503,7 +500,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         selectedProperties: context.selectionForPipeline,
         signal: context.controller.signal,
         translate,
-        perfStart,
         runPipeline: runPropertySelectionPipeline,
       });
 
@@ -537,7 +533,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       context: PipelineExecutionContext;
       perfStart: number;
     }): number => {
-      const { pipelineResult, context, perfStart } = params;
+      const { pipelineResult, context } = params;
 
       const removedRows = context.selectionForPipeline.filter((row) =>
         pipelineResult.toRemove.has(normalizeFnrKey(row.FNR))
@@ -565,7 +561,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         highlightColorConfig,
         highlightOpacityConfig,
         outlineWidthConfig,
-        perfStart,
       });
 
       rawPropertyResultsRef.current = stateUpdate.resultsToStore;
@@ -584,7 +579,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         graphicsHelpers,
         getCurrentView,
         isStaleRequest: context.isStaleRequest,
-        perfStart,
         syncFn: syncSelectionGraphics,
       });
 
@@ -944,35 +938,23 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   });
 
   const handleExport = hooks.useEventCallback((format: ExportFormat) => {
-    console.log("[Export] Starting export:", {
-      format,
-      hasSelectedProperties,
-      rawPropertyResults,
-    });
-
     if (!hasSelectedProperties) {
-      console.log("[Export] No selected properties, aborting");
       return;
     }
 
     const resultsMap = buildResultsMap(rawPropertyResults);
     if (!resultsMap) {
-      console.log("[Export] Unable to build results map, aborting");
       return;
     }
 
-    console.log("[Export] Results map size:", resultsMap.size);
     if (resultsMap.size === 0) {
-      console.log("[Export] Results map is empty, aborting");
       return;
     }
 
     const selectedRows = [...selectedProperties];
     const selectedRawData = collectSelectedRawData(selectedRows, resultsMap);
 
-    console.log("[Export] Selected raw data count:", selectedRawData.length);
     if (selectedRawData.length === 0) {
-      console.log("[Export] No raw data found for selected rows, aborting");
       return;
     }
 
@@ -1013,7 +995,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       const copySucceeded = copyToClipboard(payload.text);
       notifyCopyOutcome(copySucceeded, payload, translate);
     } catch (error) {
-      console.error("Copy failed:", error);
       setUrlFeedback({
         type: "error",
         text: translate("copyFailed"),
@@ -1033,7 +1014,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const handleMapClick = hooks.useEventCallback(
     async (event: __esri.ViewClickEvent) => {
       const perfStart = performance.now();
-      console.log("[PERF] Map click started at", perfStart);
       const tracker = createPerformanceTracker("map_click_query");
 
       const context = prepareQueryExecution(event, tracker);
@@ -1113,7 +1093,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const tooltipFormatRef = hooks.useLatest(cursorTooltipFormatText);
   const highlightColorConfigRef = hooks.useLatest(highlightColorConfig);
   const highlightOpacityConfigRef = hooks.useLatest(highlightOpacityConfig);
-  const outlineWidthConfigRef = hooks.useLatest(outlineWidthConfig);
 
   const clearCursorGraphics = hooks.useEventCallback(() => {
     // Cancel any pending RAF update
@@ -1168,9 +1147,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         highlightColorConfigRef.current,
         highlightOpacityConfigRef.current
       );
-      const currentOutlineWidth = getValidatedOutlineWidth(
-        outlineWidthConfigRef.current
-      );
 
       let tooltipText: string | null = null;
 
@@ -1189,7 +1165,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         mapPoint,
         tooltipText,
         highlightColor: currentHighlightColor,
-        outlineWidth: currentOutlineWidth,
         existing: cursorGraphicsStateRef.current,
         style: CURSOR_TOOLTIP_STYLE,
       });

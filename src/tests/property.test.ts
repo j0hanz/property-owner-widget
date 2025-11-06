@@ -1407,7 +1407,6 @@ describe("Property Widget - Utility Helper Functions", () => {
       mapPoint,
       tooltipText: "<em>FAST-1</em>",
       highlightColor,
-      outlineWidth: 2,
       existing: null,
       style: CURSOR_TOOLTIP_STYLE,
     });
@@ -1431,7 +1430,6 @@ describe("Property Widget - Utility Helper Functions", () => {
       mapPoint: null,
       tooltipText: null,
       highlightColor,
-      outlineWidth: 2,
       existing: state,
       style: CURSOR_TOOLTIP_STYLE,
     });
@@ -1454,7 +1452,6 @@ describe("Property Widget - Utility Helper Functions", () => {
       mapPoint: mapPoint1,
       tooltipText: "Property A",
       highlightColor,
-      outlineWidth: 2,
       existing: null,
       style: CURSOR_TOOLTIP_STYLE,
     });
@@ -1469,7 +1466,6 @@ describe("Property Widget - Utility Helper Functions", () => {
       mapPoint: mapPoint2,
       tooltipText: "Property A",
       highlightColor,
-      outlineWidth: 2,
       existing: state1,
       style: CURSOR_TOOLTIP_STYLE,
     });
@@ -1485,7 +1481,6 @@ describe("Property Widget - Utility Helper Functions", () => {
       mapPoint: mapPoint2,
       tooltipText: "Property B",
       highlightColor,
-      outlineWidth: 2,
       existing: state2,
       style: CURSOR_TOOLTIP_STYLE,
     });

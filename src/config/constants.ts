@@ -117,3 +117,28 @@ export const SORT_COMPARE_OPTIONS: Intl.CollatorOptions = {
   numeric: true,
   sensitivity: "base",
 } as const;
+
+// Privacy: Owner identity key prefixes for deduplication
+export const IDENTITY_KEY_PREFIXES = {
+  OWNER_LIST: "A",
+  NAME: "N",
+  ADDRESS: "B",
+  POSTAL_CODE: "P",
+  CITY: "C",
+  ORG_NUMBER: "O",
+  SHARE: "S",
+  PROPERTY: "PR",
+  FNR: "FN",
+  OBJECT_ID: "OB",
+  UUID: "UU",
+  INDEX: "IX",
+} as const;
+
+// Privacy: Character codes and defaults
+export const SPACE_CHAR_CODE = 32;
+export const DEFAULT_MASK = "***";
+
+// Validation: Network security patterns
+export const LOCALHOST_PATTERNS = ["localhost", "127.0.0.1", "::1", "[::1]"];
+export const PRIVATE_IP_REGEX =
+  /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[0-1])\.)/u;

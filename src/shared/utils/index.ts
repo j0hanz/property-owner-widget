@@ -9,6 +9,7 @@ export * from "./configuration";
 export * from "./dispatcher";
 export * from "./helpers";
 export * from "./export";
+export * from "./serialization";
 export { isValidationSuccess, isValidationFailure } from "../../config/types";
 export type {
   CursorGraphicsState,

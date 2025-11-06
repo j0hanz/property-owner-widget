@@ -422,6 +422,43 @@ export interface CursorGraphicsState {
   lastTooltipText: string | null;
 }
 
+export interface HoverQueryConfig {
+  propertyDataSourceId: string;
+  ownerDataSourceId: string;
+  allowedHosts?: readonly string[];
+}
+
+export interface GeometryInput {
+  rings?: unknown;
+  paths?: unknown;
+  points?: unknown;
+  xmin?: unknown;
+  ymin?: unknown;
+  xmax?: unknown;
+  ymax?: unknown;
+  x?: unknown;
+  y?: unknown;
+  z?: unknown;
+}
+
+export interface ExportContent {
+  content: string;
+  mimeType: string;
+  extension: string;
+}
+
+export type GraphicWithAggregates = __esri.Graphic & {
+  aggregateGeometries?: unknown;
+};
+
+export interface ValidationPipelineExecutor<TContext> {
+  (context: TContext): ValidationResult<TContext>;
+  addStep: (
+    step: (context: TContext) => ValidationResult<TContext>
+  ) => ValidationPipelineExecutor<TContext>;
+  run: (context: TContext) => ValidationResult<TContext>;
+}
+
 export interface ProcessPropertyQueryParams {
   propertyResults: QueryResult[];
   config: {

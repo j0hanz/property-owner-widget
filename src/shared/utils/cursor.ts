@@ -8,19 +8,45 @@ import type {
   CursorTooltipStyle,
   EsriModules,
   CursorGraphicsState,
+  HoverQueryConfig,
 } from "../../config/types";
 import { queryPropertyByPoint, queryOwnerByFnr } from "../api";
-import { formatOwnerInfo, stripHtml } from "./privacy";
-import { abortHelpers } from "./helpers";
+import { formatOwnerInfo } from "./privacy";
+import { abortHelpers, stripHtml } from "./helpers";
 import { validateDataSourcesCore, checkValidationFailure } from "./validation";
 import { extractFnr } from "./processing";
 
+const createOpaqueColor = (
+  color: [number, number, number, number]
+): [number, number, number, number] => [color[0], color[1], color[2], 1];
+
+const createSymbolCache = () => {
+  const cache = new Map<string, __esri.SimpleMarkerSymbol>();
+  const maxSize = 10;
+
+  return {
+    get: (key: string): __esri.SimpleMarkerSymbol | undefined => cache.get(key),
+    set: (key: string, symbol: __esri.SimpleMarkerSymbol): void => {
+      if (cache.size >= maxSize) {
+        const firstKey = cache.keys().next().value;
+        cache.delete(firstKey);
+      }
+      cache.set(key, symbol);
+    },
+    clear: (): void => {
+      cache.clear();
+    },
+  };
+};
+
+const symbolCache = createSymbolCache();
+
 export const buildTooltipSymbol = (
-  modules: EsriModules | null,
+  modules: EsriModules,
   text: string,
   style: CursorTooltipStyle
 ): __esri.TextSymbol | null => {
-  if (!modules?.TextSymbol || !text) return null;
+  if (!text) return null;
   const sanitized = stripHtml(text);
   if (!sanitized) return null;
 
@@ -43,6 +69,114 @@ export const buildTooltipSymbol = (
   } as __esri.TextSymbolProperties);
 };
 
+const clearTooltipGraphic = (
+  layer: __esri.GraphicsLayer,
+  state: CursorGraphicsState
+): void => {
+  if (state.tooltipGraphic) {
+    layer.remove(state.tooltipGraphic);
+    state.tooltipGraphic = null;
+    state.lastTooltipText = null;
+  }
+};
+
+const clearAllGraphics = (
+  layer: __esri.GraphicsLayer,
+  state: CursorGraphicsState
+): void => {
+  if (state.pointGraphic) layer.remove(state.pointGraphic);
+  if (state.tooltipGraphic) layer.remove(state.tooltipGraphic);
+};
+
+const createPointGraphic = (
+  modules: EsriModules,
+  mapPoint: __esri.Point,
+  highlightColor: [number, number, number, number]
+): __esri.Graphic => {
+  const cacheKey = highlightColor.join(",");
+  let symbol = symbolCache.get(cacheKey);
+
+  if (!symbol) {
+    symbol = new modules.SimpleMarkerSymbol({
+      style: "cross",
+      size: HIGHLIGHT_MARKER_SIZE,
+      color: highlightColor,
+      outline: { color: createOpaqueColor(highlightColor), width: 2.5 },
+    });
+    symbolCache.set(cacheKey, symbol);
+  }
+  return new modules.Graphic({
+    geometry: mapPoint,
+    symbol,
+  });
+};
+
+const updateOrCreateGraphic = <T extends __esri.Graphic>(
+  layer: __esri.GraphicsLayer,
+  existing: T | null,
+  create: () => T,
+  update: (graphic: T) => void
+): T => {
+  if (!existing) {
+    const graphic = create();
+    layer.add(graphic);
+    return graphic;
+  }
+  update(existing);
+  return existing;
+};
+
+const syncPointGraphic = (
+  modules: EsriModules,
+  layer: __esri.GraphicsLayer,
+  state: CursorGraphicsState,
+  mapPoint: __esri.Point,
+  highlightColor: [number, number, number, number]
+): void => {
+  state.pointGraphic = updateOrCreateGraphic(
+    layer,
+    state.pointGraphic,
+    () => createPointGraphic(modules, mapPoint, highlightColor),
+    (graphic) => {
+      graphic.geometry = mapPoint;
+    }
+  );
+};
+
+const syncTooltipGraphic = (
+  modules: EsriModules,
+  layer: __esri.GraphicsLayer,
+  state: CursorGraphicsState,
+  mapPoint: __esri.Point,
+  tooltipText: string,
+  style: CursorTooltipStyle
+): boolean => {
+  if (state.lastTooltipText === tooltipText) {
+    if (state.tooltipGraphic) {
+      state.tooltipGraphic.geometry = mapPoint;
+    }
+    return true;
+  }
+
+  const symbol = buildTooltipSymbol(modules, tooltipText, style);
+  if (!symbol) {
+    clearTooltipGraphic(layer, state);
+    return false;
+  }
+
+  state.tooltipGraphic = updateOrCreateGraphic(
+    layer,
+    state.tooltipGraphic,
+    () => new modules.Graphic({ geometry: mapPoint, symbol }),
+    (graphic) => {
+      graphic.geometry = mapPoint;
+      graphic.symbol = symbol;
+    }
+  );
+  state.lastTooltipText = tooltipText;
+  return true;
+};
+
 export const syncCursorGraphics = ({
   modules,
   layer,
@@ -57,86 +191,29 @@ export const syncCursorGraphics = ({
   mapPoint: __esri.Point | null;
   tooltipText: string | null;
   highlightColor: [number, number, number, number];
-  outlineWidth: number;
   existing: CursorGraphicsState | null;
   style?: CursorTooltipStyle;
 }): CursorGraphicsState | null => {
-  if (!modules?.Graphic || !layer) {
-    return existing ?? null;
+  if (!modules?.Graphic || !modules.TextSymbol || !layer) {
+    return existing || null;
   }
 
   if (!mapPoint) {
-    if (existing?.pointGraphic) {
-      layer.remove(existing.pointGraphic);
-    }
-    if (existing?.tooltipGraphic) {
-      layer.remove(existing.tooltipGraphic);
-    }
+    if (existing) clearAllGraphics(layer, existing);
     return null;
   }
 
-  const next: CursorGraphicsState = {
-    pointGraphic: existing?.pointGraphic ?? null,
-    tooltipGraphic: existing?.tooltipGraphic ?? null,
-    lastTooltipText: existing?.lastTooltipText ?? null,
-  };
+  const state: CursorGraphicsState = existing || createCursorTrackingState();
 
-  if (!next.pointGraphic) {
-    next.pointGraphic = new modules.Graphic({
-      geometry: mapPoint,
-      symbol: new modules.SimpleMarkerSymbol({
-        style: "cross",
-        size: HIGHLIGHT_MARKER_SIZE,
-        color: highlightColor,
-        outline: {
-          color: [highlightColor[0], highlightColor[1], highlightColor[2], 1],
-          width: 2.5,
-        },
-      }),
-    });
-    layer.add(next.pointGraphic);
-  } else {
-    next.pointGraphic.geometry = mapPoint;
-  }
+  syncPointGraphic(modules, layer, state, mapPoint, highlightColor);
 
   if (!tooltipText) {
-    if (next.tooltipGraphic) {
-      layer.remove(next.tooltipGraphic);
-      next.tooltipGraphic = null;
-      next.lastTooltipText = null;
-    }
-    return next;
+    clearTooltipGraphic(layer, state);
+    return state;
   }
 
-  if (next.lastTooltipText === tooltipText && next.tooltipGraphic) {
-    next.tooltipGraphic.geometry = mapPoint;
-    return next;
-  }
-
-  const symbol = buildTooltipSymbol(modules, tooltipText, style);
-
-  if (!symbol) {
-    if (next.tooltipGraphic) {
-      layer.remove(next.tooltipGraphic);
-      next.tooltipGraphic = null;
-      next.lastTooltipText = null;
-    }
-    return next;
-  }
-
-  if (!next.tooltipGraphic) {
-    next.tooltipGraphic = new modules.Graphic({
-      geometry: mapPoint,
-      symbol,
-    });
-    layer.add(next.tooltipGraphic);
-  } else {
-    next.tooltipGraphic.geometry = mapPoint;
-    next.tooltipGraphic.symbol = symbol;
-  }
-  next.lastTooltipText = tooltipText;
-
-  return next;
+  syncTooltipGraphic(modules, layer, state, mapPoint, tooltipText, style);
+  return state;
 };
 
 export const createCursorTrackingState = (
@@ -147,6 +224,15 @@ export const createCursorTrackingState = (
   lastTooltipText: null,
   ...overrides,
 });
+
+const cancelScheduledUpdate = (
+  rafIdRef: MutableRefObject<number | null>
+): void => {
+  if (rafIdRef.current !== null) {
+    cancelAnimationFrame(rafIdRef.current);
+    rafIdRef.current = null;
+  }
+};
 
 export const scheduleCursorUpdate = (params: {
   rafIdRef: MutableRefObject<number | null>;
@@ -159,44 +245,28 @@ export const scheduleCursorUpdate = (params: {
   pendingMapPointRef.current = nextPoint;
 
   if (!nextPoint) {
-    if (rafIdRef.current !== null) {
-      cancelAnimationFrame(rafIdRef.current);
-      rafIdRef.current = null;
-    }
+    cancelScheduledUpdate(rafIdRef);
     onUpdate(null);
     return;
   }
 
-  if (rafIdRef.current !== null) {
-    return;
-  }
+  if (rafIdRef.current !== null) return;
 
   rafIdRef.current = requestAnimationFrame(() => {
-    const point = pendingMapPointRef.current;
     rafIdRef.current = null;
-    if (point) {
-      onUpdate(point);
-      return;
-    }
-    onUpdate(null);
+    onUpdate(pendingMapPointRef.current);
   });
 };
 
-export const executeHoverQuery = async (params: {
-  mapPoint: __esri.Point;
+const validateAndGetManager = (
   config: {
     propertyDataSourceId: string;
     ownerDataSourceId: string;
     allowedHosts?: readonly string[];
-  };
-  dsManager: DataSourceManager | null;
-  signal: AbortSignal;
-  enablePIIMasking: boolean;
-  translate: (key: string) => string;
-}): Promise<{ fastighet: string; bostadr: string } | null> => {
-  const { mapPoint, config, dsManager, signal, enablePIIMasking, translate } =
-    params;
-
+  },
+  dsManager: DataSourceManager | null,
+  translate: (key: string) => string
+): DataSourceManager | null => {
   const dsValidation = validateDataSourcesCore({
     propertyDsId: config.propertyDataSourceId,
     ownerDsId: config.ownerDataSourceId,
@@ -205,52 +275,87 @@ export const executeHoverQuery = async (params: {
     translate,
   });
 
-  if (checkValidationFailure(dsValidation)) {
-    return null;
-  }
-  const { manager } = dsValidation.data;
+  if (checkValidationFailure(dsValidation)) return null;
+  return dsValidation.data.manager;
+};
 
-  const propertyResults = await queryPropertyByPoint(
-    mapPoint,
-    config.propertyDataSourceId,
-    manager,
-    { signal }
-  );
-
+const queryPropertyData = async (
+  mapPoint: __esri.Point,
+  dataSourceId: string,
+  manager: DataSourceManager,
+  signal: AbortSignal
+): Promise<{ fnr: string; fastighet: string } | null> => {
+  const results = await queryPropertyByPoint(mapPoint, dataSourceId, manager, {
+    signal,
+  });
   abortHelpers.throwIfAborted(signal);
 
-  if (!propertyResults.length || !propertyResults[0]?.features?.length) {
-    return null;
-  }
+  if (!results.length || !results[0]?.features?.length) return null;
 
-  const feature = propertyResults[0].features[0];
+  const feature = results[0].features[0];
   const fnr = extractFnr(feature.attributes);
   const fastighet = feature.attributes?.FASTIGHET || "";
 
-  if (!fnr || !fastighet) {
-    return null;
-  }
+  if (!fnr || !fastighet) return null;
 
-  const ownerFeatures = await queryOwnerByFnr(
-    fnr,
-    config.ownerDataSourceId,
-    manager,
-    { signal }
-  );
+  return { fnr: String(fnr), fastighet };
+};
 
+const queryOwnerData = async (
+  fnr: string,
+  dataSourceId: string,
+  manager: DataSourceManager,
+  signal: AbortSignal,
+  enablePIIMasking: boolean,
+  unknownOwnerLabel: string
+): Promise<string> => {
+  const ownerFeatures = await queryOwnerByFnr(fnr, dataSourceId, manager, {
+    signal,
+  });
   abortHelpers.throwIfAborted(signal);
 
-  let bostadr = translate("unknownOwner");
-  if (ownerFeatures.length > 0) {
-    const ownerAttrs = ownerFeatures[0].attributes;
-    bostadr = formatOwnerInfo(
-      ownerAttrs,
-      enablePIIMasking,
-      translate("unknownOwner")
-    );
-  }
+  if (ownerFeatures.length === 0) return unknownOwnerLabel;
 
-  return { fastighet, bostadr };
+  return formatOwnerInfo(
+    ownerFeatures[0].attributes,
+    enablePIIMasking,
+    unknownOwnerLabel
+  );
+};
+
+export const executeHoverQuery = async (params: {
+  mapPoint: __esri.Point;
+  config: HoverQueryConfig;
+  dsManager: DataSourceManager | null;
+  signal: AbortSignal;
+  enablePIIMasking: boolean;
+  translate: (key: string) => string;
+}): Promise<{ fastighet: string; bostadr: string } | null> => {
+  const { mapPoint, config, dsManager, signal, enablePIIMasking, translate } =
+    params;
+
+  const manager = validateAndGetManager(config, dsManager, translate);
+  if (!manager) return null;
+
+  const propertyData = await queryPropertyData(
+    mapPoint,
+    config.propertyDataSourceId,
+    manager,
+    signal
+  );
+  if (!propertyData) return null;
+
+  const unknownOwnerLabel = translate("unknownOwner");
+  const bostadr = await queryOwnerData(
+    propertyData.fnr,
+    config.ownerDataSourceId,
+    manager,
+    signal,
+    enablePIIMasking,
+    unknownOwnerLabel
+  );
+
+  return { fastighet: propertyData.fastighet, bostadr };
 };
 
 export const shouldSkipHoverQuery = (
@@ -260,11 +365,27 @@ export const shouldSkipHoverQuery = (
 ): boolean => {
   if (!lastQueryPoint) return false;
 
-  const dx = screenPoint.x - lastQueryPoint.x;
-  const dy = screenPoint.y - lastQueryPoint.y;
-  const distance = Math.sqrt(dx * dx + dy * dy);
+  const deltaX = screenPoint.x - lastQueryPoint.x;
+  const deltaY = screenPoint.y - lastQueryPoint.y;
+  const distanceSquared = deltaX * deltaX + deltaY * deltaY;
+  const toleranceSquared = tolerancePx * tolerancePx;
 
-  return distance < tolerancePx;
+  return distanceSquared < toleranceSquared;
+};
+
+const removeEventHandle = (
+  handleRef: MutableRefObject<__esri.Handle | null>
+): void => {
+  if (handleRef.current) {
+    handleRef.current.remove();
+    handleRef.current = null;
+  }
+};
+
+const resetRefState = (...refs: Array<MutableRefObject<unknown>>): void => {
+  for (const ref of refs) {
+    ref.current = null;
+  }
 };
 
 export const cursorLifecycleHelpers = {
@@ -275,21 +396,16 @@ export const cursorLifecycleHelpers = {
     clearGraphics: () => void;
     cleanupQuery: () => void;
   }) => {
-    if (refs.pointerMoveHandle.current) {
-      refs.pointerMoveHandle.current.remove();
-      refs.pointerMoveHandle.current = null;
-      refs.clearGraphics();
-    }
+    const { pointerMoveHandle, pointerLeaveHandle, rafId, clearGraphics } =
+      refs;
 
-    if (refs.pointerLeaveHandle.current) {
-      refs.pointerLeaveHandle.current.remove();
-      refs.pointerLeaveHandle.current = null;
-    }
-
-    if (refs.rafId.current !== null) {
-      cancelAnimationFrame(refs.rafId.current);
-      refs.rafId.current = null;
-    }
+    // Cancel RAF first to prevent any pending frame from executing
+    cancelScheduledUpdate(rafId);
+    // Then remove event handles
+    removeEventHandle(pointerMoveHandle);
+    removeEventHandle(pointerLeaveHandle);
+    // Finally clear graphics
+    clearGraphics();
   },
 
   setupCursorTracking: (params: {
@@ -354,13 +470,11 @@ export const cursorLifecycleHelpers = {
         nextPoint: mapPoint,
         onUpdate: updateCursorPoint,
       });
-
       throttledHoverQuery(mapPoint, screenPoint);
     });
 
     pointerLeaveHandleRef.current = view.on("pointer-leave", () => {
-      lastCursorPointRef.current = null;
-      lastHoverQueryPointRef.current = null;
+      resetRefState(lastCursorPointRef, lastHoverQueryPointRef);
       scheduleCursorUpdate({
         rafIdRef,
         pendingMapPointRef,
@@ -378,11 +492,16 @@ export const cursorLifecycleHelpers = {
     clearGraphics: () => void;
     cleanupQuery: () => void;
   }) => {
-    refs.lastCursorPointRef.current = null;
-    refs.pendingMapPointRef.current = null;
-    refs.cachedLayerRef.current = null;
-    refs.clearGraphics();
-    refs.cleanupQuery();
+    const {
+      lastCursorPointRef,
+      pendingMapPointRef,
+      cachedLayerRef,
+      clearGraphics,
+      cleanupQuery,
+    } = refs;
+    resetRefState(lastCursorPointRef, pendingMapPointRef, cachedLayerRef);
+    clearGraphics();
+    cleanupQuery();
   },
 
   teardownCursorTracking: (params: {
@@ -396,24 +515,24 @@ export const cursorLifecycleHelpers = {
     clearGraphics: () => void;
     cleanupQuery: () => void;
   }) => {
-    if (params.rafId.current !== null) {
-      cancelAnimationFrame(params.rafId.current);
-      params.rafId.current = null;
-    }
-    if (params.pointerMoveHandle.current) {
-      params.pointerMoveHandle.current.remove();
-      params.pointerMoveHandle.current = null;
-    }
-    if (params.pointerLeaveHandle.current) {
-      params.pointerLeaveHandle.current.remove();
-      params.pointerLeaveHandle.current = null;
-    }
-    params.cleanupQuery();
-    params.pendingMapPointRef.current = null;
-    params.cachedLayerRef.current = null;
-    if (!params.canTrackCursor) {
-      params.lastCursorPointRef.current = null;
-    }
-    params.clearGraphics();
+    const {
+      rafId,
+      pointerMoveHandle,
+      pointerLeaveHandle,
+      lastCursorPointRef,
+      pendingMapPointRef,
+      cachedLayerRef,
+      canTrackCursor,
+      clearGraphics,
+      cleanupQuery,
+    } = params;
+
+    cancelScheduledUpdate(rafId);
+    removeEventHandle(pointerMoveHandle);
+    removeEventHandle(pointerLeaveHandle);
+    cleanupQuery();
+    resetRefState(pendingMapPointRef, cachedLayerRef);
+    if (!canTrackCursor) resetRefState(lastCursorPointRef);
+    clearGraphics();
   },
 };

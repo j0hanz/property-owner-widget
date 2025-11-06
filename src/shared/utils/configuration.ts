@@ -1,18 +1,11 @@
 import type { ImmutableArray } from "jimu-core";
 import type { IMConfig } from "../../config/types";
-import { stripHtml } from "./privacy";
-import { isRecord } from "./helpers";
-
-const resolveCollectionLength = (values: unknown): number => {
-  if (!values) {
-    return 0;
-  }
-  const candidate = values as { length?: number };
-  if (typeof candidate.length === "number") {
-    return candidate.length;
-  }
-  return 0;
-};
+import {
+  resolveEntry,
+  getStringValue as readString,
+  resolveCollectionLength,
+  normalizeHostValue,
+} from "./helpers";
 
 export const computeSettingsVisibility = (params: {
   useMapWidgetIds?: ImmutableArray<string> | string[] | null;
@@ -74,36 +67,6 @@ export const resetDependentFields = (params: {
   }
 
   params.clearRelationshipError();
-};
-
-const hasGetMethod = (
-  value: unknown
-): value is { get: (key: string) => unknown } => {
-  return isRecord(value) && typeof value.get === "function";
-};
-
-const resolveEntry = (collection: unknown, key: string): unknown => {
-  if (!collection) return undefined;
-  if (hasGetMethod(collection)) {
-    return collection.get(key);
-  }
-  if (isRecord(collection)) {
-    return collection[key];
-  }
-  return undefined;
-};
-
-const readString = (source: unknown, key: string): string => {
-  if (!source) return "";
-  if (hasGetMethod(source)) {
-    const value = source.get(key);
-    return typeof value === "string" ? value : "";
-  }
-  if (isRecord(source)) {
-    const value = source[key];
-    return typeof value === "string" ? value : "";
-  }
-  return "";
 };
 
 const hasPropertyKeyword = (value: string): boolean => {
@@ -173,9 +136,6 @@ export const computeWidgetsToClose = (
 
   return ids;
 };
-
-export const normalizeHostValue = (value: string): string =>
-  stripHtml(value || "").trim();
 
 export const normalizeHostList = (
   hosts: readonly string[] | undefined
