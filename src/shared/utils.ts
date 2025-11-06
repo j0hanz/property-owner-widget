@@ -721,38 +721,46 @@ export const syncCursorGraphics = ({
     next.pointGraphic.geometry = mapPoint;
   }
 
-  if (tooltipText) {
-    // Only rebuild symbol if text actually changed (performance optimization)
-    const textChanged = next.lastTooltipText !== tooltipText;
-
-    if (textChanged) {
-      const symbol = buildTooltipSymbol(modules, tooltipText, style);
-      if (symbol) {
-        if (!next.tooltipGraphic) {
-          next.tooltipGraphic = new modules.Graphic({
-            geometry: mapPoint,
-            symbol,
-          });
-          layer.add(next.tooltipGraphic);
-        } else {
-          next.tooltipGraphic.geometry = mapPoint;
-          next.tooltipGraphic.symbol = symbol;
-        }
-        next.lastTooltipText = tooltipText;
-      } else if (next.tooltipGraphic) {
-        layer.remove(next.tooltipGraphic);
-        next.tooltipGraphic = null;
-        next.lastTooltipText = null;
-      }
-    } else if (next.tooltipGraphic) {
-      // Text hasn't changed, just update position
-      next.tooltipGraphic.geometry = mapPoint;
+  // Guard: Remove existing tooltip if no text
+  if (!tooltipText) {
+    if (next.tooltipGraphic) {
+      layer.remove(next.tooltipGraphic);
+      next.tooltipGraphic = null;
+      next.lastTooltipText = null;
     }
-  } else if (next.tooltipGraphic) {
-    layer.remove(next.tooltipGraphic);
-    next.tooltipGraphic = null;
-    next.lastTooltipText = null;
+    return next;
   }
+
+  // Guard: Text unchanged - just update position
+  if (next.lastTooltipText === tooltipText && next.tooltipGraphic) {
+    next.tooltipGraphic.geometry = mapPoint;
+    return next;
+  }
+
+  // Text changed - rebuild symbol
+  const symbol = buildTooltipSymbol(modules, tooltipText, style);
+
+  if (!symbol) {
+    if (next.tooltipGraphic) {
+      layer.remove(next.tooltipGraphic);
+      next.tooltipGraphic = null;
+      next.lastTooltipText = null;
+    }
+    return next;
+  }
+
+  // Create new graphic or update existing
+  if (!next.tooltipGraphic) {
+    next.tooltipGraphic = new modules.Graphic({
+      geometry: mapPoint,
+      symbol,
+    });
+    layer.add(next.tooltipGraphic);
+  } else {
+    next.tooltipGraphic.geometry = mapPoint;
+    next.tooltipGraphic.symbol = symbol;
+  }
+  next.lastTooltipText = tooltipText;
 
   return next;
 };
