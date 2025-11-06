@@ -7,7 +7,6 @@ import type {
 import { loadArcGISJSAPIModules } from "jimu-arcgis";
 import type {
   AttributeMap,
-  ErrorState,
   FnrValue,
   GridRowData,
   OwnerAttributes,
@@ -53,16 +52,10 @@ import {
   shouldStopAccumulation,
   processOwnerResult,
   createValidationPipeline,
+  isValidArcGISUrl,
+  getDataSourceUrl,
+  createValidationError,
 } from "./utils";
-
-const ARC_GIS_LAYER_PATTERN = /\/(mapserver|featureserver)\/\d+(?:\/query)?$/i;
-const PRIVATE_IPV4_PATTERNS = [
-  /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u,
-  /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/u,
-  /^192\.168\.\d{1,3}\.\d{1,3}$/u,
-];
-const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
-const LOOPBACK_IPV6 = "::1";
 
 let cachedFeatureLayerCtor: FeatureLayerConstructor | null = null;
 let cachedQueryCtor: QueryConstructor | null = null;
@@ -84,54 +77,6 @@ const getPromiseUtils = async (): Promise<PromiseUtilsLike> => {
   cachedPromiseUtils = promiseUtils;
   return promiseUtils;
 };
-
-const stripIpv6Brackets = (hostname: string): string => {
-  if (hostname.startsWith("[") && hostname.endsWith("]")) {
-    return hostname.slice(1, -1);
-  }
-  return hostname;
-};
-
-const isIpv4Address = (value: string): boolean =>
-  /^\d{1,3}(\.\d{1,3}){3}$/u.test(value);
-
-const isPrivateHost = (hostname: string): boolean => {
-  const normalized = stripIpv6Brackets(hostname.toLowerCase());
-  if (LOCAL_HOSTNAMES.has(normalized)) {
-    return true;
-  }
-  if (normalized === LOOPBACK_IPV6) {
-    return true;
-  }
-  if (isIpv4Address(normalized)) {
-    return PRIVATE_IPV4_PATTERNS.some((pattern) => pattern.test(normalized));
-  }
-  return false;
-};
-
-const normalizeHostname = (hostname: string): string =>
-  hostname.trim().toLowerCase();
-
-const isAllowedHost = (
-  hostname: string,
-  allowedHosts?: readonly string[]
-): boolean => {
-  if (!allowedHosts || allowedHosts.length === 0) {
-    return true;
-  }
-
-  const normalizedHostname = normalizeHostname(hostname);
-
-  return allowedHosts.some((allowedHost) => {
-    const normalizedAllowed = normalizeHostname(allowedHost);
-    return (
-      normalizedHostname === normalizedAllowed ||
-      normalizedHostname.endsWith(`.${normalizedAllowed}`)
-    );
-  });
-};
-
-const isStandardPort = (port: string): boolean => port === "" || port === "443";
 
 const createSignalOptions = (
   signal?: AbortSignal
@@ -159,46 +104,6 @@ const clearFeatureLayerCache = (): void => {
   cachedPromiseUtils = null;
 };
 
-const createValidationError = (
-  type: ErrorState["type"],
-  message: string,
-  failureReason: string
-): ValidationResult<never> => ({
-  valid: false,
-  error: { type, message },
-  failureReason,
-});
-
-const extractDataSourceUrl = (
-  dataSource: FeatureLayerDataSource | null
-): string | null => {
-  if (!dataSource) {
-    return null;
-  }
-
-  if (typeof dataSource.url === "string" && dataSource.url) {
-    return dataSource.url;
-  }
-
-  const layerDefinition = dataSource.getLayerDefinition?.();
-  if (layerDefinition && typeof layerDefinition === "object") {
-    const candidate = (layerDefinition as { url?: string | null }).url;
-    if (candidate) {
-      return candidate;
-    }
-  }
-
-  const dsJson = dataSource.getDataSourceJson?.();
-  if (dsJson && typeof dsJson === "object") {
-    const candidate = (dsJson as { url?: string | null }).url;
-    if (candidate) {
-      return candidate;
-    }
-  }
-
-  return null;
-};
-
 const validateSingleDataSource = (
   dataSource: FeatureLayerDataSource | null,
   role: "property" | "owner",
@@ -221,7 +126,7 @@ const validateDataSourceUrl = (
   allowedHosts: readonly string[] | undefined,
   translate: (key: string) => string
 ): ValidationResult<{ url: string }> => {
-  const url = extractDataSourceUrl(dataSource);
+  const url = getDataSourceUrl(dataSource);
   if (!url) {
     return createValidationError(
       "VALIDATION_ERROR",
@@ -400,46 +305,6 @@ const processBatchOfProperties = async (params: {
   }
 
   return accumulator;
-};
-
-export const isValidArcGISUrl = (
-  url: string,
-  allowedHosts?: readonly string[]
-): boolean => {
-  if (!url || typeof url !== "string") {
-    return false;
-  }
-
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch (_error) {
-    return false;
-  }
-
-  if (parsed.protocol !== "https:") {
-    return false;
-  }
-
-  if (!isStandardPort(parsed.port)) {
-    return false;
-  }
-
-  const hostname = parsed.hostname;
-  if (isPrivateHost(hostname)) {
-    return false;
-  }
-
-  if (!isAllowedHost(hostname, allowedHosts)) {
-    return false;
-  }
-
-  const normalizedPath = parsed.pathname.replace(/\/+/g, "/").toLowerCase();
-  if (!ARC_GIS_LAYER_PATTERN.test(normalizedPath)) {
-    return false;
-  }
-
-  return true;
 };
 
 export const clearQueryCache = (): void => {
@@ -1311,3 +1176,5 @@ export const queryPropertiesInBuffer = async (
     throw new Error(parseArcGISError(error, "Buffer query failed"));
   }
 };
+
+export { isValidArcGISUrl };

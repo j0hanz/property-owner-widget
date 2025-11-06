@@ -93,7 +93,7 @@ const isRecord = (value: unknown): value is UnknownRecord => {
   return typeof value === "object" && value !== null;
 };
 
-const createValidationError = (
+export const createValidationError = (
   type: ErrorState["type"],
   message: string,
   failureReason: string
@@ -103,7 +103,7 @@ const createValidationError = (
   failureReason,
 });
 
-const getDataSourceUrl = (
+export const getDataSourceUrl = (
   dataSource: FeatureLayerDataSource | null | undefined
 ): string | null => {
   if (!dataSource) {
