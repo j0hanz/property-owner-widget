@@ -741,7 +741,7 @@ export const queryOwnersByRelationship = async (
 
     const signalOptions = createSignalOptions(options?.signal);
 
-    const BATCH_SIZE = 50;
+    const BATCH_SIZE = 100;
     const fnrBatches: FnrValue[][] = [];
     for (let index = 0; index < propertyFnrs.length; index += BATCH_SIZE) {
       fnrBatches.push(propertyFnrs.slice(index, index + BATCH_SIZE));

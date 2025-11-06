@@ -68,14 +68,14 @@ export const buildHighlightSymbolJSON = <
   } as unknown as HighlightSymbolJSON<T>;
 };
 
-export const syncGraphicsWithState = async (params: {
+export const syncGraphicsWithState = (params: {
   graphicsToAdd: Array<{ graphic: __esri.Graphic; fnr: string | number }>;
   selectedRows: Array<{ FNR: string | number }>;
   view: __esri.MapView | null | undefined;
   helpers: SelectionGraphicsHelpers;
   highlightColor: [number, number, number, number];
   outlineWidth: number;
-}): Promise<boolean> => {
+}): boolean => {
   const {
     graphicsToAdd,
     selectedRows,
@@ -99,7 +99,7 @@ export const syncGraphicsWithState = async (params: {
   });
 
   if (graphicsToProcess.length > 0) {
-    await helpers.highlightGraphics({
+    helpers.highlightGraphics({
       entries: graphicsToProcess,
       view,
       extractFnr: helpers.extractFnr,

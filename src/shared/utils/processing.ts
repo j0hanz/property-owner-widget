@@ -807,7 +807,7 @@ export const scheduleGraphicsRendering = (params: {
   graphicsHelpers: SelectionGraphicsHelpers;
   getCurrentView: () => __esri.MapView | null | undefined;
   isStaleRequest: () => boolean;
-  syncFn: (params: SelectionGraphicsParams) => void | Promise<unknown>;
+  syncFn: (params: SelectionGraphicsParams) => void;
 }): void => {
   const {
     pipelineResult,
@@ -819,33 +819,16 @@ export const scheduleGraphicsRendering = (params: {
     syncFn,
   } = params;
 
-  const renderGraphics = () => {
-    if (isStaleRequest()) {
-      return;
-    }
-
-    const result = syncFn({
-      graphicsToAdd: pipelineResult.graphicsToAdd,
-      selectedRows: pipelineResult.updatedRows,
-      getCurrentView,
-      helpers: graphicsHelpers,
-      highlightColor,
-      outlineWidth,
-    });
-
-    if (result && typeof result === "object" && "catch" in result) {
-      const promise = result as { catch: (fn: (err: unknown) => void) => void };
-      promise.catch((error: unknown) => {
-        console.log("Failed to render selection highlights", error, {
-          selectionSize: pipelineResult.updatedRows.length,
-        });
-      });
-    }
-  };
-
-  if (typeof requestAnimationFrame === "function") {
-    requestAnimationFrame(renderGraphics);
-  } else {
-    renderGraphics();
+  if (isStaleRequest()) {
+    return;
   }
+
+  syncFn({
+    graphicsToAdd: pipelineResult.graphicsToAdd,
+    selectedRows: pipelineResult.updatedRows,
+    getCurrentView,
+    helpers: graphicsHelpers,
+    highlightColor,
+    outlineWidth,
+  });
 };

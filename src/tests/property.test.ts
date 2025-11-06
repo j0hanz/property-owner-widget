@@ -1,4 +1,4 @@
-import { React, WidgetState } from "jimu-core";
+import { WidgetState } from "jimu-core";
 import type {
   DataSourceManager,
   FeatureDataRecord,
@@ -6,7 +6,6 @@ import type {
 } from "jimu-core";
 import { describe, expect, it, jest } from "@jest/globals";
 import "@testing-library/jest-dom";
-import { act, render } from "@testing-library/react";
 import copyLib from "copy-to-clipboard";
 import * as configConstants from "../config/constants";
 import * as apiModule from "../shared/api";
@@ -2097,9 +2096,9 @@ describe("Query Controls", () => {
       { signal: new AbortController().signal }
     );
 
-    expect((propertyDs.query as jest.Mock).mock.calls.length).toBe(3);
+    expect((propertyDs.query as jest.Mock).mock.calls.length).toBe(2);
     whereClauses.forEach((clause) => {
-      expect(clause.split(" OR ").length).toBeLessThanOrEqual(50);
+      expect(clause.split(" OR ").length).toBeLessThanOrEqual(100);
     });
     expect(mockQueryTaskExecute).toHaveBeenCalledTimes(1);
     expect(ownersMap.size).toBe(propertyFnrs.length);
