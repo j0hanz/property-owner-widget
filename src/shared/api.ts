@@ -47,14 +47,14 @@ import {
   formatPropertyWithShare,
   formatOwnerInfo,
   extractFnr,
-  createGridRow,
-  deduplicateOwnerEntries,
   shouldStopAccumulation,
   processOwnerResult,
   createValidationPipeline,
   isValidArcGISUrl,
   getDataSourceUrl,
   createValidationError,
+  deriveToggleState,
+  buildPropertyRows,
 } from "./utils";
 
 let cachedFeatureLayerCtor: FeatureLayerConstructor | null = null;
@@ -104,6 +104,39 @@ const clearFeatureLayerCache = (): void => {
   cachedPromiseUtils = null;
 };
 
+const appendRowsForValidatedProperty = (
+  accumulator: {
+    rows: GridRowData[];
+    graphics: Array<{ graphic: __esri.Graphic; fnr: FnrValue }>;
+  },
+  params: {
+    validated: ValidatedProperty;
+    owners: OwnerAttributes[];
+    ownerQueryFailed: boolean;
+    maskPII: boolean;
+    context: PropertyProcessingContext;
+  }
+) => {
+  const { rows, graphics } = accumulator;
+  const { validated, owners, ownerQueryFailed, maskPII, context } = params;
+
+  const builtRows = buildPropertyRows(
+    validated,
+    owners,
+    ownerQueryFailed,
+    maskPII,
+    context
+  );
+
+  if (builtRows.length > 0) {
+    rows.push(...builtRows);
+  }
+
+  graphics.push({
+    graphic: validated.graphic,
+    fnr: validated.fnr,
+  });
+};
 const validateSingleDataSource = (
   dataSource: FeatureLayerDataSource | null,
   role: "property" | "owner",
@@ -808,83 +841,18 @@ const processBatchQuery = async (
 
     for (const validated of chunk) {
       const owners = ownersByFnr.get(String(validated.fnr)) ?? [];
-      const geometry = validated.graphic.geometry;
-      const geometryType = geometry?.type ?? null;
-      const serializedGeometry =
-        geometry && typeof geometry.toJSON === "function"
-          ? geometry.toJSON()
-          : null;
+      const ownerQueryFailed = failedFnrs.has(String(validated.fnr));
 
-      if (owners.length > 0) {
-        const uniqueOwners = deduplicateOwnerEntries(owners, {
-          fnr: validated.fnr,
-          propertyId: validated.attrs.UUID_FASTIGHET,
-        });
-
-        uniqueOwners.forEach((owner) => {
-          const formattedOwner = context.helpers.formatOwnerInfo(
-            owner,
-            config.enablePIIMasking,
-            context.messages.unknownOwner
-          );
-          const propertyWithShare = context.helpers.formatPropertyWithShare(
-            validated.attrs.FASTIGHET,
-            owner.ANDEL
-          );
-
-          rowsToProcess.push(
-            createGridRow({
-              fnr: validated.fnr,
-              objectId: owner.OBJECTID ?? validated.attrs.OBJECTID,
-              uuidFastighet:
-                owner.UUID_FASTIGHET ?? validated.attrs.UUID_FASTIGHET,
-              fastighet: propertyWithShare,
-              bostadr: formattedOwner,
-              address: formattedOwner,
-              geometryType,
-              geometry: serializedGeometry,
-              createRowId: context.helpers.createRowId,
-              rawOwner: owner,
-            })
-          );
-        });
-      } else {
-        const fallbackMessage = failedFnrs.has(String(validated.fnr))
-          ? context.messages.errorOwnerQueryFailed
-          : context.messages.unknownOwner;
-
-        const fallbackOwner: OwnerAttributes = {
-          OBJECTID: validated.attrs.OBJECTID,
-          FNR: validated.fnr,
-          UUID_FASTIGHET: validated.attrs.UUID_FASTIGHET,
-          FASTIGHET: validated.attrs.FASTIGHET,
-          NAMN: fallbackMessage,
-          BOSTADR: "",
-          POSTNR: "",
-          POSTADR: "",
-          ORGNR: "",
-        };
-
-        rowsToProcess.push(
-          createGridRow({
-            fnr: validated.fnr,
-            objectId: validated.attrs.OBJECTID,
-            uuidFastighet: validated.attrs.UUID_FASTIGHET,
-            fastighet: validated.attrs.FASTIGHET,
-            bostadr: fallbackMessage,
-            address: "",
-            geometryType,
-            geometry: serializedGeometry,
-            createRowId: context.helpers.createRowId,
-            rawOwner: fallbackOwner,
-          })
-        );
-      }
-
-      graphicsToAdd.push({
-        graphic: validated.graphic,
-        fnr: validated.fnr,
-      });
+      appendRowsForValidatedProperty(
+        { rows: rowsToProcess, graphics: graphicsToAdd },
+        {
+          validated,
+          owners,
+          ownerQueryFailed,
+          maskPII: config.enablePIIMasking,
+          context,
+        }
+      );
     }
 
     if (index + CHUNK_SIZE < validatedProperties.length) {
@@ -988,61 +956,23 @@ export const runPropertySelectionPipeline = async (
     return { status: "empty" };
   }
 
-  const extractFnrFromResult = (result: QueryResult): FnrValue | null => {
-    const feature = result?.features?.[0];
-    const attrs = feature?.attributes as AttributeMap | null | undefined;
-    return attrs ? extractFnr(attrs) : null;
-  };
-
-  const computeToggleOnlyRemoval = (
-    results: QueryResult[],
-    selected: GridRowData[]
-  ): Set<string> | null => {
-    if (!toggleEnabled || selected.length === 0) {
-      return null;
-    }
-
-    const selectedFnrs = new Set(
-      selected.map((row) => normalizeFnrKey(row.FNR))
-    );
-    if (selectedFnrs.size === 0) {
-      return null;
-    }
-
-    const toRemove = new Set<string>();
-
-    for (const result of results) {
-      const fnr = extractFnrFromResult(result);
-      if (fnr == null) {
-        return null;
-      }
-
-      const key = normalizeFnrKey(fnr);
-      if (!selectedFnrs.has(key)) {
-        return null;
-      }
-      toRemove.add(key);
-    }
-
-    return toRemove.size > 0 ? toRemove : null;
-  };
-
-  const toggleOnlyRemovals = computeToggleOnlyRemoval(
+  const toggleRemovalState = deriveToggleState({
     propertyResults,
-    selectedProperties
-  );
+    selectedProperties,
+    toggleEnabled,
+    normalizeFnrKey,
+    extractFnr,
+  });
 
-  if (toggleOnlyRemovals && toggleOnlyRemovals.size > 0) {
-    const updatedRows = selectedProperties.filter(
-      (row) => !toggleOnlyRemovals.has(normalizeFnrKey(row.FNR))
-    );
+  if (toggleRemovalState) {
+    const { updatedRows, keysToRemove } = toggleRemovalState;
 
     return {
       status: "success",
       rowsToProcess: [],
       graphicsToAdd: [],
       updatedRows,
-      toRemove: toggleOnlyRemovals,
+      toRemove: keysToRemove,
       propertyResults,
     };
   }

@@ -132,6 +132,54 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   });
 };
 
+const resolveWidgetId = (props: AllWidgetProps<IMConfig>): string => {
+  const widgetIdProp = (props as unknown as { widgetId?: string }).widgetId;
+  const fallbackId = props.id as unknown as string;
+  if (typeof widgetIdProp === "string" && widgetIdProp.length > 0) {
+    return widgetIdProp;
+  }
+  return fallbackId ?? fallbackId;
+};
+
+const usePropertySelectors = (widgetId: string) => {
+  const selectorsRef = React.useRef(createPropertySelectors(widgetId));
+  const previousWidgetId = hooks.usePrevious(widgetId);
+
+  if (
+    !selectorsRef.current ||
+    (previousWidgetId && previousWidgetId !== widgetId)
+  ) {
+    selectorsRef.current = createPropertySelectors(widgetId);
+  }
+
+  return selectorsRef.current;
+};
+
+interface ClipboardPayload {
+  text: string;
+  count: number;
+  isSorted: boolean;
+}
+
+interface PipelineExecutionContext {
+  mapPoint: __esri.Point;
+  manager: DataSourceManager;
+  controller: AbortController;
+  isStaleRequest: () => boolean;
+  selectionForPipeline: GridRowData[];
+}
+
+type PipelineRunResult =
+  | { status: "stale" }
+  | { status: "aborted" }
+  | { status: "empty" }
+  | { status: "success"; pipelineResult: PropertyPipelineSuccess };
+
+type PropertyPipelineSuccess = Extract<
+  Awaited<ReturnType<typeof executePropertyQueryPipeline>>,
+  { status: "success" }
+>;
+
 // Error boundaries require class components in React (no functional equivalent)
 class PropertyWidgetErrorBoundary extends React.Component<
   ErrorBoundaryProps,
@@ -177,21 +225,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const styles = useWidgetStyles();
   const translate = hooks.useTranslation(jimuUIMessages, defaultMessages);
 
-  const widgetIdProp = (props as unknown as { widgetId?: string }).widgetId;
-  const widgetId =
-    (typeof widgetIdProp === "string" && widgetIdProp.length > 0
-      ? widgetIdProp
-      : (id as unknown as string)) ?? (id as unknown as string);
-
-  const selectorsRef = React.useRef(createPropertySelectors(widgetId));
-  const previousWidgetId = hooks.usePrevious(widgetId);
-  if (
-    !selectorsRef.current ||
-    (previousWidgetId && previousWidgetId !== widgetId)
-  ) {
-    selectorsRef.current = createPropertySelectors(widgetId);
-  }
-  const selectors = selectorsRef.current;
+  const widgetId = resolveWidgetId(props);
+  const selectors = usePropertySelectors(widgetId);
 
   const ensureImmutableUseDataSource = (
     candidate: ReturnType<typeof dataSourceHelpers.findById>
@@ -284,6 +319,327 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     hooks.useLatest<GridRowData[]>(selectedProperties);
   const rawPropertyResultsRef =
     hooks.useLatest<SerializedQueryResultMap | null>(rawPropertyResults);
+
+  const buildResultsMap = (
+    rawResults:
+      | SerializedQueryResultMap
+      | Map<string, SerializedQueryResult>
+      | null
+  ): Map<string, SerializedQueryResult> | null => {
+    if (!rawResults) {
+      return null;
+    }
+
+    if (rawResults instanceof Map) {
+      return rawResults;
+    }
+
+    if (isSerializedResultRecord(rawResults)) {
+      const resultsMap = new Map<string, SerializedQueryResult>();
+      Object.keys(rawResults).forEach((key) => {
+        const value = rawResults[key];
+        if (value) {
+          resultsMap.set(key, value);
+        }
+      });
+      return resultsMap;
+    }
+
+    console.log("[Export] Invalid rawPropertyResults type:", typeof rawResults);
+    return null;
+  };
+
+  const collectSelectedRawData = (
+    rows: GridRowData[],
+    resultsMap: Map<string, SerializedQueryResult>
+  ): SerializedQueryResult[] => {
+    const selectedRawData: SerializedQueryResult[] = [];
+    rows.forEach((row) => {
+      const rawData = resultsMap.get(row.id);
+      console.log("[Export] Looking up row:", row.id, "Found:", !!rawData);
+      if (rawData) {
+        selectedRawData.push(rawData);
+      }
+    });
+    return selectedRawData;
+  };
+
+  const exportSelectedRows = (
+    format: ExportFormat,
+    rows: GridRowData[],
+    rawData: SerializedQueryResult[],
+    sorting: SortingState
+  ) => {
+    const sortedRows = applySortingToProperties(rows, sorting);
+
+    try {
+      exportData(
+        rawData,
+        sortedRows,
+        {
+          format,
+          filename: "property-export",
+          rowCount: sortedRows.length,
+          definition: EXPORT_FORMATS.find((item) => item.id === format),
+        },
+        config.enablePIIMasking,
+        translate("unknownOwner")
+      );
+
+      trackEvent({
+        category: "Export",
+        action: `export_${format}`,
+        label: sorting.length > 0 ? "sorted" : "unsorted",
+        value: sortedRows.length,
+      });
+    } catch (error) {
+      console.error("Export failed", error);
+      trackError(`export_${format}`, error);
+    }
+  };
+
+  const buildClipboardPayload = (
+    selection: GridRowData[],
+    sorting: SortingState,
+    maskEnabled: boolean,
+    translateFn: (key: string) => string
+  ): ClipboardPayload | null => {
+    if (!selection.length) {
+      return null;
+    }
+
+    const sortedSelection = applySortingToProperties(selection, sorting);
+    const formattedText = formatPropertiesForClipboard(
+      sortedSelection,
+      maskEnabled,
+      translateFn("unknownOwner")
+    );
+
+    return {
+      text: formattedText,
+      count: selection.length,
+      isSorted: sorting.length > 0,
+    };
+  };
+
+  const notifyCopyOutcome = (
+    copySucceeded: boolean,
+    payload: ClipboardPayload,
+    translateFn: (key: string) => string
+  ) => {
+    if (copySucceeded) {
+      const successTemplate = translateFn("copiedSuccess");
+      const successMessage =
+        typeof successTemplate === "string"
+          ? successTemplate.replace("{count}", String(payload.count))
+          : "";
+
+      setUrlFeedback({
+        type: "success",
+        text:
+          successMessage ||
+          (typeof successTemplate === "string" ? successTemplate : ""),
+      });
+
+      trackEvent({
+        category: "Copy",
+        action: "copy_properties",
+        label: payload.isSorted ? "sorted" : "unsorted",
+        value: payload.count,
+      });
+      return;
+    }
+
+    setUrlFeedback({
+      type: "error",
+      text: translateFn("copyFailed"),
+    });
+
+    trackEvent({
+      category: "Copy",
+      action: "copy_properties",
+      label: "failed",
+      value: payload.count,
+    });
+  };
+
+  const prepareQueryExecution = hooks.useEventCallback(
+    (
+      event: __esri.ViewClickEvent,
+      tracker: ReturnType<typeof createPerformanceTracker>
+    ): PipelineExecutionContext | null => {
+      const validation = validateMapClickRequest({
+        event,
+        modules,
+        config,
+        dsManager: dsManagerRef.current,
+        translate,
+      });
+
+      if (isValidationFailure(validation)) {
+        const { error, failureReason } = validation;
+        setError(error.type as ErrorType, error.message);
+        tracker.failure(failureReason);
+        trackError("map_click_validation", failureReason);
+        return null;
+      }
+
+      const { mapPoint, manager } = validation.data;
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+      const isStaleRequest = () => requestId !== requestIdRef.current;
+
+      propertyDispatchRef.current.clearError();
+      propertyDispatchRef.current.setQueryInFlight(true);
+
+      const currentSelection = selectedPropertiesRef.current ?? [];
+      const selectionForPipeline = [...currentSelection];
+
+      const controller = getController();
+
+      return {
+        mapPoint,
+        manager,
+        controller,
+        isStaleRequest,
+        selectionForPipeline,
+      };
+    }
+  );
+
+  const runSelectionPipeline = hooks.useEventCallback(
+    async (params: {
+      context: PipelineExecutionContext;
+      perfStart: number;
+    }): Promise<PipelineRunResult> => {
+      const { context, perfStart } = params;
+
+      const pipelineResult = await executePropertyQueryPipeline({
+        mapPoint: context.mapPoint,
+        config,
+        dsManager: context.manager,
+        maxResults,
+        toggleEnabled,
+        enablePIIMasking: piiMaskingEnabled,
+        selectedProperties: context.selectionForPipeline,
+        signal: context.controller.signal,
+        translate,
+        perfStart,
+      });
+
+      const abortStatus = abortHelpers.checkAbortedOrStale(
+        context.controller.signal,
+        context.isStaleRequest
+      );
+
+      if (abortStatus === "stale") {
+        return { status: "stale" };
+      }
+
+      if (abortStatus === "aborted") {
+        return { status: "aborted" };
+      }
+
+      if (pipelineResult.status === "empty") {
+        return { status: "empty" };
+      }
+
+      return {
+        status: "success",
+        pipelineResult,
+      };
+    }
+  );
+
+  const finalizeSelection = hooks.useEventCallback(
+    (params: {
+      pipelineResult: PropertyPipelineSuccess;
+      context: PipelineExecutionContext;
+      perfStart: number;
+    }): number => {
+      const { pipelineResult, context, perfStart } = params;
+
+      const removedRows = context.selectionForPipeline.filter((row) =>
+        pipelineResult.toRemove.has(normalizeFnrKey(row.FNR))
+      );
+
+      if (removedRows.length > 0) {
+        trackEvent({
+          category: "Property",
+          action: "toggle_remove",
+          value: removedRows.length,
+        });
+      }
+
+      if (context.isStaleRequest()) {
+        return pipelineResult.rowsToProcess.length;
+      }
+
+      const stateUpdate = updatePropertySelectionState({
+        pipelineResult,
+        previousRawResults: rawPropertyResultsRef.current,
+        selectedProperties: context.selectionForPipeline,
+        dispatch: propertyDispatchRef.current,
+        removeGraphicsForFnr,
+        normalizeFnrKey,
+        highlightColorConfig,
+        highlightOpacityConfig,
+        outlineWidthConfig,
+        perfStart,
+      });
+
+      rawPropertyResultsRef.current = stateUpdate.resultsToStore;
+
+      const graphicsHelpers = {
+        addGraphicsToMap,
+        addManyGraphicsToMap,
+        extractFnr,
+        normalizeFnrKey,
+      } satisfies SelectionGraphicsHelpers;
+
+      scheduleGraphicsRendering({
+        pipelineResult,
+        highlightColor: stateUpdate.highlightColor,
+        outlineWidth: stateUpdate.outlineWidth,
+        graphicsHelpers,
+        getCurrentView,
+        isStaleRequest: context.isStaleRequest,
+        perfStart,
+        syncFn: syncSelectionGraphics,
+      });
+
+      return pipelineResult.rowsToProcess.length;
+    }
+  );
+
+  const handleSelectionError = hooks.useEventCallback(
+    (
+      error: unknown,
+      tracker: ReturnType<typeof createPerformanceTracker>,
+      context: PipelineExecutionContext
+    ) => {
+      if (context.isStaleRequest()) {
+        return;
+      }
+
+      if (isAbortError(error)) {
+        tracker.failure("aborted");
+        propertyDispatchRef.current.setQueryInFlight(false);
+        return;
+      }
+
+      logger.error("Property query error:", error, {
+        message: error instanceof Error ? error.message : undefined,
+        stack: error instanceof Error ? error.stack : undefined,
+        propertyDsId: config.propertyDataSourceId,
+        ownerDsId: config.ownerDataSourceId,
+      });
+      setError(ErrorType.QUERY_ERROR, translate("errorQueryFailed"));
+      tracker.failure("query_error");
+      propertyDispatchRef.current.setQueryInFlight(false);
+      trackError("property_query", error);
+    }
+  );
 
   hooks.useEffectOnce(() => {
     // Widget mounted
@@ -619,29 +975,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       return;
     }
 
-    if (!rawPropertyResults) {
-      console.log("[Export] No raw results available, aborting");
-      return;
-    }
-
-    // Convert rawPropertyResults to Map for consistent access
-    let resultsMap: Map<string, SerializedQueryResult>;
-    if (rawPropertyResults instanceof Map) {
-      resultsMap = rawPropertyResults;
-    } else if (isSerializedResultRecord(rawPropertyResults)) {
-      // Handle Redux immutable object or plain object
-      resultsMap = new Map();
-      Object.keys(rawPropertyResults).forEach((key) => {
-        const value = rawPropertyResults[key];
-        if (value !== null && value !== undefined) {
-          resultsMap.set(key, value);
-        }
-      });
-    } else {
-      console.log(
-        "[Export] Invalid rawPropertyResults type:",
-        typeof rawPropertyResults
-      );
+    const resultsMap = buildResultsMap(rawPropertyResults);
+    if (!resultsMap) {
+      console.log("[Export] Unable to build results map, aborting");
       return;
     }
 
@@ -651,12 +987,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       return;
     }
 
-    const selectedRawData: SerializedQueryResult[] = [];
-    selectedProperties.forEach((row) => {
-      const rawData = resultsMap.get(row.id);
-      console.log("[Export] Looking up row:", row.id, "Found:", !!rawData);
-      if (rawData) selectedRawData.push(rawData);
-    });
+    const selectedRows = [...selectedProperties];
+    const selectedRawData = collectSelectedRawData(selectedRows, resultsMap);
 
     console.log("[Export] Selected raw data count:", selectedRawData.length);
     if (selectedRawData.length === 0) {
@@ -664,36 +996,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       return;
     }
 
-    const selectedRows = Array.from(selectedProperties);
-
-    // Apply current table sorting to selected rows
-    const sortedRows = applySortingToProperties(selectedRows, tableSorting);
-
-    try {
-      exportData(
-        selectedRawData,
-        sortedRows,
-        {
-          format,
-          filename: "property-export",
-          rowCount: sortedRows.length,
-          definition: EXPORT_FORMATS.find((item) => item.id === format),
-        },
-        config.enablePIIMasking,
-        translate("unknownOwner")
-      );
-
-      // Track sorted vs unsorted exports
-      trackEvent({
-        category: "Export",
-        action: `export_${format}`,
-        label: tableSorting.length > 0 ? "sorted" : "unsorted",
-        value: sortedRows.length,
-      });
-    } catch (error) {
-      console.error("Export failed", error);
-      trackError(`export_${format}`, error);
-    }
+    exportSelectedRows(format, selectedRows, selectedRawData, tableSorting);
   });
 
   const handleExportFormatSelect = hooks.useEventCallback(
@@ -713,54 +1016,22 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       return;
     }
 
+    const selectionArray = [...currentSelection];
+
     try {
-      const sortedSelection = applySortingToProperties(
-        currentSelection,
-        tableSorting
-      );
-
-      const formattedText = formatPropertiesForClipboard(
-        sortedSelection,
+      const payload = buildClipboardPayload(
+        selectionArray,
+        tableSorting,
         piiMaskingEnabled,
-        translate("unknownOwner")
+        translate
       );
 
-      const copySucceeded = copyToClipboard(formattedText);
-      const selectionCount = currentSelection.length;
-
-      if (copySucceeded) {
-        const successTemplate = translate("copiedSuccess");
-        const successMessage =
-          typeof successTemplate === "string"
-            ? successTemplate.replace("{count}", String(selectionCount))
-            : "";
-
-        setUrlFeedback({
-          type: "success",
-          text:
-            successMessage ||
-            (typeof successTemplate === "string" ? successTemplate : ""),
-        });
-
-        trackEvent({
-          category: "Copy",
-          action: "copy_properties",
-          label: tableSorting.length > 0 ? "sorted" : "unsorted",
-          value: selectionCount,
-        });
-      } else {
-        setUrlFeedback({
-          type: "error",
-          text: translate("copyFailed"),
-        });
-
-        trackEvent({
-          category: "Copy",
-          action: "copy_properties",
-          label: "failed",
-          value: selectionCount,
-        });
+      if (!payload) {
+        return;
       }
+
+      const copySucceeded = copyToClipboard(payload.text);
+      notifyCopyOutcome(copySucceeded, payload, translate);
     } catch (error) {
       console.error("Copy failed:", error);
       setUrlFeedback({
@@ -785,148 +1056,53 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       console.log("[PERF] Map click started at", perfStart);
       const tracker = createPerformanceTracker("map_click_query");
 
-      const validation = validateMapClickRequest({
-        event,
-        modules,
-        config,
-        dsManager: dsManagerRef.current,
-        translate,
-      });
+      const context = prepareQueryExecution(event, tracker);
 
-      if (isValidationFailure(validation)) {
-        const { error, failureReason } = validation;
-        setError(error.type as ErrorType, error.message);
-        tracker.failure(failureReason);
-        trackError("map_click_validation", failureReason);
+      if (!context) {
         return;
       }
 
-      const { mapPoint, manager } = validation.data;
-
-      const requestId = requestIdRef.current + 1;
-      requestIdRef.current = requestId;
-      const isStaleRequest = () => requestId !== requestIdRef.current;
-
-      propertyDispatchRef.current.clearError();
-      propertyDispatchRef.current.setQueryInFlight(true);
-
-      const currentSelection = selectedPropertiesRef.current ?? [];
-      const selectionForPipeline = Array.isArray(currentSelection)
-        ? currentSelection
-        : Array.from(currentSelection as Iterable<GridRowData>);
-
-      const controller = getController();
+      const { controller } = context;
 
       try {
-        const pipelineResult = await executePropertyQueryPipeline({
-          mapPoint,
-          config,
-          dsManager: manager,
-          maxResults,
-          toggleEnabled,
-          enablePIIMasking: piiMaskingEnabled,
-          selectedProperties: selectionForPipeline,
-          signal: controller.signal,
-          translate,
+        const outcome = await runSelectionPipeline({
+          context,
           perfStart,
         });
 
-        const abortStatus = abortHelpers.checkAbortedOrStale(
-          controller.signal,
-          isStaleRequest
-        );
-        if (abortStatus === "stale") {
-          return;
-        }
-        if (abortStatus === "aborted") {
-          tracker.failure("aborted");
+        if (outcome.status === "stale") {
           return;
         }
 
-        if (pipelineResult.status === "empty") {
-          if (!isStaleRequest()) {
-            propertyDispatchRef.current.setQueryInFlight(false);
-          }
+        if (outcome.status === "aborted") {
+          tracker.failure("aborted");
+          propertyDispatchRef.current.setQueryInFlight(false);
+          return;
+        }
+
+        if (outcome.status === "empty") {
+          propertyDispatchRef.current.setQueryInFlight(false);
           tracker.success();
           return;
         }
 
-        const removedRows = selectionForPipeline.filter((row) =>
-          pipelineResult.toRemove.has(normalizeFnrKey(row.FNR))
-        );
-
-        if (removedRows.length > 0) {
-          trackEvent({
-            category: "Property",
-            action: "toggle_remove",
-            value: removedRows.length,
-          });
-        }
-
-        if (!isStaleRequest()) {
-          const stateUpdate = updatePropertySelectionState({
-            pipelineResult,
-            previousRawResults: rawPropertyResultsRef.current,
-            selectedProperties: selectionForPipeline,
-            dispatch: propertyDispatchRef.current,
-            removeGraphicsForFnr,
-            normalizeFnrKey,
-            highlightColorConfig,
-            highlightOpacityConfig,
-            outlineWidthConfig,
-            perfStart,
-          });
-
-          rawPropertyResultsRef.current = stateUpdate.resultsToStore;
-
-          const graphicsHelpers = {
-            addGraphicsToMap,
-            addManyGraphicsToMap,
-            extractFnr,
-            normalizeFnrKey,
-          } satisfies SelectionGraphicsHelpers;
-
-          scheduleGraphicsRendering({
-            pipelineResult,
-            highlightColor: stateUpdate.highlightColor,
-            outlineWidth: stateUpdate.outlineWidth,
-            graphicsHelpers,
-            getCurrentView,
-            isStaleRequest,
-            perfStart,
-            syncFn: syncSelectionGraphics,
-          });
-        }
+        const processedCount = finalizeSelection({
+          pipelineResult: outcome.pipelineResult,
+          context,
+          perfStart,
+        });
 
         tracker.success();
         trackEvent({
           category: "Query",
           action: "property_query",
           label: "success",
-          value: pipelineResult.rowsToProcess.length,
+          value: processedCount,
         });
         trackFeatureUsage("pii_masking", piiMaskingEnabled);
         trackFeatureUsage("toggle_removal", toggleEnabled);
       } catch (error) {
-        if (isStaleRequest()) {
-          return;
-        }
-
-        if (isAbortError(error)) {
-          tracker.failure("aborted");
-          propertyDispatchRef.current.setQueryInFlight(false);
-          return;
-        }
-
-        logger.error("Property query error:", error, {
-          message: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
-          propertyDsId: config.propertyDataSourceId,
-          ownerDsId: config.ownerDataSourceId,
-        });
-        setError(ErrorType.QUERY_ERROR, translate("errorQueryFailed"));
-        tracker.failure("query_error");
-        trackError("property_query", error);
+        handleSelectionError(error, tracker, context);
       } finally {
         releaseController(controller);
       }

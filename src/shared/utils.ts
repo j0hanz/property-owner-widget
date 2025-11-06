@@ -1400,6 +1400,72 @@ export const shouldStopAccumulation = (
   return currentRowCount + accumulatedRows >= maxResults;
 };
 
+export const deriveToggleState = (params: {
+  propertyResults: QueryResult[];
+  selectedProperties: GridRowData[];
+  toggleEnabled: boolean;
+  normalizeFnrKey: (fnr: FnrValue | null | undefined) => string;
+  extractFnr: (
+    attributes: { [key: string]: unknown } | null | undefined
+  ) => FnrValue | null;
+}): {
+  status: "remove_only";
+  keysToRemove: Set<string>;
+  updatedRows: GridRowData[];
+} | null => {
+  const {
+    propertyResults,
+    selectedProperties,
+    toggleEnabled,
+    normalizeFnrKey: normalize,
+    extractFnr: extract,
+  } = params;
+
+  if (!toggleEnabled || selectedProperties.length === 0) {
+    return null;
+  }
+
+  const selectedFnrKeys = new Set(
+    selectedProperties.map((row) => normalize(row.FNR))
+  );
+  if (selectedFnrKeys.size === 0) {
+    return null;
+  }
+
+  const keysToRemove = new Set<string>();
+
+  for (const result of propertyResults) {
+    const feature = result?.features?.[0] ?? null;
+    const attributes = (feature?.attributes ?? null) as {
+      [key: string]: unknown;
+    } | null;
+    const fnr = extract(attributes);
+    if (fnr == null) {
+      return null;
+    }
+
+    const key = normalize(fnr);
+    if (!selectedFnrKeys.has(key)) {
+      return null;
+    }
+    keysToRemove.add(key);
+  }
+
+  if (keysToRemove.size === 0) {
+    return null;
+  }
+
+  const updatedRows = selectedProperties.filter((row) => {
+    return !keysToRemove.has(normalize(row.FNR));
+  });
+
+  return {
+    status: "remove_only",
+    keysToRemove,
+    updatedRows,
+  };
+};
+
 export const processOwnerResult = (params: {
   resolution: OwnerQueryResolution;
   validated: ValidatedProperty;
