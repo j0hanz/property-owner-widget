@@ -49,7 +49,6 @@ import {
   getDataSourceUrl,
   isAbortError,
   isValidArcGISUrl,
-  logger,
   normalizeFnrKey,
   parseArcGISError,
   processOwnerResult,
@@ -869,7 +868,7 @@ const processBatchQuery = async (
     if (helpers.isAbortError(error)) {
       throw error instanceof Error ? error : new Error(String(error));
     }
-    logger.error("Batch owner query failed", { error });
+    console.log("Batch owner query failed", { error });
     ownersByFnr = new Map();
     fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)));
   }

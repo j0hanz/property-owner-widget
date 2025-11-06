@@ -137,14 +137,6 @@ export interface SelectionGraphicsHelpers {
     normalizeFnrKey: (fnr: FnrValue | null | undefined) => NormalizedFnr
   ) => void;
   clearHighlights: () => void;
-  ensureLayerView: (
-    view: __esri.MapView | null | undefined
-  ) => Promise<__esri.FeatureLayerView | null>;
-  applyHighlightOptions: (
-    view: __esri.MapView | null | undefined,
-    highlightColor: [number, number, number, number],
-    outlineWidth: number
-  ) => void;
   extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null;
   normalizeFnrKey: (fnr: FnrValue | null | undefined) => NormalizedFnr;
 }

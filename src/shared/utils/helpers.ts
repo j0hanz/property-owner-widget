@@ -169,24 +169,6 @@ export const sanitizeClipboardCell = (value: unknown): string => {
 export const normalizeHostValue = (value: string): string =>
   stripHtml(value || "").trim();
 
-export const logger = {
-  debug: (_context: string, _data?: { [key: string]: unknown }) => {
-    void _context;
-    void _data;
-  },
-  warn: (_context: string, _data?: { [key: string]: unknown }) => {
-    void _context;
-    void _data;
-  },
-  error: (
-    context: string,
-    error: unknown,
-    data?: { [key: string]: unknown }
-  ) => {
-    console.error(`Property Widget: ${context}`, error, data || {});
-  },
-};
-
 export const isAbortError = (error: unknown): error is Error => {
   if (!error || typeof error !== "object") return false;
   const candidate = error as { name?: string; message?: string };
