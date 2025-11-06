@@ -55,7 +55,6 @@ import {
 } from "../shared/config";
 import {
   useAbortControllerPool,
-  useDebounce,
   useEsriModules,
   useGraphicsLayer,
   useHitTestHover,
@@ -95,7 +94,6 @@ import {
   scheduleGraphicsRendering,
   syncCursorGraphics,
   syncGraphicsWithState,
-  updateGraphicSymbol,
   updatePropertySelectionState,
   validateMapClickRequest,
 } from "../shared/utils/index";
@@ -107,7 +105,9 @@ import copyButton from "../assets/copy.svg";
 import exportIcon from "../assets/export.svg";
 import mapSelect from "../assets/map-select.svg";
 
-const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
+const syncSelectionGraphics = async (
+  params: SelectionGraphicsParams
+) => {
   const {
     graphicsToAdd,
     selectedRows,
@@ -122,7 +122,7 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
     return;
   }
 
-  syncGraphicsWithState({
+  await syncGraphicsWithState({
     graphicsToAdd,
     selectedRows,
     view,
@@ -385,7 +385,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         previousRawResults: rawPropertyResultsRef.current,
         selectedProperties: context.selectionForPipeline,
         dispatch: propertyDispatchRef.current,
-        removeGraphicsForFnr,
+        removeHighlightForFnr,
         normalizeFnrKey,
         highlightColorConfig,
         highlightOpacityConfig,
@@ -395,8 +395,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       rawPropertyResultsRef.current = stateUpdate.resultsToStore;
 
       const graphicsHelpers = {
-        addGraphicsToMap,
-        addManyGraphicsToMap,
+        highlightGraphics,
+        clearHighlights,
+        ensureLayerView,
+        applyHighlightOptions,
+        removeHighlightForFnr,
         extractFnr,
         normalizeFnrKey,
       } satisfies SelectionGraphicsHelpers;
@@ -481,35 +484,39 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   );
   const ownerUseDataSourceId = dataSourceHelpers.extractId(ownerUseDataSource);
 
+  // ArcGIS resource refs: Singleton manager and query tracking
+  const dsManagerRef = React.useRef<DataSourceManager | null>(null);
+  if (!dsManagerRef.current) {
+    dsManagerRef.current = DataSourceManager.getInstance();
+  }
+
   const {
     modules,
     loading: modulesLoading,
     error: modulesError,
   } = useEsriModules();
   const {
-    ensureGraphicsLayer,
-    clearGraphics,
-    removeGraphicsForFnr,
-    addGraphicsToMap,
-    addManyGraphicsToMap,
+    ensureLayerView,
+    clearHighlights,
+    removeHighlightForFnr,
+    highlightGraphics,
+    applyHighlightOptions,
     destroyGraphicsLayer,
-  } = useGraphicsLayer(modules, widgetId);
+  } = useGraphicsLayer({
+    widgetId,
+    propertyDataSourceId: config.propertyDataSourceId,
+    dsManagerRef,
+  });
   const { disablePopup, restorePopup } = usePopupManager(widgetId);
   const { getController, releaseController, abortAll } =
     useAbortControllerPool();
-
-  // ArcGIS resource refs: Singleton manager and query tracking
-  const dsManagerRef = React.useRef<DataSourceManager | null>(null);
-  if (!dsManagerRef.current) {
-    dsManagerRef.current = DataSourceManager.getInstance();
-  }
   const requestIdRef = React.useRef(0); // Increments for each query to detect stale requests
 
   const resetSelectionState = hooks.useEventCallback(
     (shouldTrackClear: boolean) => {
       abortAll();
       clearQueryCache();
-      clearGraphics();
+      clearHighlights();
 
       const previousSelection = selectedPropertiesRef.current ?? [];
       if (shouldTrackClear && previousSelection.length > 0) {
@@ -652,7 +659,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     removedProperties.forEach((prop) => {
       const fnr = prop.FNR;
       if (fnr != null) {
-        removeGraphicsForFnr(fnr, normalizeFnrKey);
+        removeHighlightForFnr(fnr, normalizeFnrKey);
       }
     });
 
@@ -674,7 +681,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       });
       propertyDispatchRef.current.setRawResults(nextRaw);
     }
-  }, [maxResults, normalizeFnrKey, removeGraphicsForFnr, trackEvent]);
+  }, [maxResults, normalizeFnrKey, removeHighlightForFnr, trackEvent]);
 
   hooks.useUpdateEffect(() => {
     trackFeatureUsage("toggle_removal_changed", toggleEnabled);
@@ -880,7 +887,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const { onActiveViewChange, getCurrentView, reactivateMapView, cleanup } =
     useMapViewLifecycle({
       modules,
-      ensureGraphicsLayer,
+      ensureLayerView,
       destroyGraphicsLayer,
       disablePopup,
       restorePopup,
@@ -1083,21 +1090,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     updateCursorPoint(lastCursorPointRef.current);
   }, [hoverTooltipData]);
 
-  // Sync selection graphics when highlight config changes (incremental update)
-  const debouncedSyncGraphics = useDebounce(() => {
-    const currentSelection = selectedPropertiesRef.current ?? [];
-    const selectionArray = Array.isArray(currentSelection)
-      ? currentSelection
-      : Array.from(currentSelection as Iterable<GridRowData>);
-    if (selectionArray.length === 0) return;
-
+  hooks.useUpdateEffect(() => {
     const view = getCurrentView();
-    if (!view || !modules) return;
-
-    const layer = view.map.findLayerById(
-      `property-${widgetId}-highlight-layer`
-    ) as __esri.GraphicsLayer | null;
-    if (!layer) return;
+    if (!view) {
+      return;
+    }
 
     const currentHighlightColor = buildHighlightColor(
       highlightColorConfig,
@@ -1105,31 +1102,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     );
     const currentOutlineWidth = getValidatedOutlineWidth(outlineWidthConfig);
 
-    const selectedFnrKeys = new Set(
-      selectionArray.map((row) => normalizeFnrKey(row.FNR))
-    );
-
-    layer.graphics.forEach((graphic: __esri.Graphic) => {
-      if (!graphic?.geometry) return;
-
-      const fnr = extractFnr(graphic.attributes);
-      if (!fnr) return;
-
-      const fnrKey = normalizeFnrKey(fnr);
-      if (!selectedFnrKeys.has(fnrKey)) return;
-
-      updateGraphicSymbol(
-        graphic,
-        currentHighlightColor,
-        currentOutlineWidth,
-        modules
-      );
-    });
-  }, 0);
-
-  hooks.useUpdateEffect(() => {
-    debouncedSyncGraphics();
-  }, [highlightColorConfig, highlightOpacityConfig, outlineWidthConfig]);
+    applyHighlightOptions(view, currentHighlightColor, currentOutlineWidth);
+  }, [
+    getCurrentView,
+    applyHighlightOptions,
+    highlightColorConfig,
+    highlightOpacityConfig,
+    outlineWidthConfig,
+  ]);
 
   hooks.useUpdateEffect(() => {
     const isOpening =
@@ -1184,7 +1164,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   hooks.useUnmount(() => {
     abortAll();
     clearQueryCache();
-    clearGraphics();
+    clearHighlights();
     propertyDispatchRef.current.removeWidgetState();
   });
 
