@@ -1,4 +1,4 @@
-import { hooks, React } from "jimu-core";
+import { hooks, React, type DataSourceManager } from "jimu-core";
 import { loadArcGISJSAPIModules } from "jimu-arcgis";
 import type { JimuMapView } from "jimu-arcgis";
 import {
@@ -14,12 +14,11 @@ import type {
   EsriModules,
   EsriStubGlobal,
   FnrValue,
-  HoverQueryParams,
 } from "../config/types";
+import { queryPropertyByPoint } from "./api";
 import {
   batchGraphicsRenderer,
   createSymbolCache,
-  executeHoverQuery,
   isAbortError,
   logger,
   popupSuppressionManager,
@@ -890,7 +889,9 @@ export const useDebounce = <T extends (...args: unknown[]) => void>(
 
   const undebouncedWithCancel = React.useMemo(() => {
     const fn = undebounced as DebouncedFn<T>;
-    fn.cancel = () => {}; // No-op cancel for instant execution
+    fn.cancel = () => {
+      // No-op cancel for instant execution
+    };
     return fn;
   }, [undebounced]);
 
@@ -961,94 +962,112 @@ export const useDebounce = <T extends (...args: unknown[]) => void>(
   return safeDelay === 0 ? undebouncedWithCancel : debouncedRef.current;
 };
 
-export const useHoverQuery = (params: HoverQueryParams) => {
-  const { config, dsManager, enablePIIMasking, translate } = params;
+/**
+ * Hook for hover query functionality using point-buffer spatial queries.
+ * Queries property data when user hovers over the map.
+ */
+export const useHitTestHover = (params: {
+  dataSourceId: string | undefined;
+  dsManagerRef: React.MutableRefObject<DataSourceManager | null>;
+  viewRef: React.MutableRefObject<__esri.MapView | null>;
+  enablePIIMasking: boolean;
+  translate: (key: string, fallback?: string) => string;
+}) => {
   const [hoverTooltipData, setHoverTooltipData] = React.useState<{
     fastighet: string;
     bostadr: string;
   } | null>(null);
-  const [isHoverQueryActive, setIsHoverQueryActive] = React.useState(false);
-  const hoverQueryAbortRef = React.useRef<AbortController | null>(null);
+
+  const [hasCompletedFirstHitTest, setHasCompletedFirstHitTest] =
+    React.useState(false);
+
+  const [isQuerying, setIsQuerying] = React.useState(false);
+
+  const abortControllerRef = React.useRef<AbortController | null>(null);
   const lastHoverQueryPointRef = React.useRef<{ x: number; y: number } | null>(
     null
   );
-  const hasCompletedFirstQueryRef = React.useRef(false);
-  const queryResultCacheRef = React.useRef<
-    Map<string, { fastighet: string; bostadr: string } | null>
-  >(new Map());
 
-  const queryPropertyAtPoint = hooks.useEventCallback(
-    async (mapPoint: __esri.Point) => {
-      const cacheKey = `${Math.round(mapPoint.x / 10) * 10},${Math.round(mapPoint.y / 10) * 10}`;
-      const cachedResult = queryResultCacheRef.current.get(cacheKey);
+  const performHitTest = hooks.useEventCallback(
+    async (event: __esri.ViewPointerMoveEvent) => {
+      // Abort previous query
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
 
-      if (cachedResult !== undefined) {
-        hasCompletedFirstQueryRef.current = true;
-        setHoverTooltipData(cachedResult);
+      const view = params.viewRef.current;
+      const dsManager = params.dsManagerRef.current;
+      const dataSourceId = params.dataSourceId;
+
+      if (!view || !dsManager || !dataSourceId) {
+        setHoverTooltipData(null);
+        setIsQuerying(false);
         return;
       }
 
-      if (hoverQueryAbortRef.current) {
-        hoverQueryAbortRef.current.abort();
-        hoverQueryAbortRef.current = null;
+      const mapPoint = view.toMap({ x: event.x, y: event.y });
+      if (!mapPoint) {
+        setHoverTooltipData(null);
+        setIsQuerying(false);
+        return;
       }
 
       const controller = new AbortController();
-      hoverQueryAbortRef.current = controller;
+      abortControllerRef.current = controller;
+      lastHoverQueryPointRef.current = { x: event.x, y: event.y };
+      setIsQuerying(true);
 
-      setIsHoverQueryActive(true);
       try {
-        const result = await executeHoverQuery({
+        // Query properties at the point location
+        const results = await queryPropertyByPoint(
           mapPoint,
-          config: {
-            propertyDataSourceId: config.propertyDataSourceId,
-            ownerDataSourceId: config.ownerDataSourceId,
-            allowedHosts: config.allowedHosts,
-          },
+          dataSourceId,
           dsManager,
-          signal: controller.signal,
-          enablePIIMasking,
-          translate,
-        });
+          { signal: controller.signal }
+        );
 
+        // Check if query was aborted
         if (controller.signal.aborted) {
-          setIsHoverQueryActive(false);
           return;
         }
 
-        hasCompletedFirstQueryRef.current = true;
-        queryResultCacheRef.current.set(cacheKey, result);
+        setIsQuerying(false);
 
-        if (queryResultCacheRef.current.size > 100) {
-          const firstKey = queryResultCacheRef.current.keys().next().value;
-          queryResultCacheRef.current.delete(firstKey);
+        if (results && results.length > 0) {
+          const result = results[0];
+          const feature = result.features[0];
+          if (feature?.attributes) {
+            const fastighet = String(feature.attributes.FASTIGHET || "");
+            const bostadr = String(feature.attributes.BOSTADR || "");
+            setHoverTooltipData({ fastighet, bostadr });
+          } else {
+            setHoverTooltipData(null);
+          }
+        } else {
+          setHoverTooltipData(null);
         }
 
-        setHoverTooltipData(result);
-        setIsHoverQueryActive(false);
+        if (!hasCompletedFirstHitTest) {
+          setHasCompletedFirstHitTest(true);
+        }
       } catch (error) {
-        setIsHoverQueryActive(false);
+        setIsQuerying(false);
         if (!isAbortError(error)) {
           logger.error("hover_query_error", error);
         }
-      } finally {
-        if (hoverQueryAbortRef.current === controller) {
-          hoverQueryAbortRef.current = null;
-        }
+        // Don't clear hoverTooltipData on error - keep previous value
       }
     }
   );
 
   const cleanup = hooks.useEventCallback(() => {
-    if (hoverQueryAbortRef.current) {
-      hoverQueryAbortRef.current.abort();
-      hoverQueryAbortRef.current = null;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
     setHoverTooltipData(null);
-    setIsHoverQueryActive(false);
+    setIsQuerying(false);
     lastHoverQueryPointRef.current = null;
-    hasCompletedFirstQueryRef.current = false;
-    queryResultCacheRef.current.clear();
   });
 
   hooks.useUnmount(() => {
@@ -1057,10 +1076,10 @@ export const useHoverQuery = (params: HoverQueryParams) => {
 
   return {
     hoverTooltipData,
-    isHoverQueryActive,
-    queryPropertyAtPoint,
+    isQuerying,
+    performHitTest,
     lastHoverQueryPointRef,
     cleanup,
-    hasCompletedFirstQuery: hasCompletedFirstQueryRef.current,
+    hasCompletedFirstHitTest,
   };
 };

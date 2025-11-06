@@ -433,10 +433,7 @@ export const cursorLifecycleHelpers = {
     pendingMapPointRef: MutableRefObject<__esri.Point | null>;
     lastHoverQueryPointRef: MutableRefObject<{ x: number; y: number } | null>;
     updateCursorPoint: (mapPoint: __esri.Point | null) => void;
-    throttledHoverQuery: (
-      mapPoint: __esri.Point,
-      screenPoint: { x: number; y: number }
-    ) => void;
+    throttledHitTest: (event: __esri.ViewPointerMoveEvent) => void;
     cleanupHoverQuery: () => void;
   }) => {
     const {
@@ -451,7 +448,7 @@ export const cursorLifecycleHelpers = {
       pendingMapPointRef,
       lastHoverQueryPointRef,
       updateCursorPoint,
-      throttledHoverQuery,
+      throttledHitTest,
       cleanupHoverQuery,
     } = params;
 
@@ -461,8 +458,7 @@ export const cursorLifecycleHelpers = {
     ) as __esri.GraphicsLayer | null;
 
     pointerMoveHandleRef.current = view.on("pointer-move", (event) => {
-      const screenPoint = { x: event.x, y: event.y };
-      const mapPoint = view.toMap(screenPoint);
+      const mapPoint = view.toMap({ x: event.x, y: event.y });
 
       if (!mapPoint) {
         lastCursorPointRef.current = null;
@@ -483,7 +479,8 @@ export const cursorLifecycleHelpers = {
         nextPoint: mapPoint,
         onUpdate: updateCursorPoint,
       });
-      throttledHoverQuery(mapPoint, screenPoint);
+      // Use hitTest instead of spatial queries - instant client-side detection
+      throttledHitTest(event);
     });
 
     pointerLeaveHandleRef.current = view.on("pointer-leave", () => {

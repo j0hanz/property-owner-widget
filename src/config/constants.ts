@@ -29,7 +29,7 @@ export const DEFAULT_MAX_RESULTS = 100;
 export const OWNER_QUERY_CONCURRENCY = 20;
 
 export const HIGHLIGHT_MARKER_SIZE = 12;
-export const SYMBOL_CACHE_MAX_SIZE = 50;
+export const SYMBOL_CACHE_MAX_SIZE = 100;
 
 export const CURSOR_TOOLTIP_STYLE = {
   textColor: "#000000",
@@ -47,19 +47,10 @@ export const CURSOR_TOOLTIP_STYLE = {
 } as const;
 
 // Size matches OWNER_QUERY_CONCURRENCY to handle typical concurrent operations
-export const ABORT_CONTROLLER_POOL_SIZE = 20;
+export const ABORT_CONTROLLER_POOL_SIZE = 5;
 
 // Debounce duration for loading indicator visibility to prevent flicker
 export const LOADING_VISIBILITY_DEBOUNCE_MS = 200;
-
-// Debounce duration for map click to prevent rapid-fire queries
-export const MAP_CLICK_DEBOUNCE_MS = 100;
-
-// Pixel tolerance for hover queries to improve usability
-export const HOVER_QUERY_TOLERANCE_PX = 10;
-
-// Throttle duration for hover query invocations
-export const HOVER_QUERY_THROTTLE_MS = 0;
 
 export const EXPORT_FORMATS: ExportFormatDefinition[] = [
   {
@@ -89,7 +80,7 @@ export const EXPORT_FORMATS: ExportFormatDefinition[] = [
 export const HEX_COLOR_PATTERN = /^#?([0-9a-fA-F]{6})$/;
 
 // Query cache settings
-export const QUERY_CACHE_MAX_SIZE = 100;
+export const QUERY_CACHE_MAX_SIZE = 50;
 export const QUERY_CACHE_EVICTION_PERCENTAGE = 0.2;
 
 // CSV export settings

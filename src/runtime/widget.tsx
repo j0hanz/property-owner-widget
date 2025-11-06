@@ -29,12 +29,7 @@ import {
   SVG,
 } from "jimu-ui";
 import type { ColumnDef, SortingState } from "@tanstack/react-table";
-import {
-  CURSOR_TOOLTIP_STYLE,
-  EXPORT_FORMATS,
-  HOVER_QUERY_TOLERANCE_PX,
-  MAP_CLICK_DEBOUNCE_MS,
-} from "../config/constants";
+import { CURSOR_TOOLTIP_STYLE, EXPORT_FORMATS } from "../config/constants";
 import { ErrorType } from "../config/enums";
 import { useWidgetStyles } from "../config/style";
 import type {
@@ -63,7 +58,7 @@ import {
   useDebounce,
   useEsriModules,
   useGraphicsLayer,
-  useHoverQuery,
+  useHitTestHover,
   useMapViewLifecycle,
   usePopupManager,
   useThrottle,
@@ -98,7 +93,6 @@ import {
   notifyCopyOutcome,
   readAppWidgetsFromState,
   scheduleGraphicsRendering,
-  shouldSkipHoverQuery,
   syncCursorGraphics,
   syncGraphicsWithState,
   updateGraphicSymbol,
@@ -587,46 +581,35 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const highlightOpacityConfig = config.highlightOpacity;
   const outlineWidthConfig = config.outlineWidth;
 
-  // Hover query hook
+  // View ref for hover queries
+  const currentViewRef = React.useRef<__esri.MapView | null>(null);
+
+  // Hover hitTest hook (client-side, instant)
   const {
     hoverTooltipData,
-    isHoverQueryActive,
-    queryPropertyAtPoint,
+    isQuerying,
+    performHitTest,
     lastHoverQueryPointRef,
     cleanup: cleanupHoverQuery,
-    hasCompletedFirstQuery,
-  } = useHoverQuery({
-    config: {
-      propertyDataSourceId: config.propertyDataSourceId,
-      ownerDataSourceId: config.ownerDataSourceId,
-      allowedHosts: config.allowedHosts,
-    },
-    dsManager: dsManagerRef.current,
+    hasCompletedFirstHitTest,
+  } = useHitTestHover({
+    dataSourceId: config.propertyDataSourceId,
+    dsManagerRef: dsManagerRef,
+    viewRef: currentViewRef,
     enablePIIMasking: piiMaskingEnabled,
     translate,
   });
 
-  // Throttled hover query function
-  const throttledHoverQuery = useThrottle(
-    (mapPoint: __esri.Point, screenPoint: { x: number; y: number }) => {
-      const hasTrustedHoverResult =
-        Boolean(hoverTooltipData) || isHoverQueryActive;
+  // Use ref to avoid closure capture issues
+  const hoverTooltipDataRef = hooks.useLatest(hoverTooltipData);
+  const isQueryingRef = hooks.useLatest(isQuerying);
+  const hasCompletedFirstQueryRef = hooks.useLatest(hasCompletedFirstHitTest);
 
-      if (
-        shouldSkipHoverQuery(
-          screenPoint,
-          lastHoverQueryPointRef.current,
-          HOVER_QUERY_TOLERANCE_PX,
-          hasTrustedHoverResult
-        )
-      ) {
-        return;
-      }
-      lastHoverQueryPointRef.current = screenPoint;
-      queryPropertyAtPoint(mapPoint);
-    },
-    0
-  );
+  // Throttled hitTest function (50ms is standard for pointer-move)
+  const throttledHitTest = useThrottle((event: __esri.ViewPointerMoveEvent) => {
+    lastHoverQueryPointRef.current = { x: event.x, y: event.y };
+    performHitTest(event);
+  }, 50);
 
   hooks.useUpdateEffect(() => {
     const currentSelection = selectedPropertiesRef.current ?? [];
@@ -894,17 +877,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
   );
 
-  const debouncedMapClick = useDebounce(
-    handleMapClickCore,
-    MAP_CLICK_DEBOUNCE_MS
-  );
-
-  const handleMapClick = hooks.useEventCallback(
-    (event: __esri.ViewClickEvent) => {
-      debouncedMapClick(event);
-    }
-  );
-
   const { onActiveViewChange, getCurrentView, reactivateMapView, cleanup } =
     useMapViewLifecycle({
       modules,
@@ -912,8 +884,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       destroyGraphicsLayer,
       disablePopup,
       restorePopup,
-      onMapClick: handleMapClick,
+      onMapClick: handleMapClickCore,
     });
+
+  // Update view ref when view changes
+  hooks.useUpdateEffect(() => {
+    const view = getCurrentView();
+    currentViewRef.current = view;
+  }, [getCurrentView]);
 
   // Cursor tracking state and refs
   const cursorGraphicsStateRef = React.useRef<CursorGraphicsState | null>(null);
@@ -986,12 +964,20 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       let tooltipText: string | null = null;
 
-      if (hoverTooltipData) {
+      const currentHoverData = hoverTooltipDataRef.current;
+      const hasCompleted = hasCompletedFirstQueryRef.current;
+      const isCurrentlyQuerying = isQueryingRef.current;
+
+      if (currentHoverData) {
         tooltipText = tooltipFormatRef.current.replace(
           "{fastighet}",
-          hoverTooltipData.fastighet
+          currentHoverData.fastighet
         );
-      } else if (hasCompletedFirstQuery && lastCursorPointRef.current) {
+      } else if (
+        hasCompleted &&
+        !isCurrentlyQuerying &&
+        lastCursorPointRef.current
+      ) {
         tooltipText = tooltipNoPropertyRef.current;
       }
 
@@ -1042,7 +1028,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         pendingMapPointRef,
         lastHoverQueryPointRef,
         updateCursorPoint,
-        throttledHoverQuery,
+        throttledHitTest,
         cleanupHoverQuery,
       });
     } else {
@@ -1095,7 +1081,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     // Update cursor point to refresh tooltip when hover data changes
     if (!lastCursorPointRef.current) return;
     updateCursorPoint(lastCursorPointRef.current);
-  }, [hoverTooltipData, isHoverQueryActive]);
+  }, [hoverTooltipData]);
 
   // Sync selection graphics when highlight config changes (incremental update)
   const debouncedSyncGraphics = useDebounce(() => {
