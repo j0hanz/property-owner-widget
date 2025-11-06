@@ -53,10 +53,10 @@ export const ABORT_CONTROLLER_POOL_SIZE = 5;
 export const LOADING_VISIBILITY_DEBOUNCE_MS = 200;
 
 // Widget startup delay to prevent spinner flicker on fast initialization
-export const WIDGET_STARTUP_DELAY_MS = 300;
+export const WIDGET_STARTUP_DELAY_MS = 500;
 
 // Minimum time to show spinner after it appears (prevents flash)
-export const MIN_SPINNER_DISPLAY_MS = 500;
+export const MIN_SPINNER_DISPLAY_MS = 1500;
 
 export const EXPORT_FORMATS: ExportFormatDefinition[] = [
   {
