@@ -205,13 +205,21 @@ const ensureSubState = (
     return createImmutableState();
   }
 
-  if (typeof (current as { set?: unknown }).set === "function") {
+  if (
+    current &&
+    typeof current === "object" &&
+    typeof (current as { set?: unknown }).set === "function"
+  ) {
     return current as ImmutableObject<PropertyWidgetState>;
   }
 
-  return Immutable(
-    current as PropertyWidgetState
-  ) as ImmutableObject<PropertyWidgetState>;
+  if (current && typeof current === "object") {
+    return Immutable(
+      current as PropertyWidgetState
+    ) as ImmutableObject<PropertyWidgetState>;
+  }
+
+  return createImmutableState();
 };
 
 const setSubState = (

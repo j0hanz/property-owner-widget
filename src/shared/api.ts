@@ -636,16 +636,8 @@ export const queryOwnerByFnr = async (
       dataSourceId
     ) as FeatureLayerDataSource | null;
     if (!ds) {
-      console.error("[API] Owner data source not found:", dataSourceId);
       throw new Error("Owner data source not found");
     }
-
-    console.log("[API] Querying owner data source:", {
-      dataSourceId,
-      fnr,
-      dsType: ds.type,
-      url: ds.url,
-    });
 
     const signalOptions = createSignalOptions(options?.signal);
 
@@ -661,8 +653,6 @@ export const queryOwnerByFnr = async (
     abortHelpers.throwIfAborted(options?.signal);
 
     const records = result?.records ?? [];
-    console.log("[API] Owner query returned", records.length, "records");
-
     if (records.length === 0) {
       return [];
     }
@@ -672,11 +662,6 @@ export const queryOwnerByFnr = async (
       return { attributes } as __esri.Graphic;
     });
   } catch (error) {
-    console.error("[API] Owner query error:", {
-      fnr,
-      dataSourceId,
-      error,
-    });
     abortHelpers.handleOrThrow(error);
     throw new Error(parseArcGISError(error, "Owner query failed"));
   }

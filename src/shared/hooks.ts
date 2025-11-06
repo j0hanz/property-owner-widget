@@ -947,13 +947,7 @@ export const useHoverQuery = (params: HoverQueryParams) => {
 
   const queryPropertyAtPoint = hooks.useEventCallback(
     async (mapPoint: __esri.Point) => {
-      console.log("[HOOK] queryPropertyAtPoint called", {
-        x: mapPoint.x,
-        y: mapPoint.y,
-      });
-
       if (hoverQueryAbortRef.current) {
-        console.log("[HOOK] Aborting previous query");
         hoverQueryAbortRef.current.abort();
         hoverQueryAbortRef.current = null;
       }
@@ -961,7 +955,6 @@ export const useHoverQuery = (params: HoverQueryParams) => {
       const controller = new AbortController();
       hoverQueryAbortRef.current = controller;
 
-      console.log("[HOOK] Setting isHoverQueryActive = true");
       setIsHoverQueryActive(true);
       try {
         const result = await executeHoverQuery({
@@ -978,24 +971,18 @@ export const useHoverQuery = (params: HoverQueryParams) => {
         });
 
         if (controller.signal.aborted) {
-          console.log("[HOOK] Query was aborted");
           setIsHoverQueryActive(false);
           return;
         }
 
-        console.log("[HOOK] Query completed with result:", result);
         setHoverTooltipData(result);
         setIsHoverQueryActive(false);
       } catch (error) {
-        if (isAbortError(error)) {
-          console.log(
-            "[HOOK] Query was aborted (expected during rapid mouse movement)"
-          );
-        } else {
-          console.error("[HOOK] Query error (unexpected):", error);
-        }
         setHoverTooltipData(null);
         setIsHoverQueryActive(false);
+        if (!isAbortError(error)) {
+          logger.error("hover_query_error", error);
+        }
       } finally {
         if (hoverQueryAbortRef.current === controller) {
           hoverQueryAbortRef.current = null;
