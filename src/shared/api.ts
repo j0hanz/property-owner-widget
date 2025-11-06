@@ -579,9 +579,6 @@ export const queryOwnersByRelationship = async (
     }
     const relationshipQuery = new RelationshipQuery();
 
-    const objectIds: number[] = [];
-    const fnrToObjectIdMap = new Map<number, string>();
-
     const signalOptions = createSignalOptions(options?.signal);
 
     const BATCH_SIZE = 100;
@@ -603,6 +600,8 @@ export const queryOwnersByRelationship = async (
     );
 
     const propertyRecords: FeatureDataRecord[] = [];
+    const objectIds: number[] = [];
+    const fnrToObjectIdMap = new Map<number, string>();
 
     // Performance: Process batches with concurrency limit
     for (
@@ -615,29 +614,29 @@ export const queryOwnersByRelationship = async (
         slice.map((createRequest) => createRequest())
       );
 
-      // Performance: Flatten results directly into target array
+      // Performance: Flatten results and build maps in single pass
       for (let j = 0; j < settled.length; j++) {
         const result = settled[j];
         const records = ((result?.records ?? []) as FeatureDataRecord[]) || [];
-        propertyRecords.push(...records);
+        const recordsLen = records.length;
+
+        for (let k = 0; k < recordsLen; k++) {
+          const record = records[k];
+          propertyRecords.push(record);
+
+          const data = record.getData() as PropertyAttributes;
+          const objectId = data.OBJECTID;
+          const fnr = String(data.FNR);
+
+          if (objectId != null && fnr) {
+            objectIds.push(objectId);
+            fnrToObjectIdMap.set(objectId, fnr);
+          }
+        }
       }
 
       abortHelpers.throwIfAborted(options?.signal);
     }
-
-    if (propertyRecords.length === 0) {
-      return new Map();
-    }
-
-    propertyRecords.forEach((record: FeatureDataRecord) => {
-      const data = record.getData() as PropertyAttributes;
-      const objectId = data.OBJECTID;
-      const fnr = String(data.FNR);
-      if (objectId != null && fnr) {
-        objectIds.push(objectId);
-        fnrToObjectIdMap.set(objectId, fnr);
-      }
-    });
 
     if (objectIds.length === 0) {
       return new Map();

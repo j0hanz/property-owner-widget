@@ -117,6 +117,7 @@ const createOwnerRows = (
     propertyId: validated.attrs.UUID_FASTIGHET,
   });
 
+  // Performance: Pre-allocate result array to avoid dynamic resizing
   const len = deduplicated.length;
   const rows = new Array<GridRowData>(len);
   for (let i = 0; i < len; i++) {
@@ -235,7 +236,13 @@ const buildSelectedFnrSet = (
   selectedProperties: GridRowData[],
   normalize: (fnr: FnrValue | null | undefined) => string
 ): Set<string> => {
-  return new Set(selectedProperties.map((row) => normalize(row.FNR)));
+  // Performance: Direct loop avoids temporary array allocation from map()
+  const result = new Set<string>();
+  const len = selectedProperties.length;
+  for (let i = 0; i < len; i++) {
+    result.add(normalize(selectedProperties[i].FNR));
+  }
+  return result;
 };
 
 const collectKeysToRemove = (
@@ -457,23 +464,53 @@ const applyRemovalsAndAdditions = <
   maxResults: number,
   cachedFnrKeys: Map<T, string>
 ): T[] => {
+  // Performance: Eliminate spread operators and pre-allocate result array
   if (toRemove.size === 0) {
-    const combined = [...existingProperties, ...toAdd];
-    return combined.length > maxResults
-      ? combined.slice(0, maxResults)
-      : combined;
+    const totalLen = existingProperties.length + toAdd.length;
+    const targetLen = Math.min(totalLen, maxResults);
+    const combined = new Array<T>(targetLen);
+
+    let writeIndex = 0;
+    for (
+      let i = 0;
+      i < existingProperties.length && writeIndex < targetLen;
+      i++
+    ) {
+      combined[writeIndex++] = existingProperties[i];
+    }
+    for (let i = 0; i < toAdd.length && writeIndex < targetLen; i++) {
+      combined[writeIndex++] = toAdd[i];
+    }
+    return combined;
   }
 
-  const filtered = existingProperties.filter((row) => {
+  // Performance: Single-pass filter and combine
+  const maxFiltered = Math.max(maxResults, existingProperties.length);
+  const filtered = new Array<T>(maxFiltered);
+  let filteredLen = 0;
+
+  for (let i = 0; i < existingProperties.length; i++) {
+    const row = existingProperties[i];
     const cachedKey = cachedFnrKeys.get(row);
     const fnrKey = cachedKey ?? normalizeFnrKey(row.FNR);
-    return !toRemove.has(fnrKey);
-  });
+    if (!toRemove.has(fnrKey)) {
+      filtered[filteredLen++] = row;
+    }
+  }
 
-  const combined = [...filtered, ...toAdd];
-  return combined.length > maxResults
-    ? combined.slice(0, maxResults)
-    : combined;
+  const totalLen = filteredLen + toAdd.length;
+  const targetLen = Math.min(totalLen, maxResults);
+  const combined = new Array<T>(targetLen);
+
+  let writeIndex = 0;
+  for (let i = 0; i < filteredLen && writeIndex < targetLen; i++) {
+    combined[writeIndex++] = filtered[i];
+  }
+  for (let i = 0; i < toAdd.length && writeIndex < targetLen; i++) {
+    combined[writeIndex++] = toAdd[i];
+  }
+
+  return combined;
 };
 
 export const calculatePropertyUpdates = <
@@ -556,10 +593,10 @@ const buildPropertyResultsLookup = (
   propertyResults: QueryResult[],
   normalize: (fnr: FnrValue | null | undefined) => string
 ): Map<string, SerializedQueryResult> => {
+  // Performance: Direct loop with early continue for better branch prediction
   const lookup = new Map<string, SerializedQueryResult>();
   const len = propertyResults.length;
 
-  // Performance: Direct loop with early continue (faster than filter chains)
   for (let i = 0; i < len; i++) {
     const result = propertyResults[i];
     if (!result) continue;
@@ -581,8 +618,9 @@ const buildSelectedPropertiesLookup = (
   selectedProperties: Array<{ FNR: string | number; id: string }>,
   normalize: (fnr: FnrValue | null | undefined) => string
 ): Map<string, string> => {
-  const lookup = new Map<string, string>();
+  // Performance: Direct loop with explicit length check
   const len = selectedProperties.length;
+  const lookup = new Map<string, string>();
 
   for (let i = 0; i < len; i++) {
     const row = selectedProperties[i];
@@ -627,12 +665,13 @@ const removeDeletedProperties = (
   toRemove: Set<string>,
   selectedByFnr: Map<string, string>
 ): void => {
-  toRemove.forEach((removedKey) => {
+  // Performance: for-of loop is optimized for Set iteration
+  for (const removedKey of toRemove) {
     const removedId = selectedByFnr.get(removedKey);
     if (removedId) {
       updated.delete(removedId);
     }
-  });
+  }
 };
 
 export const updateRawPropertyResults = (
