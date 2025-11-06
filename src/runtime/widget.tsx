@@ -973,13 +973,23 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       let tooltipText: string | null = null;
 
+      console.log('[CURSOR] updateCursorPoint tooltip logic:', {
+        hoverTooltipData,
+        isHoverQueryActive,
+        mapPoint: { x: mapPoint.x, y: mapPoint.y },
+      });
+
       if (hoverTooltipData) {
         tooltipText = tooltipFormatRef.current.replace(
           "{fastighet}",
           hoverTooltipData.fastighet
         );
+        console.log('[CURSOR] Showing property name:', tooltipText);
       } else if (!isHoverQueryActive) {
         tooltipText = tooltipNoPropertyRef.current;
+        console.log('[CURSOR] Showing no property text:', tooltipText);
+      } else {
+        console.log('[CURSOR] Query active, showing no tooltip');
       }
 
       cursorGraphicsStateRef.current = syncCursorGraphics({
