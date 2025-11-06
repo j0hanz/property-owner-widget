@@ -56,6 +56,10 @@ type ValidationFailureResult<T> = Extract<
 >;
 
 const HTML_WHITESPACE_PATTERN = /[\s\u00A0\u200B]+/g;
+const SORT_COMPARE_OPTIONS: Intl.CollatorOptions = {
+  numeric: true,
+  sensitivity: "base",
+};
 
 const sanitizeWhitespace = (value: string): string =>
   value.replace(HTML_WHITESPACE_PATTERN, " ").trim();
@@ -833,6 +837,20 @@ const formatOwnerList = (agarLista: string, maskPII: boolean): string => {
     .join("; ");
 };
 
+const ownerInfoCache = new WeakMap<OwnerAttributes, Map<string, string>>();
+
+const getOwnerCacheKey = (maskPII: boolean, unknownOwnerText: string): string =>
+  `${maskPII ? "1" : "0"}|${unknownOwnerText}`;
+
+const getOwnerFormatCache = (owner: OwnerAttributes): Map<string, string> => {
+  let cache = ownerInfoCache.get(owner);
+  if (!cache) {
+    cache = new Map();
+    ownerInfoCache.set(owner, cache);
+  }
+  return cache;
+};
+
 const formatIndividualOwner = (
   owner: OwnerAttributes,
   maskPII: boolean,
@@ -867,10 +885,25 @@ export const formatOwnerInfo = (
   maskPII: boolean,
   unknownOwnerText: string
 ): string => {
-  if (owner.AGARLISTA && typeof owner.AGARLISTA === "string") {
-    return formatOwnerList(owner.AGARLISTA, maskPII);
+  const cacheKey = getOwnerCacheKey(maskPII, unknownOwnerText);
+  const cache = getOwnerFormatCache(owner);
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    return cached;
   }
-  return formatIndividualOwner(owner, maskPII, unknownOwnerText);
+
+  if (owner.AGARLISTA && typeof owner.AGARLISTA === "string") {
+    const formattedList = formatOwnerList(owner.AGARLISTA, maskPII);
+    cache.set(cacheKey, formattedList);
+    return formattedList;
+  }
+  const formattedOwner = formatIndividualOwner(
+    owner,
+    maskPII,
+    unknownOwnerText
+  );
+  cache.set(cacheKey, formattedOwner);
+  return formattedOwner;
 };
 
 export const sanitizeForExport = (
@@ -958,33 +991,63 @@ export const applySortingToProperties = (
     return [...properties];
   }
 
+  const activeSorting = sorting.filter((item) =>
+    Boolean(item && typeof item.id === "string")
+  );
+
+  if (activeSorting.length === 0) {
+    return [...properties];
+  }
+
+  const valueCache = new WeakMap<GridRowData, Map<string, string>>();
+
+  const getSortableValue = (row: GridRowData, columnId: string): string => {
+    let rowCache = valueCache.get(row);
+    if (!rowCache) {
+      rowCache = new Map();
+      valueCache.set(row, rowCache);
+    }
+
+    const cachedValue = rowCache.get(columnId);
+    if (cachedValue !== undefined) {
+      return cachedValue;
+    }
+
+    const rawValue = row[columnId as keyof GridRowData];
+    const normalized = (() => {
+      if (rawValue === null || rawValue === undefined) return "";
+      if (typeof rawValue === "string") return rawValue;
+      if (typeof rawValue === "number") return String(rawValue);
+      if (typeof rawValue === "boolean") return String(rawValue);
+      return "";
+    })();
+
+    rowCache.set(columnId, normalized);
+    return normalized;
+  };
+
+  const comparatorOrder = [...activeSorting].reverse();
+
   const sorted = [...properties];
+  sorted.sort((a, b) => {
+    for (const sortItem of comparatorOrder) {
+      const { id, desc } = sortItem;
+      const key = id as keyof GridRowData;
+      const aValue = getSortableValue(a, key as string);
+      const bValue = getSortableValue(b, key as string);
 
-  sorting.forEach((sortItem) => {
-    const { id, desc } = sortItem;
+      const comparison = aValue.localeCompare(
+        bValue,
+        "sv",
+        SORT_COMPARE_OPTIONS
+      );
 
-    sorted.sort((a, b) => {
-      const aValue = a[id as keyof GridRowData];
-      const bValue = b[id as keyof GridRowData];
+      if (comparison !== 0) {
+        return desc ? -comparison : comparison;
+      }
+    }
 
-      const toSortableString = (value: unknown): string => {
-        if (value === null || value === undefined) return "";
-        if (typeof value === "string") return value;
-        if (typeof value === "number") return String(value);
-        if (typeof value === "boolean") return String(value);
-        return "";
-      };
-
-      const aStr = toSortableString(aValue);
-      const bStr = toSortableString(bValue);
-
-      const comparison = aStr.localeCompare(bStr, "sv", {
-        numeric: true,
-        sensitivity: "base",
-      });
-
-      return desc ? -comparison : comparison;
-    });
+    return 0;
   });
 
   return sorted;
@@ -999,6 +1062,8 @@ export const formatPropertiesForClipboard = (
     return "";
   }
 
+  const sanitizedUnknown = sanitizeClipboardCell(unknownOwnerText);
+
   const rows = properties.map((property) => {
     const propertyLabel = sanitizeClipboardCell(
       property.FASTIGHET || property.FNR || ""
@@ -1012,11 +1077,11 @@ export const formatPropertiesForClipboard = (
           unknownOwnerText
         );
         const sanitizedOwner = sanitizeClipboardCell(formattedOwner);
-        return sanitizedOwner || sanitizeClipboardCell(unknownOwnerText);
+        return sanitizedOwner || sanitizedUnknown;
       }
 
       const fallbackSanitized = sanitizeClipboardCell(property.BOSTADR);
-      return fallbackSanitized || sanitizeClipboardCell(unknownOwnerText);
+      return fallbackSanitized || sanitizedUnknown;
     })();
 
     return `${propertyLabel}\t${ownerText}`;
@@ -1330,8 +1395,14 @@ export const buildPropertyRows = (
       propertyId: validated.attrs.UUID_FASTIGHET,
     });
 
-    return uniqueOwners.map((owner) =>
-      createGridRow({
+    return uniqueOwners.map((owner) => {
+      const formattedOwner = context.helpers.formatOwnerInfo(
+        owner,
+        maskPII,
+        context.messages.unknownOwner
+      );
+
+      return createGridRow({
         fnr: validated.fnr,
         objectId: owner.OBJECTID ?? validated.attrs.OBJECTID,
         uuidFastighet: owner.UUID_FASTIGHET ?? validated.attrs.UUID_FASTIGHET,
@@ -1339,22 +1410,14 @@ export const buildPropertyRows = (
           owner.FASTIGHET ?? validated.attrs.FASTIGHET,
           owner.ANDEL
         ),
-        bostadr: context.helpers.formatOwnerInfo(
-          owner,
-          maskPII,
-          context.messages.unknownOwner
-        ),
-        address: context.helpers.formatOwnerInfo(
-          owner,
-          maskPII,
-          context.messages.unknownOwner
-        ),
+        bostadr: formattedOwner,
+        address: formattedOwner,
         geometryType,
         geometry: serializedGeometry,
         createRowId: context.helpers.createRowId,
         rawOwner: owner,
-      })
-    );
+      });
+    });
   }
 
   const fallbackMessage = queryFailed
