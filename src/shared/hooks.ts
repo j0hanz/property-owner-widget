@@ -279,6 +279,8 @@ export const useGraphicsLayer = (params: {
     highlightGraphicsMapRef.current.clear();
   });
 
+  const symbolCacheRef = React.useRef<Map<string, __esri.Symbol>>(new Map());
+
   const createHighlightSymbol = hooks.useEventCallback(
     (
       geometry: __esri.Geometry,
@@ -290,9 +292,17 @@ export const useGraphicsLayer = (params: {
       }
 
       const [r, g, b, a] = highlightColor;
+      const cacheKey = `${geometry.type}-${r}-${g}-${b}-${a}-${outlineWidth}`;
+
+      const cached = symbolCacheRef.current.get(cacheKey);
+      if (cached) {
+        return cached;
+      }
+
+      let symbol: __esri.Symbol | null = null;
 
       if (geometry.type === "polygon") {
-        return new modules.SimpleFillSymbol({
+        symbol = new modules.SimpleFillSymbol({
           style: "solid",
           color: [r, g, b, a],
           outline: {
@@ -301,18 +311,14 @@ export const useGraphicsLayer = (params: {
             width: outlineWidth,
           },
         });
-      }
-
-      if (geometry.type === "polyline") {
-        return new modules.SimpleLineSymbol({
+      } else if (geometry.type === "polyline") {
+        symbol = new modules.SimpleLineSymbol({
           style: "solid",
           color: [r, g, b, a],
           width: outlineWidth,
         });
-      }
-
-      if (geometry.type === "point") {
-        return new modules.SimpleMarkerSymbol({
+      } else if (geometry.type === "point") {
+        symbol = new modules.SimpleMarkerSymbol({
           style: "cross",
           color: [r, g, b, a],
           size: 12,
@@ -324,7 +330,10 @@ export const useGraphicsLayer = (params: {
         });
       }
 
-      return null;
+      if (symbol) {
+        symbolCacheRef.current.set(cacheKey, symbol);
+      }
+      return symbol;
     }
   );
 
@@ -469,6 +478,7 @@ export const useGraphicsLayer = (params: {
 
   hooks.useUnmount(() => {
     clearHighlights();
+    symbolCacheRef.current.clear();
 
     const layer = highlightLayerRef.current;
     if (layer && !layer.destroyed) {

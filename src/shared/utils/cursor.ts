@@ -21,12 +21,22 @@ const sanitizeTooltipText = (
   return sanitized.length > 0 ? sanitized : null;
 };
 
+const symbolCache = new Map<string, __esri.TextSymbol>();
+const MAX_CACHE_SIZE = 50;
+
 const createTooltipTextSymbol = (
   modules: EsriModules,
   sanitizedText: string,
   style: CursorTooltipStyle
-): __esri.TextSymbol =>
-  new modules.TextSymbol({
+): __esri.TextSymbol => {
+  const cacheKey = `${sanitizedText}-${style.fontSize}-${style.textColor[0]},${style.textColor[1]},${style.textColor[2]},${style.textColor[3]}`;
+
+  const cached = symbolCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const symbol = new modules.TextSymbol({
     text: sanitizedText,
     color: style.textColor,
     backgroundColor: style.backgroundColor,
@@ -43,6 +53,15 @@ const createTooltipTextSymbol = (
     },
     kerning: style.kerning,
   } as __esri.TextSymbolProperties);
+
+  // LRU: Remove oldest if cache full
+  if (symbolCache.size >= MAX_CACHE_SIZE) {
+    const firstKey = symbolCache.keys().next().value;
+    if (firstKey) symbolCache.delete(firstKey);
+  }
+  symbolCache.set(cacheKey, symbol);
+  return symbol;
+};
 
 export const buildTooltipSymbol = (
   modules: EsriModules,
@@ -224,8 +243,9 @@ const validateAndGetManager = (
     translate,
   });
 
-  if (checkValidationFailure(dsValidation)) return null;
-  return dsValidation.data.manager;
+  return checkValidationFailure(dsValidation)
+    ? null
+    : dsValidation.data.manager;
 };
 
 const queryPropertyData = async (
@@ -344,9 +364,9 @@ const removeEventHandle = (
 };
 
 const resetRefState = (...refs: Array<MutableRefObject<unknown>>): void => {
-  for (const ref of refs) {
+  refs.forEach((ref) => {
     ref.current = null;
-  }
+  });
 };
 
 const STANDARD_CURSOR_VALUES = [

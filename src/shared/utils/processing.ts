@@ -381,14 +381,19 @@ export const shouldToggleRemove = (
 
 const buildFnrGroupMap = <T extends { FNR: string | number; id: string }>(
   properties: T[]
-): { byFnr: Map<string, T[]>; seenIds: Set<string> } => {
+): {
+  byFnr: Map<string, T[]>;
+  seenIds: Set<string>;
+  fnrKeys: Map<T, string>;
+} => {
   const byFnr = new Map<string, T[]>();
   const seenIds = new Set<string>();
-  const len = properties.length;
+  const fnrKeys = new Map<T, string>();
 
-  for (let i = 0; i < len; i++) {
-    const row = properties[i];
+  for (const row of properties) {
     const fnrKey = normalizeFnrKey(row.FNR);
+    fnrKeys.set(row, fnrKey);
+
     const group = byFnr.get(fnrKey);
     if (group) {
       group.push(row);
@@ -398,16 +403,16 @@ const buildFnrGroupMap = <T extends { FNR: string | number; id: string }>(
     seenIds.add(row.id);
   }
 
-  return { byFnr, seenIds };
+  return { byFnr, seenIds, fnrKeys };
 };
 
 const shouldRemoveForToggle = <T extends { FNR: string | number }>(
-  row: T,
+  fnrKey: string,
   existingByFnr: Map<string, T[]>,
   toggleEnabled: boolean
 ): boolean => {
   if (!toggleEnabled) return false;
-  const existingGroup = existingByFnr.get(normalizeFnrKey(row.FNR));
+  const existingGroup = existingByFnr.get(fnrKey);
   return existingGroup !== undefined && existingGroup.length > 0;
 };
 
@@ -423,8 +428,9 @@ const processRowsForToggleAndDedup = <
   const toAdd: T[] = [];
 
   for (const row of rowsToProcess) {
-    if (shouldRemoveForToggle(row, existingByFnr, toggleEnabled)) {
-      const fnrKey = normalizeFnrKey(row.FNR);
+    const fnrKey = normalizeFnrKey(row.FNR);
+
+    if (shouldRemoveForToggle(fnrKey, existingByFnr, toggleEnabled)) {
       const existingGroup = existingByFnr.get(fnrKey);
       if (existingGroup) {
         for (const existingRow of existingGroup) {

@@ -53,11 +53,14 @@ import {
   processPropertyQueryResults,
 } from "./utils/index";
 
+// Global module cache - loaded once per session
 let cachedFeatureLayerCtor: FeatureLayerConstructor | null = null;
 let cachedQueryCtor: QueryConstructor | null = null;
 let cachedQueryTaskCtor: QueryTaskConstructor | null = null;
 let cachedRelationshipQueryCtor: RelationshipQueryConstructor | null = null;
 let cachedPromiseUtils: PromiseUtilsLike | null = null;
+
+// Instance caches - cleared on widget unmount
 const featureLayerCache = new Map<string, __esri.FeatureLayer>();
 const relationshipQueryTaskCache = new Map<string, QueryTaskLike>();
 
@@ -166,14 +169,12 @@ const validateAndDeduplicateProperties = (
   extractFnrFn: (attrs: AttributeMap | null | undefined) => FnrValue | null,
   maxResults?: number
 ): ValidatedProperty[] => {
-  const seenFnrs = new Set<string>();
-  const validated: ValidatedProperty[] = [];
   const limit =
     typeof maxResults === "number" ? maxResults : propertyResults.length;
+  const seenFnrs = new Map<string, ValidatedProperty>();
 
-  for (let i = 0; i < propertyResults.length && validated.length < limit; i++) {
-    const propertyResult = propertyResults[i];
-    const feature = propertyResult.features?.[0];
+  for (let i = 0; i < propertyResults.length && seenFnrs.size < limit; i++) {
+    const feature = propertyResults[i]?.features?.[0];
     if (!feature?.attributes || !feature.geometry) {
       continue;
     }
@@ -190,15 +191,14 @@ const validateAndDeduplicateProperties = (
       continue;
     }
 
-    seenFnrs.add(normalized);
-    validated.push({
+    seenFnrs.set(normalized, {
       fnr,
       attrs: feature.attributes as PropertyAttributes,
       graphic: feature,
     });
   }
 
-  return validated;
+  return Array.from(seenFnrs.values());
 };
 
 const fetchOwnerDataForProperty = async (
@@ -402,24 +402,24 @@ export const queryPropertyByPoint = async (
     }
 
     if (!cachedFeatureLayerCtor || !cachedQueryCtor) {
-      const modules = await loadArcGISJSAPIModules([
+      const [FeatureLayer, Query] = (await loadArcGISJSAPIModules([
         "esri/layers/FeatureLayer",
         "esri/rest/support/Query",
-      ]);
-      const [FeatureLayer, Query] = modules;
-      cachedFeatureLayerCtor = FeatureLayer as FeatureLayerConstructor;
-      cachedQueryCtor = Query as QueryConstructor;
+      ])) as [FeatureLayerConstructor, QueryConstructor];
+      cachedFeatureLayerCtor = FeatureLayer;
+      cachedQueryCtor = Query;
     }
 
-    const FeatureLayerCtor = cachedFeatureLayerCtor;
-    const QueryCtor = cachedQueryCtor;
-    if (!FeatureLayerCtor || !QueryCtor) {
-      throw new Error("Property query modules failed to load");
+    if (!cachedFeatureLayerCtor || !cachedQueryCtor) {
+      throw new Error("Failed to load ArcGIS query modules");
     }
+
+    const FeatureLayer = cachedFeatureLayerCtor;
+    const Query = cachedQueryCtor;
 
     let layer = featureLayerCache.get(layerUrl);
     if (!layer) {
-      layer = new FeatureLayerCtor({
+      layer = new FeatureLayer({
         url: layerUrl,
         outFields: ["*"],
       });
@@ -437,7 +437,7 @@ export const queryPropertyByPoint = async (
       }
     }
 
-    const query = new QueryCtor({
+    const query = new Query({
       geometry: point,
       returnGeometry: true,
       outFields: ["*"],
@@ -549,28 +549,27 @@ export const queryOwnersByRelationship = async (
     }
 
     if (!cachedQueryTaskCtor || !cachedRelationshipQueryCtor) {
-      const modules = await loadArcGISJSAPIModules([
+      const [QueryTask, RelationshipQuery] = (await loadArcGISJSAPIModules([
         "esri/tasks/QueryTask",
         "esri/rest/support/RelationshipQuery",
-      ]);
-      const [QueryTask, RelationshipQuery] = modules;
-      cachedQueryTaskCtor = QueryTask as QueryTaskConstructor;
-      cachedRelationshipQueryCtor =
-        RelationshipQuery as RelationshipQueryConstructor;
+      ])) as [QueryTaskConstructor, RelationshipQueryConstructor];
+      cachedQueryTaskCtor = QueryTask;
+      cachedRelationshipQueryCtor = RelationshipQuery;
     }
 
-    const QueryTaskCtor = cachedQueryTaskCtor;
-    const RelationshipQueryCtor = cachedRelationshipQueryCtor;
-    if (!QueryTaskCtor || !RelationshipQueryCtor) {
-      throw new Error("Relationship query modules failed to load");
+    if (!cachedQueryTaskCtor || !cachedRelationshipQueryCtor) {
+      throw new Error("Failed to load relationship query modules");
     }
 
-    let queryTask = relationshipQueryTaskCache.get(layerUrl) ?? null;
+    const QueryTask = cachedQueryTaskCtor;
+    const RelationshipQuery = cachedRelationshipQueryCtor;
+
+    let queryTask = relationshipQueryTaskCache.get(layerUrl);
     if (!queryTask) {
-      queryTask = new QueryTaskCtor({ url: layerUrl });
+      queryTask = new QueryTask({ url: layerUrl });
       relationshipQueryTaskCache.set(layerUrl, queryTask);
     }
-    const relationshipQuery = new RelationshipQueryCtor();
+    const relationshipQuery = new RelationshipQuery();
 
     const objectIds: number[] = [];
     const fnrToObjectIdMap = new Map<number, string>();
