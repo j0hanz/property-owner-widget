@@ -710,25 +710,28 @@ export const queryOwnersByRelationship = async (
       fnrBatches.push(propertyFnrs.slice(index, index + BATCH_SIZE));
     }
 
-    const batchPromises = fnrBatches.map((batch) =>
-      propertyDs.query(
-        {
-          where: batch.map((fnr) => buildFnrWhereClause(fnr)).join(" OR "),
-          outFields: ["FNR", "OBJECTID"],
-          returnGeometry: false,
-        },
-        toDataSourceQueryOptions(signalOptions)
-      )
+    const batchRequests = fnrBatches.map(
+      (batch) => () =>
+        propertyDs.query(
+          {
+            where: batch.map((fnr) => buildFnrWhereClause(fnr)).join(" OR "),
+            outFields: ["FNR", "OBJECTID"],
+            returnGeometry: false,
+          },
+          toDataSourceQueryOptions(signalOptions)
+        )
     );
 
     const propertyRecords: FeatureDataRecord[] = [];
     for (
       let index = 0;
-      index < batchPromises.length;
+      index < batchRequests.length;
       index += OWNER_QUERY_CONCURRENCY
     ) {
-      const slice = batchPromises.slice(index, index + OWNER_QUERY_CONCURRENCY);
-      const settled = await Promise.all(slice);
+      const slice = batchRequests.slice(index, index + OWNER_QUERY_CONCURRENCY);
+      const settled = await Promise.all(
+        slice.map((createRequest) => createRequest())
+      );
       settled.forEach((result) => {
         const records = ((result?.records ?? []) as FeatureDataRecord[]) || [];
         if (records.length > 0) {
