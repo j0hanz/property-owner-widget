@@ -113,6 +113,7 @@ class MockFeatureLayer {
   queryFeatures = jest.fn((_query: unknown) =>
     Promise.resolve(mockQueryFeaturesResponse)
   );
+  load = jest.fn(() => Promise.resolve(this));
   destroy = jest.fn(() => {
     this.destroyed = true;
   });
@@ -129,12 +130,16 @@ class MockQuery {
   returnGeometry: boolean;
   outFields: string[];
   spatialRelationship: string;
+  returnZ?: boolean;
+  returnM?: boolean;
 
   constructor(params: MockQueryParameters) {
     this.geometry = params.geometry;
     this.returnGeometry = params.returnGeometry;
     this.outFields = params.outFields;
     this.spatialRelationship = params.spatialRelationship;
+    // Copy all properties to support returnZ, returnM, etc.
+    Object.assign(this, params);
   }
 }
 
@@ -3343,5 +3348,130 @@ describe("Property Widget - Sort-Aware Export", () => {
     expect(exported[0].ADDRESS).toContain("***"); // Masked
     expect(exported[1].FASTIGHET).toBe("Zeta 1:1");
     expect(exported[1].ADDRESS).toContain("***"); // Masked
+  });
+});
+
+describe("Property Widget - FeatureLayer Load Pattern", () => {
+  beforeEach(() => {
+    resetMockFeatureLayerState();
+    resetMockQueryTaskState();
+  });
+
+  it("should call layer.load() before querying properties", async () => {
+    const mockDataSource = createMockFeatureLayerDataSource(
+      "https://services.arcgis.com/test/FeatureServer/0"
+    );
+    const mockManager = createMockDataSourceManager(() => mockDataSource);
+    const point = createMockPoint(100, 200, { wkid: 3857 });
+
+    setMockQueryFeaturesResponse({
+      features: [
+        {
+          attributes: {
+            FNR: "123",
+            OBJECTID: 1,
+            UUID_FASTIGHET: "uuid-123",
+            FASTIGHET: "Test 1:1",
+          },
+        },
+      ],
+    });
+
+    const results = await queryPropertyByPoint(
+      point,
+      "test-ds-id",
+      mockManager
+    );
+
+    expect(results).toHaveLength(1);
+    expect(results[0].propertyId).toBe("123");
+
+    // Verify load was called on the FeatureLayer instance
+    const instances = getMockFeatureLayerInstances();
+    expect(instances.length).toBeGreaterThan(0);
+    const lastInstance = instances[instances.length - 1];
+    expect(lastInstance.load).toHaveBeenCalled();
+    expect(lastInstance.queryFeatures).toHaveBeenCalled();
+  });
+
+  it("should include returnZ and returnM false in queries", async () => {
+    const mockDataSource = createMockFeatureLayerDataSource(
+      "https://services.arcgis.com/test/FeatureServer/1"
+    );
+    const mockManager = createMockDataSourceManager(() => mockDataSource);
+    const point = createMockPoint(100, 200, { wkid: 3857 });
+
+    setMockQueryFeaturesResponse({
+      features: [
+        {
+          attributes: {
+            FNR: "456",
+            OBJECTID: 2,
+            UUID_FASTIGHET: "uuid-456",
+            FASTIGHET: "Test 2:1",
+          },
+        },
+      ],
+    });
+
+    const beforeCount = getMockFeatureLayerInstances().length;
+    await queryPropertyByPoint(point, "test-ds-id", mockManager);
+    const afterCount = getMockFeatureLayerInstances().length;
+
+    // A new instance should have been created (or existing one reused)
+    expect(afterCount).toBeGreaterThanOrEqual(beforeCount);
+
+    if (afterCount > beforeCount) {
+      const lastInstance = getMockFeatureLayerInstances()[afterCount - 1];
+      expect(lastInstance.queryFeatures).toHaveBeenCalled();
+
+      const queryArg = lastInstance.queryFeatures.mock.calls[0][0] as {
+        returnZ?: boolean;
+        returnM?: boolean;
+      };
+      expect(queryArg.returnZ).toBe(false);
+      expect(queryArg.returnM).toBe(false);
+    }
+  });
+
+  it("should cache FeatureLayer instances by URL", async () => {
+    const url = "https://services.arcgis.com/test/FeatureServer/0";
+    const mockDataSource = createMockFeatureLayerDataSource(url);
+    const mockManager = createMockDataSourceManager(() => mockDataSource);
+    const point = createMockPoint(100, 200, { wkid: 3857 });
+
+    setMockQueryFeaturesResponse({ features: [] });
+
+    // First query
+    await queryPropertyByPoint(point, "test-ds-id", mockManager);
+    const ctorCountAfterFirst = getFeatureLayerCtorCount();
+
+    // Second query with same URL
+    await queryPropertyByPoint(point, "test-ds-id", mockManager);
+    const ctorCountAfterSecond = getFeatureLayerCtorCount();
+
+    // Constructor should only be called once (cached)
+    expect(ctorCountAfterSecond).toBe(ctorCountAfterFirst);
+  });
+
+  it("should clear cached layers when clearQueryCache is called", () => {
+    const mockDataSource = createMockFeatureLayerDataSource(
+      "https://services.arcgis.com/test/FeatureServer/0"
+    );
+    const mockManager = createMockDataSourceManager(() => mockDataSource);
+    const point = createMockPoint(100, 200, { wkid: 3857 });
+
+    setMockQueryFeaturesResponse({ features: [] });
+
+    // Create cached layer
+    queryPropertyByPoint(point, "test-ds-id", mockManager);
+
+    // Clear cache
+    clearQueryCache();
+
+    const instances = getMockFeatureLayerInstances();
+    instances.forEach((instance) => {
+      expect(instance.destroy).toHaveBeenCalled();
+    });
   });
 });

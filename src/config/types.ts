@@ -122,7 +122,10 @@ export interface ExportOptions {
 
 export interface SelectionGraphicsHelpers {
   highlightGraphics: (params: {
-    entries: Array<{ graphic: __esri.Graphic; fnr: FnrValue | null | undefined }>;
+    entries: Array<{
+      graphic: __esri.Graphic;
+      fnr: FnrValue | null | undefined;
+    }>;
     view: __esri.MapView | null | undefined;
     extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null;
     normalizeFnrKey: (fnr: FnrValue | null | undefined) => NormalizedFnr;
@@ -414,6 +417,12 @@ export interface LoadingBlockProps {
   styles: WidgetStyles;
   translate: (key: string) => string;
   size?: number;
+}
+
+export interface WidgetStartupState {
+  isInitializing: boolean;
+  shouldShowSpinner: boolean;
+  modulesReady: boolean;
 }
 
 // =============================================================================

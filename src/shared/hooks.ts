@@ -1,8 +1,8 @@
 import {
-  hooks,
-  React,
   type DataSourceManager,
   type FeatureLayerDataSource,
+  hooks,
+  React,
 } from "jimu-core";
 import { loadArcGISJSAPIModules } from "jimu-arcgis";
 import type { JimuMapView } from "jimu-arcgis";
@@ -134,18 +134,34 @@ export const useEsriModules = () => {
   return { modules, loading, error };
 };
 
-export const useDebouncedValue = <T>(value: T, delay: number) => {
-  const [debouncedValue, setDebouncedValue] = React.useState(value);
+export const useDebouncedValue = <T>(value: T, delay: number): T => {
+  const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0;
+  const [debouncedValue, setDebouncedValue] = React.useState<T>(value);
+  const mountedRef = React.useRef(true);
 
-  hooks.useEffectWithPreviousValues(() => {
-    const handler = setTimeout(() => {
+  // No debouncing needed for delay=0
+  hooks.useUpdateEffect(() => {
+    if (safeDelay === 0) {
       setDebouncedValue(value);
-    }, delay);
+      return undefined;
+    }
+
+    const handler = setTimeout(() => {
+      if (mountedRef.current) {
+        setDebouncedValue(value);
+      }
+    }, safeDelay);
 
     return () => {
       clearTimeout(handler);
     };
-  }, [value, delay]);
+  }, [value, safeDelay]);
+
+  hooks.useEffectOnce(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  });
 
   return debouncedValue;
 };
@@ -217,10 +233,12 @@ export const useGraphicsLayer = (params: {
     return value.trim().replace(/\/+$/, "").toLowerCase();
   };
 
-  const isFeatureLayer = (
-    layer: unknown
-  ): layer is __esri.FeatureLayer =>
-    Boolean(layer && typeof layer === "object" && (layer as __esri.Layer).type === "feature");
+  const isFeatureLayer = (layer: unknown): layer is __esri.FeatureLayer =>
+    Boolean(
+      layer &&
+        typeof layer === "object" &&
+        (layer as __esri.Layer).type === "feature"
+    );
 
   const removeHandleForKey = hooks.useEventCallback((key: string) => {
     const handle = highlightHandlesRef.current.get(key);
@@ -271,14 +289,18 @@ export const useGraphicsLayer = (params: {
 
     pushUrl((dataSource as { url?: string }).url);
 
-    const dsJson = (dataSource as {
-      getDataSourceJson?: () => { url?: string } | null;
-    }).getDataSourceJson?.();
+    const dsJson = (
+      dataSource as {
+        getDataSourceJson?: () => { url?: string } | null;
+      }
+    ).getDataSourceJson?.();
     pushUrl(dsJson?.url);
 
-    const layerDefinition = (dataSource as {
-      getLayerDefinition?: () => { url?: string } | null;
-    }).getLayerDefinition?.();
+    const layerDefinition = (
+      dataSource as {
+        getLayerDefinition?: () => { url?: string } | null;
+      }
+    ).getLayerDefinition?.();
     pushUrl(layerDefinition?.url);
 
     return Array.from(urls);
@@ -297,9 +319,11 @@ export const useGraphicsLayer = (params: {
         return directLayer;
       }
 
-      const getLayer = (dataSource as {
-        getLayer?: () => __esri.FeatureLayer | Promise<__esri.FeatureLayer>;
-      }).getLayer;
+      const getLayer = (
+        dataSource as {
+          getLayer?: () => __esri.FeatureLayer | Promise<__esri.FeatureLayer>;
+        }
+      ).getLayer;
 
       if (typeof getLayer === "function") {
         try {
@@ -337,10 +361,7 @@ export const useGraphicsLayer = (params: {
         layers?: { toArray?: () => __esri.Layer[] };
       };
 
-      const layers = [
-        ...toArray(map.allLayers),
-        ...toArray(map.layers),
-      ];
+      const layers = [...toArray(map.allLayers), ...toArray(map.layers)];
 
       for (const layer of layers) {
         if (!isFeatureLayer(layer)) {
@@ -400,28 +421,56 @@ export const useGraphicsLayer = (params: {
 
       if (!layer && graphics) {
         const graphicUrls = graphics
-          .map((entry) =>
-            normalizeUrl(
-              isFeatureLayer((entry.graphic as { layer?: __esri.Layer }).layer)
-                ? ((entry.graphic as { layer?: __esri.FeatureLayer }).layer
-                    ?.url ?? null)
+          .map((entry) => {
+            const graphic = entry.graphic as unknown as {
+              layer?: __esri.FeatureLayer;
+            };
+            return normalizeUrl(
+              isFeatureLayer(graphic.layer)
+                ? (graphic.layer?.url ?? null)
                 : null
-            )
-          )
+            );
+          })
           .filter((url): url is string => Boolean(url));
 
         layer = findLayerInView(view, graphicUrls);
       }
 
       if (layer) {
-        propertyLayerRef.current = layer;
-      } else {
-        logger.warn("Property layer unavailable for highlight", {
+        const map = view.map as
+          | (__esri.Map & { findLayerById?: (id: string) => __esri.Layer })
+          | undefined;
+        const layerId = typeof layer.id === "string" ? layer.id : null;
+        const layerFromMap = layerId
+          ? map?.findLayerById?.(layerId)
+          : undefined;
+
+        if (layerFromMap && isFeatureLayer(layerFromMap)) {
+          propertyLayerRef.current = layerFromMap;
+          return layerFromMap;
+        }
+
+        const normalizedUrl = normalizeUrl(layer.url ?? "");
+        if (normalizedUrl) {
+          const located = findLayerInView(view, [normalizedUrl]);
+          if (located) {
+            propertyLayerRef.current = located;
+            return located;
+          }
+        }
+
+        logger.warn("Feature layer resolved outside current map view", {
           widgetId: widgetIdRef.current,
         });
+        propertyLayerRef.current = null;
+        return null;
       }
 
-      return layer;
+      logger.warn("Property layer unavailable for highlight", {
+        widgetId: widgetIdRef.current,
+      });
+      propertyLayerRef.current = null;
+      return null;
     }
   );
 
@@ -467,6 +516,7 @@ export const useGraphicsLayer = (params: {
           error,
           widgetId: widgetIdRef.current,
         });
+        propertyLayerRef.current = null;
         return null;
       }
     }
@@ -483,7 +533,13 @@ export const useGraphicsLayer = (params: {
       }
 
       const [r, g, b, a] = highlightColor;
-      const current = view.highlightOptions ?? {};
+      const current =
+        view.highlightOptions ??
+        ({} as {
+          color?: number[];
+          fillOpacity?: number;
+          haloOpacity?: number;
+        });
       const desiredColor: [number, number, number] = [r, g, b];
       const needsUpdate =
         !Array.isArray(current.color) ||
@@ -1076,13 +1132,14 @@ export const useDebounce = <T extends (...args: unknown[]) => void>(
     }
   });
 
-  const undebouncedWithCancel = React.useMemo(() => {
+  const undebouncedWithCancelRef = React.useRef<DebouncedFn<T> | null>(null);
+  if (!undebouncedWithCancelRef.current) {
     const fn = undebounced as DebouncedFn<T>;
     fn.cancel = () => {
       // No-op cancel for instant execution
     };
-    return fn;
-  }, [undebounced]);
+    undebouncedWithCancelRef.current = fn;
+  }
 
   const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = React.useRef(false);
@@ -1148,7 +1205,78 @@ export const useDebounce = <T extends (...args: unknown[]) => void>(
     };
   });
 
-  return safeDelay === 0 ? undebouncedWithCancel : debouncedRef.current;
+  return safeDelay === 0
+    ? undebouncedWithCancelRef.current
+    : debouncedRef.current;
+};
+
+export const useWidgetStartup = (params: {
+  modulesLoading: boolean;
+  startupDelay: number;
+  minSpinnerDisplay: number;
+}) => {
+  const { modulesLoading, startupDelay, minSpinnerDisplay } = params;
+
+  const [isInitializing, setIsInitializing] = React.useState(true);
+  const [spinnerVisible, setSpinnerVisible] = React.useState(false);
+  const spinnerStartTimeRef = React.useRef<number | null>(null);
+  const mountedRef = React.useRef(true);
+
+  // Debounce the loading state to prevent flicker
+  const debouncedLoading = useDebouncedValue(modulesLoading, startupDelay);
+
+  // Show spinner after delay if still loading
+  hooks.useUpdateEffect(() => {
+    if (debouncedLoading && !spinnerVisible) {
+      setSpinnerVisible(true);
+      spinnerStartTimeRef.current = performance.now();
+    }
+  }, [debouncedLoading, spinnerVisible]);
+
+  // Handle module load completion with minimum spinner display time
+  hooks.useUpdateEffect(() => {
+    if (!modulesLoading && spinnerVisible) {
+      const elapsed = spinnerStartTimeRef.current
+        ? performance.now() - spinnerStartTimeRef.current
+        : minSpinnerDisplay;
+
+      if (elapsed >= minSpinnerDisplay) {
+        // Spinner has been visible long enough, hide immediately
+        setSpinnerVisible(false);
+        setIsInitializing(false);
+      } else {
+        // Keep spinner visible for minimum duration
+        const remainingTime = minSpinnerDisplay - elapsed;
+        const timer = setTimeout(() => {
+          if (mountedRef.current) {
+            setSpinnerVisible(false);
+            setIsInitializing(false);
+          }
+        }, remainingTime);
+
+        return () => {
+          clearTimeout(timer);
+        };
+      }
+    } else if (!modulesLoading && !spinnerVisible) {
+      // Fast load completed, no spinner was shown
+      setIsInitializing(false);
+    }
+
+    return undefined;
+  }, [modulesLoading, spinnerVisible, minSpinnerDisplay]);
+
+  hooks.useEffectOnce(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  });
+
+  return {
+    shouldShowLoading: spinnerVisible,
+    isInitializing,
+    modulesReady: !modulesLoading && !isInitializing,
+  };
 };
 
 /**

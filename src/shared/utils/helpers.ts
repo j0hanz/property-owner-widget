@@ -274,7 +274,11 @@ export const cleanupRemovedGraphics = (params: {
   ) => void;
   normalizeFnrKey: (fnr: FnrValue | null | undefined) => string;
 }): void => {
-  const { toRemove, removeHighlightForFnr, normalizeFnrKey: normalize } = params;
+  const {
+    toRemove,
+    removeHighlightForFnr,
+    normalizeFnrKey: normalize,
+  } = params;
 
   toRemove.forEach((fnrKey) => {
     removeHighlightForFnr(fnrKey, normalize);

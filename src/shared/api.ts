@@ -586,8 +586,20 @@ export const queryPropertyByPoint = async (
     if (!layer) {
       layer = new FeatureLayerCtor({
         url: layerUrl,
+        outFields: ["*"],
       });
       featureLayerCache.set(layerUrl, layer);
+
+      // Ensure layer is loaded before querying
+      try {
+        await layer.load(createSignalOptions(options?.signal));
+        abortHelpers.throwIfAborted(options?.signal);
+      } catch (loadError) {
+        featureLayerCache.delete(layerUrl);
+        throw loadError instanceof Error
+          ? loadError
+          : new Error(String(loadError));
+      }
     }
 
     const query = new QueryCtor({
@@ -595,6 +607,8 @@ export const queryPropertyByPoint = async (
       returnGeometry: true,
       outFields: ["*"],
       spatialRelationship: "intersects",
+      returnZ: false,
+      returnM: false,
     });
 
     const result = await layer.queryFeatures(

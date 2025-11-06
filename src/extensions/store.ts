@@ -1,5 +1,5 @@
 import type { extensionSpec, ImmutableObject } from "jimu-core";
-import * as SeamlessImmutableNs from "seamless-immutable";
+import SeamlessImmutable from "seamless-immutable";
 import { PROPERTY_ACTION_TYPES } from "../config/constants";
 import { PropertyActionType } from "../config/enums";
 import type {
@@ -58,20 +58,26 @@ export const propertyActions = {
 };
 
 const resolveImmutableFactory = (): SeamlessImmutableFactory => {
-  const candidate = SeamlessImmutableNs as {
-    default?: SeamlessImmutableFactory;
-    Immutable?: SeamlessImmutableFactory;
-  };
+  const candidate = SeamlessImmutable as unknown;
 
-  if (typeof candidate.default === "function") {
-    return candidate.default;
+  if (typeof candidate === "function") {
+    return candidate as SeamlessImmutableFactory;
   }
 
-  if (typeof candidate.Immutable === "function") {
-    return candidate.Immutable;
+  const asDefault = (candidate as { default?: SeamlessImmutableFactory })
+    .default;
+  if (typeof asDefault === "function") {
+    return asDefault;
   }
 
-  return <T>(input: T) => input as SeamlessImmutableNs.Immutable<T>;
+  const asImmutable = (candidate as { Immutable?: SeamlessImmutableFactory })
+    .Immutable;
+  if (typeof asImmutable === "function") {
+    return asImmutable;
+  }
+
+  return <T>(input: T) =>
+    (SeamlessImmutable as unknown as SeamlessImmutableFactory)(input);
 };
 
 const Immutable = resolveImmutableFactory();
