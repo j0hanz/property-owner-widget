@@ -10,6 +10,7 @@ export * from "./dispatcher";
 export * from "./helpers";
 export * from "./export";
 export * from "./serialization";
+export * from "./transformation";
 export { isValidationSuccess, isValidationFailure } from "../../config/types";
 export type {
   CursorGraphicsState,

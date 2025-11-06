@@ -144,3 +144,53 @@ export const normalizeHostList = (
   const normalized = hosts.map(normalizeHostValue).filter((h) => h.length > 0);
   return Array.from(new Set(normalized));
 };
+
+export const readAppWidgetsFromState = (state: unknown): unknown => {
+  if (!state || typeof state !== "object") {
+    return null;
+  }
+
+  const baseState = state as {
+    appConfig?: unknown;
+    get?: (key: string) => unknown;
+  };
+
+  const readWidgets = (candidate: unknown): unknown => {
+    if (!candidate || typeof candidate !== "object") {
+      return null;
+    }
+
+    const source = candidate as {
+      widgets?: unknown;
+      get?: (key: string) => unknown;
+    };
+
+    if (typeof source.get === "function") {
+      const viaGetter = source.get("widgets");
+      if (viaGetter !== undefined) {
+        return viaGetter;
+      }
+    }
+
+    if ("widgets" in source) {
+      return source.widgets ?? null;
+    }
+
+    return null;
+  };
+
+  const directWidgets = readWidgets(baseState.appConfig);
+  if (directWidgets !== null) {
+    return directWidgets;
+  }
+
+  if (typeof baseState.get === "function") {
+    const configViaGetter = baseState.get("appConfig");
+    const widgetsFromGetter = readWidgets(configViaGetter);
+    if (widgetsFromGetter !== null) {
+      return widgetsFromGetter;
+    }
+  }
+
+  return null;
+};

@@ -46,7 +46,6 @@ import type {
   SerializedQueryResultMap,
   ErrorState,
   IMStateWithProperty,
-  ClipboardPayload,
   PipelineExecutionContext,
   PipelineRunResult,
   PropertyPipelineSuccess,
@@ -66,7 +65,6 @@ import {
 import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api";
 import {
   formatOwnerInfo,
-  formatPropertiesForClipboard,
   extractFnr,
   isAbortError,
   normalizeFnrKey,
@@ -74,7 +72,7 @@ import {
   isValidationFailure,
   buildHighlightColor,
   computeWidgetsToClose,
-  applySortingToProperties,
+  readAppWidgetsFromState,
   dataSourceHelpers,
   getValidatedOutlineWidth,
   logger,
@@ -91,6 +89,10 @@ import {
   scheduleGraphicsRendering,
   createCursorTrackingState,
   exportData,
+  buildResultsMap,
+  collectSelectedRawData,
+  buildClipboardPayload,
+  notifyCopyOutcome,
   type CursorGraphicsState,
 } from "../shared/utils/index";
 import { createPropertySelectors } from "../extensions/store";
@@ -207,34 +209,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const widgetId = resolveWidgetId(props);
   const selectors = usePropertySelectors(widgetId);
 
-  const ensureImmutableUseDataSource = (
-    candidate: ReturnType<typeof dataSourceHelpers.findById>
-  ): ImmutableObject<UseDataSource> | null => {
-    if (!candidate) {
-      return null;
-    }
-
-    const mutableCandidate = candidate as {
-      asMutable?: (options?: { deep?: boolean }) => unknown;
-    };
-
-    if (typeof mutableCandidate.asMutable === "function") {
-      return candidate as ImmutableObject<UseDataSource>;
-    }
-
-    return null;
-  };
-
-  const isSerializedResultRecord = (
-    value: unknown
-  ): value is SerializedQueryResultMap => {
-    if (!value || typeof value !== "object") {
-      return false;
-    }
-
-    return !(value instanceof Map);
-  };
-
   const runtimeState = ReactRedux.useSelector((state: IMState) => {
     const widgetInfo = state.widgetsRuntimeInfo?.[widgetId];
     if (widgetInfo?.state !== undefined) {
@@ -294,150 +268,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     );
   }, [props.dispatch, widgetId]);
 
+  // Latest value refs: Provide current values to callbacks without triggering re-renders
   const selectedPropertiesRef =
     hooks.useLatest<GridRowData[]>(selectedProperties);
   const rawPropertyResultsRef =
     hooks.useLatest<SerializedQueryResultMap | null>(rawPropertyResults);
-
-  const buildResultsMap = (
-    rawResults:
-      | SerializedQueryResultMap
-      | Map<string, SerializedQueryResult>
-      | null
-  ): Map<string, SerializedQueryResult> | null => {
-    if (!rawResults) {
-      return null;
-    }
-
-    if (rawResults instanceof Map) {
-      return rawResults;
-    }
-
-    if (isSerializedResultRecord(rawResults)) {
-      const resultsMap = new Map<string, SerializedQueryResult>();
-      Object.keys(rawResults).forEach((key) => {
-        const value = rawResults[key];
-        if (value) {
-          resultsMap.set(key, value);
-        }
-      });
-      return resultsMap;
-    }
-
-    return null;
-  };
-
-  const collectSelectedRawData = (
-    rows: GridRowData[],
-    resultsMap: Map<string, SerializedQueryResult>
-  ): SerializedQueryResult[] => {
-    const selectedRawData: SerializedQueryResult[] = [];
-    rows.forEach((row) => {
-      const rawData = resultsMap.get(row.id);
-      if (rawData) {
-        selectedRawData.push(rawData);
-      }
-    });
-    return selectedRawData;
-  };
-
-  const exportSelectedRows = (
-    format: ExportFormat,
-    rows: GridRowData[],
-    rawData: SerializedQueryResult[],
-    sorting: SortingState
-  ) => {
-    const sortedRows = applySortingToProperties(rows, sorting);
-
-    try {
-      exportData(
-        rawData,
-        sortedRows,
-        {
-          format,
-          filename: "property-export",
-          rowCount: sortedRows.length,
-          definition: EXPORT_FORMATS.find((item) => item.id === format),
-        },
-        config.enablePIIMasking,
-        translate("unknownOwner")
-      );
-
-      trackEvent({
-        category: "Export",
-        action: `export_${format}`,
-        label: sorting.length > 0 ? "sorted" : "unsorted",
-        value: sortedRows.length,
-      });
-    } catch (error) {
-      trackError(`export_${format}`, error);
-    }
-  };
-
-  const buildClipboardPayload = (
-    selection: GridRowData[],
-    sorting: SortingState,
-    maskEnabled: boolean,
-    translateFn: (key: string) => string
-  ): ClipboardPayload | null => {
-    if (!selection.length) {
-      return null;
-    }
-
-    const sortedSelection = applySortingToProperties(selection, sorting);
-    const formattedText = formatPropertiesForClipboard(
-      sortedSelection,
-      maskEnabled,
-      translateFn("unknownOwner")
-    );
-
-    return {
-      text: formattedText,
-      count: selection.length,
-      isSorted: sorting.length > 0,
-    };
-  };
-
-  const notifyCopyOutcome = (
-    copySucceeded: boolean,
-    payload: ClipboardPayload,
-    translateFn: (key: string) => string
-  ) => {
-    if (copySucceeded) {
-      const successTemplate = translateFn("copiedSuccess");
-      const successMessage =
-        typeof successTemplate === "string"
-          ? successTemplate.replace("{count}", String(payload.count))
-          : "";
-
-      setUrlFeedback({
-        type: "success",
-        text:
-          successMessage ||
-          (typeof successTemplate === "string" ? successTemplate : ""),
-      });
-
-      trackEvent({
-        category: "Copy",
-        action: "copy_properties",
-        label: payload.isSorted ? "sorted" : "unsorted",
-        value: payload.count,
-      });
-      return;
-    }
-
-    setUrlFeedback({
-      type: "error",
-      text: translateFn("copyFailed"),
-    });
-
-    trackEvent({
-      category: "Copy",
-      action: "copy_properties",
-      label: "failed",
-      value: payload.count,
-    });
-  };
 
   const prepareQueryExecution = hooks.useEventCallback(
     (
@@ -619,15 +454,34 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     // Widget mounted
   });
 
-  const propertyUseDataSource = ensureImmutableUseDataSource(
-    dataSourceHelpers.findById(
+  const propertyUseDataSource = (() => {
+    const candidate = dataSourceHelpers.findById(
       props.useDataSources,
       config.propertyDataSourceId
-    )
-  );
-  const ownerUseDataSource = ensureImmutableUseDataSource(
-    dataSourceHelpers.findById(props.useDataSources, config.ownerDataSourceId)
-  );
+    );
+    if (!candidate) return null;
+    const mutableCandidate = candidate as {
+      asMutable?: (options?: { deep?: boolean }) => unknown;
+    };
+    if (typeof mutableCandidate.asMutable === "function") {
+      return candidate as ImmutableObject<UseDataSource>;
+    }
+    return null;
+  })();
+  const ownerUseDataSource = (() => {
+    const candidate = dataSourceHelpers.findById(
+      props.useDataSources,
+      config.ownerDataSourceId
+    );
+    if (!candidate) return null;
+    const mutableCandidate = candidate as {
+      asMutable?: (options?: { deep?: boolean }) => unknown;
+    };
+    if (typeof mutableCandidate.asMutable === "function") {
+      return candidate as ImmutableObject<UseDataSource>;
+    }
+    return null;
+  })();
   const propertyUseDataSourceId = dataSourceHelpers.extractId(
     propertyUseDataSource
   );
@@ -650,11 +504,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const { getController, releaseController, abortAll } =
     useAbortControllerPool();
 
+  // ArcGIS resource refs: Singleton manager and query tracking
   const dsManagerRef = React.useRef<DataSourceManager | null>(null);
   if (!dsManagerRef.current) {
     dsManagerRef.current = DataSourceManager.getInstance();
   }
-  const requestIdRef = React.useRef(0);
+  const requestIdRef = React.useRef(0); // Increments for each query to detect stale requests
 
   const resetSelectionState = hooks.useEventCallback(
     (shouldTrackClear: boolean) => {
@@ -870,55 +725,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         }
       | undefined;
 
-    const appWidgets = (() => {
-      if (!state || typeof state !== "object") {
-        return null;
-      }
-
-      const baseState = state as {
-        appConfig?: unknown;
-        get?: (key: string) => unknown;
-      };
-
-      const readWidgets = (candidate: unknown): unknown => {
-        if (!candidate || typeof candidate !== "object") {
-          return null;
-        }
-
-        const source = candidate as {
-          widgets?: unknown;
-          get?: (key: string) => unknown;
-        };
-
-        if (typeof source.get === "function") {
-          const viaGetter = source.get("widgets");
-          if (viaGetter !== undefined) {
-            return viaGetter;
-          }
-        }
-
-        if ("widgets" in source) {
-          return source.widgets ?? null;
-        }
-
-        return null;
-      };
-
-      const directWidgets = readWidgets(baseState.appConfig);
-      if (directWidgets !== null) {
-        return directWidgets;
-      }
-
-      if (typeof baseState.get === "function") {
-        const configViaGetter = baseState.get("appConfig");
-        const widgetsFromGetter = readWidgets(configViaGetter);
-        if (widgetsFromGetter !== null) {
-          return widgetsFromGetter;
-        }
-      }
-
-      return null;
-    })();
+    const appWidgets = readAppWidgetsFromState(state);
     const targets = computeWidgetsToClose(runtimeInfo, widgetId, appWidgets);
     if (targets.length === 0) return;
 
@@ -938,27 +745,38 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   });
 
   const handleExport = hooks.useEventCallback((format: ExportFormat) => {
-    if (!hasSelectedProperties) {
-      return;
-    }
+    if (!hasSelectedProperties) return;
 
     const resultsMap = buildResultsMap(rawPropertyResults);
-    if (!resultsMap) {
-      return;
-    }
-
-    if (resultsMap.size === 0) {
-      return;
-    }
+    if (!resultsMap || resultsMap.size === 0) return;
 
     const selectedRows = [...selectedProperties];
     const selectedRawData = collectSelectedRawData(selectedRows, resultsMap);
+    if (selectedRawData.length === 0) return;
 
-    if (selectedRawData.length === 0) {
-      return;
+    try {
+      exportData(
+        selectedRawData,
+        selectedRows,
+        {
+          format,
+          filename: "property-export",
+          rowCount: selectedRows.length,
+          definition: EXPORT_FORMATS.find((item) => item.id === format),
+        },
+        config.enablePIIMasking,
+        translate("unknownOwner")
+      );
+
+      trackEvent({
+        category: "Export",
+        action: `export_${format}`,
+        label: tableSorting.length > 0 ? "sorted" : "unsorted",
+        value: selectedRows.length,
+      });
+    } catch (error) {
+      trackError(`export_${format}`, error);
     }
-
-    exportSelectedRows(format, selectedRows, selectedRawData, tableSorting);
   });
 
   const handleExportFormatSelect = hooks.useEventCallback(
@@ -974,9 +792,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     setUrlFeedback(null);
 
     const currentSelection = selectedPropertiesRef.current ?? [];
-    if (!currentSelection || currentSelection.length === 0) {
-      return;
-    }
+    if (!currentSelection || currentSelection.length === 0) return;
 
     const selectionArray = [...currentSelection];
 
@@ -988,12 +804,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         translate
       );
 
-      if (!payload) {
-        return;
-      }
+      if (!payload) return;
 
       const copySucceeded = copyToClipboard(payload.text);
-      notifyCopyOutcome(copySucceeded, payload, translate);
+      notifyCopyOutcome(
+        copySucceeded,
+        payload,
+        translate,
+        setUrlFeedback,
+        trackEvent
+      );
     } catch (error) {
       setUrlFeedback({
         type: "error",
@@ -1079,7 +899,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       onMapClick: handleMapClick,
     });
 
-  // Cursor point marker tracking
+  // Cursor tracking state and refs
   const cursorGraphicsStateRef = React.useRef<CursorGraphicsState | null>(null);
   const pointerMoveHandleRef = React.useRef<__esri.Handle | null>(null);
   const pointerLeaveHandleRef = React.useRef<__esri.Handle | null>(null);
