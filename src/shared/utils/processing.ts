@@ -417,16 +417,6 @@ const buildFnrGroupMap = <T extends { FNR: string | number; id: string }>(
   return { byFnr, seenIds, fnrKeys };
 };
 
-const shouldRemoveForToggle = <T extends { FNR: string | number }>(
-  fnrKey: string,
-  existingByFnr: Map<string, T[]>,
-  toggleEnabled: boolean
-): boolean => {
-  if (!toggleEnabled) return false;
-  const existingGroup = existingByFnr.get(fnrKey);
-  return existingGroup !== undefined && existingGroup.length > 0;
-};
-
 const processRowsForToggleAndDedup = <
   T extends { FNR: string | number; id: string },
 >(
@@ -440,14 +430,10 @@ const processRowsForToggleAndDedup = <
 
   for (const row of rowsToProcess) {
     const fnrKey = normalizeFnrKey(row.FNR);
+    const hasExistingRows = existingByFnr.has(fnrKey);
 
-    if (shouldRemoveForToggle(fnrKey, existingByFnr, toggleEnabled)) {
-      const existingGroup = existingByFnr.get(fnrKey);
-      if (existingGroup) {
-        for (const existingRow of existingGroup) {
-          toRemove.add(existingRow.id);
-        }
-      }
+    if (toggleEnabled && hasExistingRows) {
+      toRemove.add(fnrKey);
       continue;
     }
 
@@ -468,9 +454,9 @@ const applyRemovalsAndAdditions = <
   existingProperties: T[],
   toRemove: Set<string>,
   toAdd: T[],
-  maxResults: number
+  maxResults: number,
+  cachedFnrKeys: Map<T, string>
 ): T[] => {
-  // Performance: Early exit if no removals
   if (toRemove.size === 0) {
     const combined = [...existingProperties, ...toAdd];
     return combined.length > maxResults
@@ -478,15 +464,10 @@ const applyRemovalsAndAdditions = <
       : combined;
   }
 
-  // Pre-compute normalized keys once for all existing properties
-  const normalizedKeys = new Map<T, string>();
-  for (const row of existingProperties) {
-    normalizedKeys.set(row, normalizeFnrKey(row.FNR));
-  }
-
   const filtered = existingProperties.filter((row) => {
-    const key = normalizedKeys.get(row);
-    return key !== undefined && !toRemove.has(key);
+    const cachedKey = cachedFnrKeys.get(row);
+    const fnrKey = cachedKey ?? normalizeFnrKey(row.FNR);
+    return !toRemove.has(fnrKey);
   });
 
   const combined = [...filtered, ...toAdd];
@@ -503,8 +484,11 @@ export const calculatePropertyUpdates = <
   toggleEnabled: boolean,
   maxResults: number
 ): { toRemove: Set<string>; toAdd: T[]; updatedRows: T[] } => {
-  const { byFnr: existingByFnr, seenIds } =
-    buildFnrGroupMap(existingProperties);
+  const {
+    byFnr: existingByFnr,
+    seenIds,
+    fnrKeys,
+  } = buildFnrGroupMap(existingProperties);
   const { toRemove, toAdd } = processRowsForToggleAndDedup(
     rowsToProcess,
     existingByFnr,
@@ -515,7 +499,8 @@ export const calculatePropertyUpdates = <
     existingProperties,
     toRemove,
     toAdd,
-    maxResults
+    maxResults,
+    fnrKeys
   );
 
   return { toRemove, toAdd, updatedRows };

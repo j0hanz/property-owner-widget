@@ -1278,6 +1278,39 @@ describe("Property Widget - Utility Helper Functions", () => {
     expect(result.updatedRows.map((row) => row.id)).toEqual(["123_1", "123_2"]);
   });
 
+  it("should expose normalized FNR keys when calculating removals", () => {
+    const existingRow: GridRowData = {
+      id: createRowId("123", 1),
+      FNR: "123",
+      UUID_FASTIGHET: "uuid-123",
+      FASTIGHET: "Property 123",
+      BOSTADR: "Owner 123",
+      ADDRESS: "Address 123",
+    };
+
+    const rowsToProcess: GridRowData[] = [
+      {
+        id: createRowId("123", 1),
+        FNR: "123",
+        UUID_FASTIGHET: "uuid-123",
+        FASTIGHET: "Property 123",
+        BOSTADR: "Owner 123",
+        ADDRESS: "Address 123",
+      },
+    ];
+
+    const result = calculatePropertyUpdates(
+      rowsToProcess,
+      [existingRow],
+      true,
+      5
+    );
+
+    const normalized = normalizeFnrKey("123");
+    expect(result.toRemove.has(normalized)).toBe(true);
+    expect(result.updatedRows).toHaveLength(0);
+  });
+
   it("should sanitize tooltip content when building text symbols", () => {
     const modules = createMockEsriModules();
 
