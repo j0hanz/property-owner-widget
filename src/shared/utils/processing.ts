@@ -9,7 +9,6 @@ import type {
   ProcessingAccumulator,
   ProcessPropertyQueryParams,
   ProcessPropertyResult,
-  PropertyDispatcher,
   PropertyPipelineSuccess,
   PropertyProcessingContext,
   PropertySelectionPipelineParams,
@@ -22,14 +21,15 @@ import type {
   SerializedRecord,
   ValidatedProperty,
 } from "../../config/types";
+import { propertyActions } from "../../extensions/store";
 import { getValidatedOutlineWidth } from "./formatting";
 import { buildHighlightColor } from "./graphics";
 import {
   cleanupRemovedGraphics,
   createRowId,
   extractFnr,
-  normalizeFnrKey,
   logger,
+  normalizeFnrKey,
 } from "./helpers";
 import { deduplicateOwnerEntries } from "./privacy";
 import { serializeGeometry, serializePropertyResult } from "./serialization";
@@ -766,7 +766,8 @@ export const updatePropertySelectionState = (params: {
     | Map<string, SerializedQueryResult>
     | null;
   selectedProperties: GridRowData[];
-  dispatch: PropertyDispatcher;
+  dispatch: (action: unknown) => void;
+  widgetId: string;
   removeHighlightForFnr: (
     fnr: FnrValue,
     normalize: (fnr: FnrValue | null | undefined) => string
@@ -786,6 +787,7 @@ export const updatePropertySelectionState = (params: {
     previousRawResults,
     selectedProperties,
     dispatch,
+    widgetId,
     removeHighlightForFnr,
     normalizeFnrKey: normalize,
     highlightColorConfig,
@@ -809,9 +811,9 @@ export const updatePropertySelectionState = (params: {
     normalizeFnrKey: normalize,
   });
 
-  dispatch.setSelectedProperties(update.rowsToStore);
-  dispatch.setRawResults(update.resultsToStore);
-  dispatch.setQueryInFlight(false);
+  dispatch(propertyActions.setSelectedProperties(update.rowsToStore, widgetId));
+  dispatch(propertyActions.setRawResults(update.resultsToStore, widgetId));
+  dispatch(propertyActions.setQueryInFlight(false, widgetId));
 
   return {
     rowsToStore: update.rowsToStore,
@@ -854,8 +856,13 @@ export const scheduleGraphicsRendering = (params: {
       outlineWidth,
     });
 
-    if (result && typeof (result as Promise<unknown>).then === "function") {
-      (result as Promise<unknown>).catch((error) => {
+    if (
+      result &&
+      typeof result === "object" &&
+      "catch" in result &&
+      typeof result.catch === "function"
+    ) {
+      result.catch((error: unknown) => {
         logger.error("Failed to render selection highlights", error, {
           selectionSize: pipelineResult.updatedRows.length,
         });

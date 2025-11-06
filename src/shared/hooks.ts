@@ -1,8 +1,8 @@
 import {
-  hooks,
-  React,
   type DataSourceManager,
   type FeatureLayerDataSource,
+  hooks,
+  React,
 } from "jimu-core";
 import { loadArcGISJSAPIModules } from "jimu-arcgis";
 import type { JimuMapView } from "jimu-arcgis";
@@ -217,10 +217,12 @@ export const useGraphicsLayer = (params: {
     return value.trim().replace(/\/+$/, "").toLowerCase();
   };
 
-  const isFeatureLayer = (
-    layer: unknown
-  ): layer is __esri.FeatureLayer =>
-    Boolean(layer && typeof layer === "object" && (layer as __esri.Layer).type === "feature");
+  const isFeatureLayer = (layer: unknown): layer is __esri.FeatureLayer =>
+    Boolean(
+      layer &&
+        typeof layer === "object" &&
+        (layer as __esri.Layer).type === "feature"
+    );
 
   const removeHandleForKey = hooks.useEventCallback((key: string) => {
     const handle = highlightHandlesRef.current.get(key);
@@ -271,14 +273,18 @@ export const useGraphicsLayer = (params: {
 
     pushUrl((dataSource as { url?: string }).url);
 
-    const dsJson = (dataSource as {
-      getDataSourceJson?: () => { url?: string } | null;
-    }).getDataSourceJson?.();
+    const dsJson = (
+      dataSource as {
+        getDataSourceJson?: () => { url?: string } | null;
+      }
+    ).getDataSourceJson?.();
     pushUrl(dsJson?.url);
 
-    const layerDefinition = (dataSource as {
-      getLayerDefinition?: () => { url?: string } | null;
-    }).getLayerDefinition?.();
+    const layerDefinition = (
+      dataSource as {
+        getLayerDefinition?: () => { url?: string } | null;
+      }
+    ).getLayerDefinition?.();
     pushUrl(layerDefinition?.url);
 
     return Array.from(urls);
@@ -297,9 +303,11 @@ export const useGraphicsLayer = (params: {
         return directLayer;
       }
 
-      const getLayer = (dataSource as {
-        getLayer?: () => __esri.FeatureLayer | Promise<__esri.FeatureLayer>;
-      }).getLayer;
+      const getLayer = (
+        dataSource as {
+          getLayer?: () => __esri.FeatureLayer | Promise<__esri.FeatureLayer>;
+        }
+      ).getLayer;
 
       if (typeof getLayer === "function") {
         try {
@@ -337,10 +345,7 @@ export const useGraphicsLayer = (params: {
         layers?: { toArray?: () => __esri.Layer[] };
       };
 
-      const layers = [
-        ...toArray(map.allLayers),
-        ...toArray(map.layers),
-      ];
+      const layers = [...toArray(map.allLayers), ...toArray(map.layers)];
 
       for (const layer of layers) {
         if (!isFeatureLayer(layer)) {
@@ -400,14 +405,16 @@ export const useGraphicsLayer = (params: {
 
       if (!layer && graphics) {
         const graphicUrls = graphics
-          .map((entry) =>
-            normalizeUrl(
-              isFeatureLayer((entry.graphic as { layer?: __esri.Layer }).layer)
-                ? ((entry.graphic as { layer?: __esri.FeatureLayer }).layer
-                    ?.url ?? null)
+          .map((entry) => {
+            const graphic = entry.graphic as unknown as {
+              layer?: __esri.FeatureLayer;
+            };
+            return normalizeUrl(
+              isFeatureLayer(graphic.layer)
+                ? (graphic.layer?.url ?? null)
                 : null
-            )
-          )
+            );
+          })
           .filter((url): url is string => Boolean(url));
 
         layer = findLayerInView(view, graphicUrls);
@@ -483,7 +490,13 @@ export const useGraphicsLayer = (params: {
       }
 
       const [r, g, b, a] = highlightColor;
-      const current = view.highlightOptions ?? {};
+      const current =
+        view.highlightOptions ??
+        ({} as {
+          color?: number[];
+          fillOpacity?: number;
+          haloOpacity?: number;
+        });
       const desiredColor: [number, number, number] = [r, g, b];
       const needsUpdate =
         !Array.isArray(current.color) ||

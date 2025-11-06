@@ -29,6 +29,7 @@ import {
   SVG,
 } from "jimu-ui";
 import type { ColumnDef, SortingState } from "@tanstack/react-table";
+import { shallowEqual } from "react-redux";
 import { CURSOR_TOOLTIP_STYLE, EXPORT_FORMATS } from "../config/constants";
 import { ErrorType } from "../config/enums";
 import { useWidgetStyles } from "../config/style";
@@ -47,7 +48,7 @@ import type {
   SerializedQueryResult,
   SerializedQueryResultMap,
 } from "../config/types";
-import { createPropertySelectors } from "../extensions/store";
+import { createPropertySelectors, propertyActions } from "../extensions/store";
 import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api";
 import {
   createPropertyTableColumns,
@@ -76,7 +77,6 @@ import {
   collectSelectedRawData,
   computeWidgetsToClose,
   copyToClipboard,
-  createPropertyDispatcher,
   type CursorGraphicsState,
   cursorLifecycleHelpers,
   dataSourceHelpers,
@@ -105,9 +105,7 @@ import copyButton from "../assets/copy.svg";
 import exportIcon from "../assets/export.svg";
 import mapSelect from "../assets/map-select.svg";
 
-const syncSelectionGraphics = async (
-  params: SelectionGraphicsParams
-) => {
+const syncSelectionGraphics = async (params: SelectionGraphicsParams) => {
   const {
     graphicsToAdd,
     selectedRows,
@@ -142,17 +140,7 @@ const resolveWidgetId = (props: AllWidgetProps<IMConfig>): string => {
 };
 
 const usePropertySelectors = (widgetId: string) => {
-  const selectorsRef = React.useRef(createPropertySelectors(widgetId));
-  const previousWidgetId = hooks.usePrevious(widgetId);
-
-  if (
-    !selectorsRef.current ||
-    (previousWidgetId && previousWidgetId !== widgetId)
-  ) {
-    selectorsRef.current = createPropertySelectors(widgetId);
-  }
-
-  return selectorsRef.current;
+  return React.useMemo(() => createPropertySelectors(widgetId), [widgetId]);
 };
 
 // Error boundaries require class components in React (no functional equivalent)
@@ -202,6 +190,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   const widgetId = resolveWidgetId(props);
   const selectors = usePropertySelectors(widgetId);
+  const dispatch = ReactRedux.useDispatch();
 
   const runtimeState = ReactRedux.useSelector((state: IMState) => {
     const widgetInfo = state.widgetsRuntimeInfo?.[widgetId];
@@ -218,11 +207,11 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const selectedProperties = ReactRedux.useSelector<
     IMStateWithProperty,
     GridRowData[]
-  >(selectors.selectSelectedProperties);
+  >(selectors.selectSelectedProperties, shallowEqual);
   const rawPropertyResults = ReactRedux.useSelector<
     IMStateWithProperty,
     SerializedQueryResultMap | null
-  >(selectors.selectRawResults);
+  >(selectors.selectRawResults, shallowEqual);
   const selectedCount = selectedProperties.length;
   const hasSelectedProperties = selectedCount > 0;
 
@@ -251,16 +240,6 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       setUrlFeedback(null);
     }
   }, [hasSelectedProperties]);
-
-  const propertyDispatchRef = React.useRef(
-    createPropertyDispatcher(props.dispatch, widgetId)
-  );
-  hooks.useUpdateEffect(() => {
-    propertyDispatchRef.current = createPropertyDispatcher(
-      props.dispatch,
-      widgetId
-    );
-  }, [props.dispatch, widgetId]);
 
   // Latest value refs: Provide current values to callbacks without triggering re-renders
   const selectedPropertiesRef =
@@ -294,8 +273,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       requestIdRef.current = requestId;
       const isStaleRequest = () => requestId !== requestIdRef.current;
 
-      propertyDispatchRef.current.clearError();
-      propertyDispatchRef.current.setQueryInFlight(true);
+      dispatch(propertyActions.clearError(widgetId));
+      dispatch(propertyActions.setQueryInFlight(true, widgetId));
 
       const currentSelection = selectedPropertiesRef.current ?? [];
       const selectionForPipeline = [...currentSelection];
@@ -384,7 +363,8 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         pipelineResult,
         previousRawResults: rawPropertyResultsRef.current,
         selectedProperties: context.selectionForPipeline,
-        dispatch: propertyDispatchRef.current,
+        dispatch,
+        widgetId,
         removeHighlightForFnr,
         normalizeFnrKey,
         highlightColorConfig,
@@ -430,7 +410,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       if (isAbortError(error)) {
         tracker.failure("aborted");
-        propertyDispatchRef.current.setQueryInFlight(false);
+        dispatch(propertyActions.setQueryInFlight(false, widgetId));
         return;
       }
 
@@ -442,7 +422,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       });
       setError(ErrorType.QUERY_ERROR, translate("errorQueryFailed"));
       tracker.failure("query_error");
-      propertyDispatchRef.current.setQueryInFlight(false);
+      dispatch(propertyActions.setQueryInFlight(false, widgetId));
       trackError("property_query", error);
     }
   );
@@ -527,9 +507,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         });
       }
 
-      propertyDispatchRef.current.clearAll();
-      propertyDispatchRef.current.setRawResults(null);
-      propertyDispatchRef.current.setQueryInFlight(false);
+      dispatch(propertyActions.clearAll(widgetId));
+      dispatch(propertyActions.setRawResults(null, widgetId));
+      dispatch(propertyActions.setQueryInFlight(false, widgetId));
     }
   );
 
@@ -543,7 +523,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   const setError = hooks.useEventCallback(
     (type: ErrorType, message: string, details?: string) => {
-      propertyDispatchRef.current.setError({ type, message, details });
+      dispatch(propertyActions.setError({ type, message, details }, widgetId));
     }
   );
 
@@ -640,8 +620,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       };
     });
 
-    propertyDispatchRef.current.setSelectedProperties(reformattedProperties);
-  }, [piiMaskingEnabled, translate]);
+    dispatch(
+      propertyActions.setSelectedProperties(reformattedProperties, widgetId)
+    );
+  }, [piiMaskingEnabled, translate, dispatch, widgetId]);
 
   hooks.useUpdateEffect(() => {
     const currentSelection = selectedPropertiesRef.current ?? [];
@@ -663,7 +645,9 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       }
     });
 
-    propertyDispatchRef.current.setSelectedProperties(trimmedProperties);
+    dispatch(
+      propertyActions.setSelectedProperties(trimmedProperties, widgetId)
+    );
 
     const existingRaw = rawPropertyResultsRef.current;
     if (existingRaw && Object.keys(existingRaw).length > 0) {
@@ -679,9 +663,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           }
         }
       });
-      propertyDispatchRef.current.setRawResults(nextRaw);
+      dispatch(propertyActions.setRawResults(nextRaw, widgetId));
     }
-  }, [maxResults, normalizeFnrKey, removeHighlightForFnr, trackEvent]);
+  }, [
+    maxResults,
+    normalizeFnrKey,
+    removeHighlightForFnr,
+    trackEvent,
+    dispatch,
+    widgetId,
+  ]);
 
   hooks.useUpdateEffect(() => {
     trackFeatureUsage("toggle_removal_changed", toggleEnabled);
@@ -736,7 +727,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       action: "close_other_widgets",
       value: safeTargets.length,
     });
-    props.dispatch(appActions.closeWidgets(safeTargets));
+    dispatch(appActions.closeWidgets(safeTargets));
   });
 
   const handleExport = hooks.useEventCallback((format: ExportFormat) => {
@@ -851,12 +842,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
         if (outcome.status === "aborted") {
           tracker.failure("aborted");
-          propertyDispatchRef.current.setQueryInFlight(false);
+          dispatch(propertyActions.setQueryInFlight(false, widgetId));
           return;
         }
 
         if (outcome.status === "empty") {
-          propertyDispatchRef.current.setQueryInFlight(false);
+          dispatch(propertyActions.setQueryInFlight(false, widgetId));
           tracker.success();
           return;
         }
@@ -899,6 +890,27 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     const view = getCurrentView();
     currentViewRef.current = view;
   }, [getCurrentView]);
+
+  // Simple graphics layer manager for cursor tooltips (separate from highlight layer)
+  const ensureGraphicsLayer = hooks.useEventCallback((view: __esri.MapView) => {
+    if (!view || !modules) return;
+
+    const layerId = `property-${widgetId}-highlight-layer`;
+    const existing = view.map.findLayerById(layerId);
+
+    if (existing) return;
+
+    if (!cachedLayerRef.current) {
+      cachedLayerRef.current = new modules.GraphicsLayer({
+        id: layerId,
+        listMode: "hide",
+      });
+    }
+
+    if (!view.map.findLayerById(cachedLayerRef.current.id)) {
+      view.map.add(cachedLayerRef.current);
+    }
+  });
 
   // Cursor tracking state and refs
   const cursorGraphicsStateRef = React.useRef<CursorGraphicsState | null>(null);
@@ -1165,7 +1177,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     abortAll();
     clearQueryCache();
     clearHighlights();
-    propertyDispatchRef.current.removeWidgetState();
+    dispatch(propertyActions.removeWidgetState(widgetId));
   });
 
   const isConfigured = config.propertyDataSourceId && config.ownerDataSourceId;

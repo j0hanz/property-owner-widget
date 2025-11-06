@@ -1,5 +1,11 @@
-import { HEX_COLOR_PATTERN, HIGHLIGHT_MARKER_SIZE } from "../../config/constants";
-import type { HighlightSymbolJSON, SelectionGraphicsHelpers } from "../../config/types";
+import {
+  HEX_COLOR_PATTERN,
+  HIGHLIGHT_MARKER_SIZE,
+} from "../../config/constants";
+import type {
+  HighlightSymbolJSON,
+  SelectionGraphicsHelpers,
+} from "../../config/types";
 
 export const buildHighlightColor = (
   color: string,
