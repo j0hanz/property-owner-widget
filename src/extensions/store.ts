@@ -58,26 +58,43 @@ export const propertyActions = {
 };
 
 const resolveImmutableFactory = (): SeamlessImmutableFactory => {
-  const candidate = SeamlessImmutable as unknown;
+  const loadCandidate = (): unknown => {
+    if (typeof SeamlessImmutable !== "undefined") {
+      return SeamlessImmutable as unknown;
+    }
+
+    try {
+      return require("seamless-immutable");
+    } catch (error) {
+      console.error("Property Widget: Failed to load seamless-immutable", {
+        error,
+      });
+    }
+
+    return null;
+  };
+
+  const candidate = loadCandidate();
 
   if (typeof candidate === "function") {
     return candidate as SeamlessImmutableFactory;
   }
 
-  const asDefault = (candidate as { default?: SeamlessImmutableFactory })
-    .default;
-  if (typeof asDefault === "function") {
-    return asDefault;
+  if (
+    candidate &&
+    typeof (candidate as { default?: unknown }).default === "function"
+  ) {
+    return (candidate as { default: SeamlessImmutableFactory }).default;
   }
 
-  const asImmutable = (candidate as { Immutable?: SeamlessImmutableFactory })
-    .Immutable;
-  if (typeof asImmutable === "function") {
-    return asImmutable;
+  if (
+    candidate &&
+    typeof (candidate as { Immutable?: unknown }).Immutable === "function"
+  ) {
+    return (candidate as { Immutable: SeamlessImmutableFactory }).Immutable;
   }
 
-  return <T>(input: T) =>
-    (SeamlessImmutable as unknown as SeamlessImmutableFactory)(input);
+  throw new Error("SeamlessImmutable factory unavailable");
 };
 
 const Immutable = resolveImmutableFactory();

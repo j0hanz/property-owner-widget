@@ -230,7 +230,16 @@ export const useGraphicsLayer = (params: {
     if (!value || typeof value !== "string") {
       return null;
     }
-    return value.trim().replace(/\/+$/, "").toLowerCase();
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const withoutFragment = trimmed.split("#")[0];
+    const withoutQuery = withoutFragment.split("?")[0];
+
+    return withoutQuery.replace(/\/+$/, "").toLowerCase();
   };
 
   const isFeatureLayer = (layer: unknown): layer is __esri.FeatureLayer =>
