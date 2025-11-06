@@ -316,6 +316,16 @@ const propertyReducer = (
     return state;
   }
 
+  // Ensure state is immutable - defensive check for external state mutations
+  if (!state || typeof state !== "object") {
+    state = initialGlobalState;
+  }
+
+  // If state.byId exists but isn't immutable, wrap it
+  if (state.byId && typeof state.byId === "object" && !hasAsMutable(state)) {
+    state = Immutable(state) as IMPropertyGlobalState;
+  }
+
   return reduceOne(state, action);
 };
 
@@ -356,8 +366,8 @@ export default class PropertyReduxStoreExtension
     return [...PROPERTY_ACTION_TYPES];
   }
 
-  getInitLocalState(): { byId: { [id: string]: PropertyWidgetState } } {
-    return { byId: {} };
+  getInitLocalState() {
+    return initialGlobalState;
   }
 
   getReducer() {
