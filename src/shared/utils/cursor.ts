@@ -361,9 +361,11 @@ export const executeHoverQuery = async (params: {
 export const shouldSkipHoverQuery = (
   screenPoint: { x: number; y: number },
   lastQueryPoint: { x: number; y: number } | null,
-  tolerancePx: number
+  tolerancePx: number,
+  hasTrustedResult: boolean
 ): boolean => {
   if (!lastQueryPoint) return false;
+  if (!hasTrustedResult) return false;
 
   const deltaX = screenPoint.x - lastQueryPoint.x;
   const deltaY = screenPoint.y - lastQueryPoint.y;

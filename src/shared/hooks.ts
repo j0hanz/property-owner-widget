@@ -970,14 +970,19 @@ export const useHoverQuery = (params: HoverQueryParams) => {
           translate,
         });
 
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted) {
+          setIsHoverQueryActive(false);
+          return;
+        }
 
         setHoverTooltipData(result);
         setIsHoverQueryActive(false);
       } catch (error) {
-        if (isAbortError(error)) return;
         setHoverTooltipData(null);
         setIsHoverQueryActive(false);
+        if (isAbortError(error)) {
+          return;
+        }
       } finally {
         if (hoverQueryAbortRef.current === controller) {
           hoverQueryAbortRef.current = null;

@@ -43,13 +43,13 @@ import type {
   GridRowData,
   IMConfig,
   IMStateWithProperty,
-  PipelineExecutionContext,
   PipelineRunResult,
   PropertyPipelineSuccess,
   SelectionGraphicsHelpers,
   SelectionGraphicsParams,
   SerializedQueryResult,
   SerializedQueryResultMap,
+  PipelineExecutionContext,
 } from "../config/types";
 import { createPropertySelectors } from "../extensions/store";
 import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api";
@@ -81,7 +81,6 @@ import {
   collectSelectedRawData,
   computeWidgetsToClose,
   copyToClipboard,
-  createCursorTrackingState,
   createPropertyDispatcher,
   type CursorGraphicsState,
   cursorLifecycleHelpers,
@@ -608,11 +607,15 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   // Throttled hover query with spatial tolerance
   const throttledHoverQuery = useThrottle(
     (mapPoint: __esri.Point, screenPoint: { x: number; y: number }) => {
+      const hasTrustedHoverResult =
+        Boolean(hoverTooltipData) || isHoverQueryActive;
+
       if (
         shouldSkipHoverQuery(
           screenPoint,
           lastHoverQueryPointRef.current,
-          HOVER_QUERY_TOLERANCE_PX
+          HOVER_QUERY_TOLERANCE_PX,
+          hasTrustedHoverResult
         )
       ) {
         return;
@@ -937,7 +940,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       }
     }
 
-    cursorGraphicsStateRef.current = createCursorTrackingState();
+    cursorGraphicsStateRef.current = null;
   });
 
   const updateCursorPoint = hooks.useEventCallback(

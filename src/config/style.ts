@@ -126,7 +126,7 @@ export const createWidgetStyles = (theme: IMThemeVariables) => {
       fontWeight: typography?.label2?.fontWeight,
     }),
     sortIndicator: css({
-      marginInlineStart: spacing?.(4),
+      marginInlineStart: spacing?.(6),
       display: "inline-block",
     }),
     emptyState: css({

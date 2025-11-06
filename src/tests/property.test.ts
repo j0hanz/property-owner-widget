@@ -57,6 +57,7 @@ import {
   maskName,
   normalizeFnrKey,
   parseArcGISError,
+  shouldSkipHoverQuery,
   shouldToggleRemove,
   syncCursorGraphics,
   updateRawPropertyResults,
@@ -1289,6 +1290,24 @@ describe("Property Widget - Utility Helper Functions", () => {
     expect(symbol.text).toBe("FAST-1");
     expect(symbol.color).toBe(CURSOR_TOOLTIP_STYLE.textColor);
     expect(symbol.font.family).toBe(CURSOR_TOOLTIP_STYLE.fontFamily);
+  });
+
+  it("should re-query after minimal movement when no property was found previously", () => {
+    const lastPoint = { x: 100, y: 100 };
+    const screenPoint = { x: 105, y: 102 };
+    const tolerance = 10;
+
+    expect(
+      shouldSkipHoverQuery(screenPoint, lastPoint, tolerance, true)
+    ).toBe(true);
+
+    expect(
+      shouldSkipHoverQuery(screenPoint, lastPoint, tolerance, false)
+    ).toBe(false);
+
+    expect(
+      shouldSkipHoverQuery(screenPoint, null, tolerance, true)
+    ).toBe(false);
   });
 
   it("should map property query results to each owner row for export", () => {
