@@ -57,9 +57,6 @@ export const WIDGET_STARTUP_DELAY_MS = 500;
 // Minimum time to show spinner after it appears (prevents flash)
 export const MIN_SPINNER_DISPLAY_MS = 1500;
 
-// Additional delay after modules load before enabling map click interactions
-export const MAP_CLICK_ACTIVATION_DELAY_MS = 500;
-
 export const EXPORT_FORMATS: ExportFormatDefinition[] = [
   {
     id: "json",

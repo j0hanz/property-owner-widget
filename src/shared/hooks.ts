@@ -553,7 +553,6 @@ export const usePopupManager = (widgetId: string) => {
 
 export const useMapViewLifecycle = (params: {
   modules: EsriModules | null;
-  mapClickActive: boolean;
   destroyGraphicsLayer: (view: __esri.MapView) => void;
   disablePopup: (view: __esri.MapView | undefined) => void;
   restorePopup: (view: __esri.MapView | undefined) => void;
@@ -561,7 +560,6 @@ export const useMapViewLifecycle = (params: {
 }) => {
   const {
     modules,
-    mapClickActive,
     destroyGraphicsLayer,
     disablePopup,
     restorePopup,
@@ -570,7 +568,6 @@ export const useMapViewLifecycle = (params: {
 
   const jimuMapViewRef = React.useRef<JimuMapView | null>(null);
   const mapClickHandleRef = React.useRef<__esri.Handle | null>(null);
-  const mapClickActiveRef = hooks.useLatest(mapClickActive);
 
   const getStoredMapView = (): __esri.MapView | null => {
     const candidateView = jimuMapViewRef.current?.view;
@@ -583,9 +580,6 @@ export const useMapViewLifecycle = (params: {
     if (mapClickHandleRef.current) {
       mapClickHandleRef.current.remove();
       mapClickHandleRef.current = null;
-    }
-    if (!mapClickActiveRef.current) {
-      return;
     }
 
     try {
@@ -640,9 +634,6 @@ export const useMapViewLifecycle = (params: {
         mapClickHandleRef.current.remove();
         mapClickHandleRef.current = null;
       }
-      if (!mapClickActiveRef.current) {
-        return;
-      }
       try {
         mapClickHandleRef.current = currentView.on("click", onMapClick);
       } catch (error) {
@@ -681,13 +672,8 @@ export const useMapViewLifecycle = (params: {
       return;
     }
 
-    if (mapClickActive) {
-      setupMapView(storedView);
-    } else if (mapClickHandleRef.current) {
-      mapClickHandleRef.current.remove();
-      mapClickHandleRef.current = null;
-    }
-  }, [modules, mapClickActive, setupMapView]);
+    setupMapView(storedView);
+  }, [modules, setupMapView]);
 
   return {
     onActiveViewChange,
@@ -1118,61 +1104,6 @@ export const useWidgetStartup = (params: {
     isInitializing,
     modulesReady: !modulesLoading && !isInitializing,
   };
-};
-
-export const useMapClickActivation = (params: {
-  modulesReady: boolean;
-  activationDelay: number;
-}) => {
-  const { modulesReady, activationDelay } = params;
-  const [mapClickActive, setMapClickActive] = React.useState(false);
-  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mountedRef = React.useRef(true);
-
-  const clearTimer = hooks.useEventCallback(() => {
-    if (timerRef.current !== null) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  });
-
-  hooks.useUpdateEffect(() => {
-    clearTimer();
-
-    if (!modulesReady) {
-      setMapClickActive(false);
-      return undefined;
-    }
-
-    const safeDelay =
-      Number.isFinite(activationDelay) && activationDelay >= 0
-        ? activationDelay
-        : 0;
-
-    if (safeDelay === 0) {
-      setMapClickActive(true);
-      return undefined;
-    }
-
-    timerRef.current = setTimeout(() => {
-      if (mountedRef.current) {
-        setMapClickActive(true);
-      }
-    }, safeDelay);
-
-    return () => {
-      clearTimer();
-    };
-  }, [modulesReady, activationDelay, clearTimer]);
-
-  hooks.useEffectOnce(() => {
-    return () => {
-      mountedRef.current = false;
-      clearTimer();
-    };
-  });
-
-  return { mapClickActive };
 };
 
 /**
