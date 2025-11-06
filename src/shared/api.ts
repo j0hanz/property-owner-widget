@@ -52,6 +52,7 @@ import {
   deduplicateOwnerEntries,
   shouldStopAccumulation,
   processOwnerResult,
+  createValidationPipeline,
 } from "./utils";
 
 const ARC_GIS_LAYER_PATTERN = /\/(mapserver|featureserver)\/\d+(?:\/query)?$/i;
@@ -448,83 +449,178 @@ export const clearQueryCache = (): void => {
 export const validateDataSources = (
   params: ValidateDataSourcesParams
 ): ValidationResult<{ manager: DataSourceManager }> => {
-  const { propertyDsId, ownerDsId, dsManager, allowedHosts, translate } =
-    params;
-
-  if (!propertyDsId || !ownerDsId) {
-    return createValidationError(
-      "VALIDATION_ERROR",
-      translate("errorNoDataAvailable"),
-      "missing_data_sources"
-    );
+  interface ValidationState {
+    propertyDsId?: string | null;
+    ownerDsId?: string | null;
+    dsManager: DataSourceManager | null;
+    manager?: DataSourceManager;
+    allowedHosts?: readonly string[];
+    translate: (key: string) => string;
+    propertyDs?: FeatureLayerDataSource;
+    ownerDs?: FeatureLayerDataSource;
   }
 
-  if (!dsManager) {
+  const initialState: ValidationState = {
+    propertyDsId: params.propertyDsId,
+    ownerDsId: params.ownerDsId,
+    dsManager: params.dsManager,
+    allowedHosts: params.allowedHosts,
+    translate: params.translate,
+  };
+
+  const pipeline = createValidationPipeline<ValidationState>([
+    (state) => {
+      if (!state.propertyDsId || !state.ownerDsId) {
+        return createValidationError(
+          "VALIDATION_ERROR",
+          state.translate("errorNoDataAvailable"),
+          "missing_data_sources"
+        ) as ValidationResult<ValidationState>;
+      }
+      return { valid: true, data: state };
+    },
+    (state) => {
+      if (!state.dsManager) {
+        return createValidationError(
+          "QUERY_ERROR",
+          state.translate("errorQueryFailed"),
+          "no_data_source_manager"
+        ) as ValidationResult<ValidationState>;
+      }
+      return {
+        valid: true,
+        data: { ...state, manager: state.dsManager },
+      };
+    },
+    (state) => {
+      const manager = state.manager ?? state.dsManager;
+      if (!manager) {
+        return createValidationError(
+          "QUERY_ERROR",
+          state.translate("errorQueryFailed"),
+          "no_data_source_manager"
+        ) as ValidationResult<ValidationState>;
+      }
+      const propertyDs = manager.getDataSource(
+        state.propertyDsId
+      ) as FeatureLayerDataSource | null;
+      const validation = validateSingleDataSource(
+        propertyDs,
+        "property",
+        state.translate
+      );
+      if (isValidationFailure(validation)) {
+        return {
+          valid: false,
+          error: validation.error,
+          failureReason: validation.failureReason,
+        };
+      }
+      return {
+        valid: true,
+        data: {
+          ...state,
+          manager,
+          propertyDs: validation.data.dataSource,
+        },
+      };
+    },
+    (state) => {
+      const manager = state.manager ?? state.dsManager;
+      if (!manager) {
+        return createValidationError(
+          "QUERY_ERROR",
+          state.translate("errorQueryFailed"),
+          "no_data_source_manager"
+        ) as ValidationResult<ValidationState>;
+      }
+      const ownerDs = manager.getDataSource(
+        state.ownerDsId
+      ) as FeatureLayerDataSource | null;
+      const validation = validateSingleDataSource(
+        ownerDs,
+        "owner",
+        state.translate
+      );
+      if (isValidationFailure(validation)) {
+        return {
+          valid: false,
+          error: validation.error,
+          failureReason: validation.failureReason,
+        };
+      }
+      return {
+        valid: true,
+        data: {
+          ...state,
+          manager,
+          ownerDs: validation.data.dataSource,
+        },
+      };
+    },
+    (state) => {
+      if (!state.propertyDs) {
+        return createValidationError(
+          "VALIDATION_ERROR",
+          state.translate("errorNoDataAvailable"),
+          "property_data_source_missing"
+        ) as ValidationResult<ValidationState>;
+      }
+      const validation = validateDataSourceUrl(
+        state.propertyDs,
+        "property",
+        state.allowedHosts,
+        state.translate
+      );
+      if (isValidationFailure(validation)) {
+        return {
+          valid: false,
+          error: validation.error,
+          failureReason: validation.failureReason,
+        };
+      }
+      return { valid: true, data: state };
+    },
+    (state) => {
+      if (!state.ownerDs) {
+        return createValidationError(
+          "VALIDATION_ERROR",
+          state.translate("errorNoDataAvailable"),
+          "owner_data_source_missing"
+        ) as ValidationResult<ValidationState>;
+      }
+      const validation = validateDataSourceUrl(
+        state.ownerDs,
+        "owner",
+        state.allowedHosts,
+        state.translate
+      );
+      if (isValidationFailure(validation)) {
+        return {
+          valid: false,
+          error: validation.error,
+          failureReason: validation.failureReason,
+        };
+      }
+      return { valid: true, data: state };
+    },
+  ]);
+
+  const pipelineResult = pipeline(initialState);
+  if (isValidationFailure(pipelineResult)) {
+    return pipelineResult;
+  }
+
+  const resolvedManager = pipelineResult.data.manager;
+  if (!resolvedManager) {
     return createValidationError(
       "QUERY_ERROR",
-      translate("errorQueryFailed"),
+      params.translate("errorQueryFailed"),
       "no_data_source_manager"
     );
   }
 
-  const propertyDs = dsManager.getDataSource(
-    propertyDsId
-  ) as FeatureLayerDataSource | null;
-  const ownerDs = dsManager.getDataSource(
-    ownerDsId
-  ) as FeatureLayerDataSource | null;
-
-  const propertyValidation = validateSingleDataSource(
-    propertyDs,
-    "property",
-    translate
-  );
-  if (isValidationFailure(propertyValidation)) {
-    return {
-      valid: false,
-      error: propertyValidation.error,
-      failureReason: propertyValidation.failureReason,
-    };
-  }
-
-  const ownerValidation = validateSingleDataSource(ownerDs, "owner", translate);
-  if (isValidationFailure(ownerValidation)) {
-    return {
-      valid: false,
-      error: ownerValidation.error,
-      failureReason: ownerValidation.failureReason,
-    };
-  }
-
-  const propertyUrlValidation = validateDataSourceUrl(
-    propertyValidation.data.dataSource,
-    "property",
-    allowedHosts,
-    translate
-  );
-  if (isValidationFailure(propertyUrlValidation)) {
-    return {
-      valid: false,
-      error: propertyUrlValidation.error,
-      failureReason: propertyUrlValidation.failureReason,
-    };
-  }
-
-  const ownerUrlValidation = validateDataSourceUrl(
-    ownerValidation.data.dataSource,
-    "owner",
-    allowedHosts,
-    translate
-  );
-  if (isValidationFailure(ownerUrlValidation)) {
-    return {
-      valid: false,
-      error: ownerUrlValidation.error,
-      failureReason: ownerUrlValidation.failureReason,
-    };
-  }
-
-  return { valid: true, data: { manager: dsManager } };
+  return { valid: true, data: { manager: resolvedManager } };
 };
 
 export const queryPropertyByPoint = async (

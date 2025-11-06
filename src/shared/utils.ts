@@ -1,4 +1,24 @@
 import copy from "copy-to-clipboard";
+import type * as React from "react";
+import type {
+  DataSourceManager,
+  FeatureLayerDataSource,
+  ImmutableArray,
+  UseDataSource,
+} from "jimu-core";
+import {
+  runPropertySelectionPipeline,
+  queryPropertyByPoint,
+  queryOwnerByFnr,
+} from "./api";
+import { propertyActions } from "../extensions/store";
+import {
+  CURSOR_TOOLTIP_STYLE,
+  HIGHLIGHT_MARKER_SIZE,
+  HEX_COLOR_PATTERN,
+  MAX_MASK_ASTERISKS,
+  MIN_MASK_LENGTH,
+} from "../config/constants";
 import type {
   OwnerAttributes,
   ValidationResult,
@@ -29,49 +49,466 @@ import type {
   PropertySelectionPipelineResult,
   CreateGridRowParams,
 } from "../config/types";
-import type {
-  DataSourceManager,
-  UseDataSource,
-  ImmutableArray,
-} from "jimu-core";
-import { isValidationFailure as checkValidationFailure } from "../config/types";
-import {
-  validateDataSources as validateDataSourcesCore,
-  queryPropertyByPoint,
-  queryOwnerByFnr,
-  runPropertySelectionPipeline,
-} from "../shared/api";
-import {
-  MIN_MASK_LENGTH,
-  MAX_MASK_ASTERISKS,
-  HIGHLIGHT_MARKER_SIZE,
-  CURSOR_TOOLTIP_STYLE,
-  HEX_COLOR_PATTERN,
-} from "../config/constants";
-import { propertyActions } from "../extensions/store";
 
-// ============================================================================
-// HTML SANITIZATION & TEXT PROCESSING
-// ============================================================================
+type ValidationFailureResult<T> = Extract<
+  ValidationResult<T>,
+  { valid: false }
+>;
 
-/** Sanitize arbitrary HTML/text content */
-const stripHtmlInternal = (value: string): string => {
-  if (!value) return "";
-  const doc = new DOMParser().parseFromString(value, "text/html");
-  const text = doc.body.textContent || "";
-  return text.replace(/[\s\u00A0\u200B]+/g, " ").trim();
+const HTML_WHITESPACE_PATTERN = /[\s\u00A0\u200B]+/g;
+
+const sanitizeWhitespace = (value: string): string =>
+  value.replace(HTML_WHITESPACE_PATTERN, " ").trim();
+
+const sanitizeTextContent = (value: string): string => {
+  if (!value) {
+    return "";
+  }
+
+  const text = String(value);
+
+  try {
+    if (typeof DOMParser === "undefined") {
+      return sanitizeWhitespace(text);
+    }
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, "text/html");
+    const content = doc.body?.textContent ?? "";
+    return sanitizeWhitespace(content);
+  } catch (_error) {
+    return sanitizeWhitespace(text);
+  }
 };
 
-export const textSanitizer = {
-  sanitize: stripHtmlInternal,
-  stripHtml: (value: string) => stripHtmlInternal(value),
-};
+export const stripHtml = (value: string): string => sanitizeTextContent(value);
 
-export const stripHtml = (value: string): string =>
-  textSanitizer.stripHtml(value);
+const stripHtmlInternal = (value: string): string => sanitizeTextContent(value);
+
+const checkValidationFailure = <T>(
+  result: ValidationResult<T>
+): result is ValidationFailureResult<T> => !result.valid;
 
 const isRecord = (value: unknown): value is UnknownRecord => {
   return typeof value === "object" && value !== null;
+};
+
+const createValidationError = (
+  type: ErrorState["type"],
+  message: string,
+  failureReason: string
+): ValidationResult<never> => ({
+  valid: false,
+  error: { type, message },
+  failureReason,
+});
+
+const getDataSourceUrl = (
+  dataSource: FeatureLayerDataSource | null | undefined
+): string | null => {
+  if (!dataSource) {
+    return null;
+  }
+
+  if (typeof (dataSource as { url?: string }).url === "string") {
+    return (dataSource as { url?: string }).url ?? null;
+  }
+
+  const layerDefinition = dataSource.getLayerDefinition?.();
+  if (layerDefinition && typeof layerDefinition === "object") {
+    const candidate = (layerDefinition as { url?: string | null }).url;
+    if (typeof candidate === "string" && candidate) {
+      return candidate;
+    }
+  }
+
+  const dsJson = dataSource.getDataSourceJson?.();
+  if (dsJson && typeof dsJson === "object") {
+    const candidate = (dsJson as { url?: string | null }).url;
+    if (typeof candidate === "string" && candidate) {
+      return candidate;
+    }
+  }
+
+  return null;
+};
+
+const isQueryableDataSource = (
+  dataSource: FeatureLayerDataSource | null
+): dataSource is FeatureLayerDataSource => {
+  return Boolean(dataSource && typeof dataSource.query === "function");
+};
+
+const isPrivateHost = (hostname: string): boolean => {
+  const normalized = hostname.trim().toLowerCase();
+  if (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1" ||
+    normalized === "[::1]"
+  ) {
+    return true;
+  }
+
+  if (/^10\./u.test(normalized) || /^192\.168\./u.test(normalized)) {
+    return true;
+  }
+
+  return /^172\.(1[6-9]|2\d|3[0-1])\./u.test(normalized);
+};
+
+const isValidHttpsUrl = (url: URL): boolean => {
+  return url.protocol === "https:" && (url.port === "" || url.port === "443");
+};
+
+const isValidArcGISPath = (pathname: string): boolean => {
+  return /\/(?:MapServer|FeatureServer)\/\d+(?:\/query)?$/iu.test(pathname);
+};
+
+const isHostAllowed = (
+  hostname: string,
+  allowedHosts?: readonly string[]
+): boolean => {
+  if (!allowedHosts || allowedHosts.length === 0) {
+    return true;
+  }
+
+  const normalizedHostname = hostname.trim().toLowerCase();
+  return allowedHosts.some((host) => {
+    const normalizedAllowed = host.trim().toLowerCase();
+    if (!normalizedAllowed) {
+      return false;
+    }
+
+    return (
+      normalizedHostname === normalizedAllowed ||
+      normalizedHostname.endsWith(`.${normalizedAllowed}`)
+    );
+  });
+};
+
+export const isValidArcGISUrl = (
+  url: string,
+  allowedHosts?: readonly string[]
+): boolean => {
+  if (!url || typeof url !== "string") {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (!isValidHttpsUrl(parsed)) {
+      return false;
+    }
+
+    if (isPrivateHost(parsed.hostname)) {
+      return false;
+    }
+
+    if (!isValidArcGISPath(parsed.pathname)) {
+      return false;
+    }
+
+    return isHostAllowed(parsed.hostname, allowedHosts);
+  } catch (_error) {
+    return false;
+  }
+};
+
+const validateSingleDataSource = (
+  dataSource: FeatureLayerDataSource | null,
+  role: "property" | "owner",
+  translate: (key: string) => string
+): ValidationResult<{ dataSource: FeatureLayerDataSource }> => {
+  if (!isQueryableDataSource(dataSource)) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorNoDataAvailable"),
+      `${role}_data_source_invalid`
+    );
+  }
+
+  return { valid: true, data: { dataSource } };
+};
+
+const validateDataSourceUrl = (
+  dataSource: FeatureLayerDataSource,
+  role: "property" | "owner",
+  allowedHosts: readonly string[] | undefined,
+  translate: (key: string) => string
+): ValidationResult<{ url: string }> => {
+  const url = getDataSourceUrl(dataSource);
+  if (!url || !isValidArcGISUrl(url, allowedHosts)) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorHostNotAllowed"),
+      `${role}_disallowed_host`
+    );
+  }
+
+  return { valid: true, data: { url } };
+};
+
+export const validateDataSourcesCore = (params: {
+  propertyDsId: string | undefined;
+  ownerDsId: string | undefined;
+  dsManager: DataSourceManager | null;
+  allowedHosts?: readonly string[];
+  translate: (key: string) => string;
+}): ValidationResult<{ manager: DataSourceManager }> => {
+  const { propertyDsId, ownerDsId, dsManager, allowedHosts, translate } =
+    params;
+
+  if (!propertyDsId || !ownerDsId) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorNoDataAvailable"),
+      "missing_data_sources"
+    );
+  }
+
+  if (!dsManager) {
+    return createValidationError(
+      "QUERY_ERROR",
+      translate("errorQueryFailed"),
+      "missing_data_source_manager"
+    );
+  }
+
+  const propertyDs = dsManager.getDataSource(
+    propertyDsId
+  ) as FeatureLayerDataSource | null;
+  const ownerDs = dsManager.getDataSource(
+    ownerDsId
+  ) as FeatureLayerDataSource | null;
+
+  const propertyValidation = validateSingleDataSource(
+    propertyDs,
+    "property",
+    translate
+  );
+  if (!propertyValidation.valid) {
+    return propertyValidation as ValidationResult<{
+      manager: DataSourceManager;
+    }>;
+  }
+
+  const ownerValidation = validateSingleDataSource(ownerDs, "owner", translate);
+  if (!ownerValidation.valid) {
+    return ownerValidation as ValidationResult<{ manager: DataSourceManager }>;
+  }
+
+  const propertyDataSource = propertyValidation.data.dataSource;
+  const ownerDataSource = ownerValidation.data.dataSource;
+
+  const propertyUrlValidation = validateDataSourceUrl(
+    propertyDataSource,
+    "property",
+    allowedHosts,
+    translate
+  );
+  if (!propertyUrlValidation.valid) {
+    return propertyUrlValidation as ValidationResult<{
+      manager: DataSourceManager;
+    }>;
+  }
+
+  const ownerUrlValidation = validateDataSourceUrl(
+    ownerDataSource,
+    "owner",
+    allowedHosts,
+    translate
+  );
+  if (!ownerUrlValidation.valid) {
+    return ownerUrlValidation as ValidationResult<{
+      manager: DataSourceManager;
+    }>;
+  }
+
+  return { valid: true, data: { manager: dsManager } };
+};
+
+export const createValidationPipeline = <TContext>(
+  initialSteps: Array<(context: TContext) => ValidationResult<TContext>> = []
+) => {
+  const steps = initialSteps.slice();
+
+  const run = (initialContext: TContext): ValidationResult<TContext> => {
+    let current = initialContext;
+    for (const step of steps) {
+      const result = step(current);
+      if (!result.valid) {
+        return result;
+      }
+      current = result.data;
+    }
+    return { valid: true, data: current };
+  };
+
+  const executor = ((context: TContext) => run(context)) as ((
+    context: TContext
+  ) => ValidationResult<TContext>) & {
+    addStep: (
+      step: (context: TContext) => ValidationResult<TContext>
+    ) => typeof executor;
+    run: (context: TContext) => ValidationResult<TContext>;
+  };
+
+  executor.addStep = (step) => {
+    steps.push(step);
+    return executor;
+  };
+
+  executor.run = run;
+
+  return executor;
+};
+export const createSymbolCache = () => {
+  const cache = new Map<
+    string,
+    | __esri.SimpleFillSymbol
+    | __esri.SimpleLineSymbol
+    | __esri.SimpleMarkerSymbol
+  >();
+
+  const resolveFromCache = (
+    key: string
+  ):
+    | __esri.SimpleFillSymbol
+    | __esri.SimpleLineSymbol
+    | __esri.SimpleMarkerSymbol
+    | null => {
+    const cached = cache.get(key);
+    return cached ?? null;
+  };
+
+  const storeSymbol = (
+    key: string,
+    symbol:
+      | __esri.SimpleFillSymbol
+      | __esri.SimpleLineSymbol
+      | __esri.SimpleMarkerSymbol
+      | null
+  ): void => {
+    if (symbol) {
+      cache.set(key, symbol);
+    }
+  };
+
+  return {
+    getSymbolForGraphic: (params: {
+      modules: EsriModules | null;
+      graphic: __esri.Graphic | null | undefined;
+      highlightColor: [number, number, number, number];
+      outlineWidth: number;
+    }):
+      | __esri.SimpleFillSymbol
+      | __esri.SimpleLineSymbol
+      | __esri.SimpleMarkerSymbol
+      | null => {
+      const { modules, graphic, highlightColor, outlineWidth } = params;
+      if (!modules || !graphic || !graphic.geometry) {
+        return null;
+      }
+
+      const geometryType = graphic.geometry.type as string | undefined;
+      const category = resolveGeometryCategory(geometryType);
+      if (!category) {
+        return null;
+      }
+
+      const cacheKey = `${category}-${highlightColor.join(",")}-${outlineWidth}`;
+      const cachedSymbol = resolveFromCache(cacheKey);
+      if (cachedSymbol) {
+        return cachedSymbol;
+      }
+
+      const symbol = createHighlightSymbolInstance(
+        modules,
+        category,
+        highlightColor,
+        outlineWidth
+      );
+      storeSymbol(cacheKey, symbol);
+      return symbol;
+    },
+    clear: () => {
+      cache.clear();
+    },
+  } as const;
+};
+
+const resolveCollectionLength = (values: unknown): number => {
+  if (!values) {
+    return 0;
+  }
+  const candidate = values as { length?: number };
+  if (typeof candidate.length === "number") {
+    return candidate.length;
+  }
+  return 0;
+};
+
+export const computeSettingsVisibility = (params: {
+  useMapWidgetIds?: ImmutableArray<string> | string[] | null;
+  config: IMConfig;
+}): {
+  hasMapSelection: boolean;
+  hasRequiredDataSources: boolean;
+  canShowDisplayOptions: boolean;
+  canShowRelationshipSettings: boolean;
+  shouldDisableRelationshipSettings: boolean;
+} => {
+  const { useMapWidgetIds, config } = params;
+  const hasMapSelection = resolveCollectionLength(useMapWidgetIds) > 0;
+  const hasPropertyDataSource = Boolean(config.propertyDataSourceId);
+  const hasOwnerDataSource = Boolean(config.ownerDataSourceId);
+  const hasRequiredDataSources = hasPropertyDataSource && hasOwnerDataSource;
+  const canShowDisplayOptions = hasMapSelection && hasRequiredDataSources;
+  const canShowRelationshipSettings = canShowDisplayOptions;
+
+  return {
+    hasMapSelection,
+    hasRequiredDataSources,
+    canShowDisplayOptions,
+    canShowRelationshipSettings,
+    shouldDisableRelationshipSettings: !canShowRelationshipSettings,
+  } as const;
+};
+
+export const resetDependentFields = (params: {
+  shouldDisable: boolean;
+  localBatchOwnerQuery: boolean;
+  setLocalBatchOwnerQuery: (value: boolean) => void;
+  isBatchOwnerQueryEnabled: boolean;
+  updateBatchOwnerQuery: (value: boolean) => void;
+  relationshipId: number | undefined;
+  updateRelationshipId: (value: number | undefined) => void;
+  localRelationshipId: string;
+  setLocalRelationshipId: (value: string) => void;
+  clearRelationshipError: () => void;
+}): void => {
+  if (!params.shouldDisable) {
+    return;
+  }
+
+  if (params.localBatchOwnerQuery) {
+    params.setLocalBatchOwnerQuery(false);
+  }
+
+  if (params.isBatchOwnerQueryEnabled) {
+    params.updateBatchOwnerQuery(false);
+  }
+
+  if (typeof params.relationshipId !== "undefined") {
+    params.updateRelationshipId(undefined);
+  }
+
+  if (params.localRelationshipId !== "0") {
+    params.setLocalRelationshipId("0");
+  }
+
+  params.clearRelationshipError();
 };
 
 // ============================================================================
@@ -322,6 +759,49 @@ export const syncCursorGraphics = ({
   return next;
 };
 
+export const createCursorTrackingState = (
+  overrides?: Partial<CursorGraphicsState>
+): CursorGraphicsState => ({
+  pointGraphic: null,
+  tooltipGraphic: null,
+  lastTooltipText: null,
+  ...overrides,
+});
+
+export const scheduleCursorUpdate = (params: {
+  rafIdRef: React.MutableRefObject<number | null>;
+  pendingMapPointRef: React.MutableRefObject<__esri.Point | null>;
+  nextPoint: __esri.Point | null;
+  onUpdate: (mapPoint: __esri.Point | null) => void;
+}): void => {
+  const { rafIdRef, pendingMapPointRef, nextPoint, onUpdate } = params;
+
+  pendingMapPointRef.current = nextPoint;
+
+  if (!nextPoint) {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    onUpdate(null);
+    return;
+  }
+
+  if (rafIdRef.current !== null) {
+    return;
+  }
+
+  rafIdRef.current = requestAnimationFrame(() => {
+    const point = pendingMapPointRef.current;
+    rafIdRef.current = null;
+    if (point) {
+      onUpdate(point);
+      return;
+    }
+    onUpdate(null);
+  });
+};
+
 const deduplicateEntries = (entries: string[]): string[] => {
   const seen = new Set<string>();
   return entries
@@ -391,6 +871,67 @@ export const formatOwnerInfo = (
     return formatOwnerList(owner.AGARLISTA, maskPII);
   }
   return formatIndividualOwner(owner, maskPII, unknownOwnerText);
+};
+
+export const sanitizeForExport = (
+  value: unknown,
+  onSerializationError?: (error: unknown, typeName: string) => void
+): string => {
+  if (value == null) {
+    return "";
+  }
+
+  if (typeof value === "string") {
+    return stripHtml(value);
+  }
+
+  if (typeof value === "number" || typeof value === "bigint") {
+    return stripHtml(String(value));
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+
+  if (typeof value === "symbol") {
+    return stripHtml(value.description ?? "");
+  }
+
+  if (typeof value === "function") {
+    return stripHtml(value.name ?? "");
+  }
+
+  if (typeof value === "object") {
+    try {
+      return stripHtml(JSON.stringify(value));
+    } catch (error) {
+      const typeName = (value as { constructor?: { name?: string } })
+        .constructor?.name;
+      onSerializationError?.(error, typeName ?? typeof value);
+      return "";
+    }
+  }
+
+  return "";
+};
+
+export const buildExportRow = (params: {
+  row: GridRowData;
+  maskingEnabled: boolean;
+  unknownOwnerText: string;
+  sanitize: (value: unknown) => string;
+}): { propertyLabel: string; ownerLabel: string } => {
+  const { row, maskingEnabled, unknownOwnerText, sanitize } = params;
+  const propertySource = row.FASTIGHET || row.FNR || "";
+
+  const ownerSource = row.rawOwner
+    ? formatOwnerInfo(row.rawOwner, maskingEnabled, unknownOwnerText)
+    : row.BOSTADR || row.ADDRESS || unknownOwnerText;
+
+  return {
+    propertyLabel: sanitize(propertySource),
+    ownerLabel: sanitize(ownerSource),
+  };
 };
 
 const sanitizeClipboardCell = (value: unknown): string => {
@@ -545,14 +1086,20 @@ export const buildHighlightColor = (
   return [r, g, b, clampedOpacity];
 };
 
-export const buildHighlightSymbolJSON = (
+type HighlightSymbolJSON<T extends "polygon" | "polyline" | "point"> =
+  T extends "polygon"
+    ? __esri.SimpleFillSymbolProperties
+    : T extends "polyline"
+      ? __esri.SimpleLineSymbolProperties
+      : __esri.SimpleMarkerSymbolProperties;
+
+export const buildHighlightSymbolJSON = <
+  T extends "polygon" | "polyline" | "point",
+>(
   highlightColor: [number, number, number, number],
   outlineWidth: number,
-  geometryType?: "polygon" | "polyline" | "point"
-):
-  | __esri.SimpleFillSymbolProperties
-  | __esri.SimpleLineSymbolProperties
-  | __esri.SimpleMarkerSymbolProperties => {
+  geometryType: T
+): HighlightSymbolJSON<T> => {
   const [r, g, b, a] = highlightColor;
 
   if (geometryType === "polyline") {
@@ -560,7 +1107,7 @@ export const buildHighlightSymbolJSON = (
       style: "solid",
       color: [r, g, b, a],
       width: outlineWidth,
-    } as __esri.SimpleLineSymbolProperties;
+    } as unknown as HighlightSymbolJSON<T>;
   }
 
   if (geometryType === "point") {
@@ -573,10 +1120,9 @@ export const buildHighlightSymbolJSON = (
         color: [r, g, b, 1],
         width: outlineWidth,
       },
-    } as __esri.SimpleMarkerSymbolProperties;
+    } as unknown as HighlightSymbolJSON<T>;
   }
 
-  // Default to polygon
   return {
     style: "solid",
     color: [r, g, b, a],
@@ -585,7 +1131,96 @@ export const buildHighlightSymbolJSON = (
       color: [r, g, b, 1],
       width: outlineWidth,
     },
-  } as __esri.SimpleFillSymbolProperties;
+  } as unknown as HighlightSymbolJSON<T>;
+};
+
+const resolveGeometryCategory = (
+  geometryType: string | undefined
+): "polygon" | "polyline" | "point" | null => {
+  if (geometryType === "polygon" || geometryType === "extent") {
+    return "polygon";
+  }
+  if (geometryType === "polyline") {
+    return "polyline";
+  }
+  if (geometryType === "point" || geometryType === "multipoint") {
+    return "point";
+  }
+  return null;
+};
+
+const createHighlightSymbolInstance = (
+  modules: EsriModules,
+  category: "polygon" | "polyline" | "point",
+  highlightColor: [number, number, number, number],
+  outlineWidth: number
+):
+  | __esri.SimpleFillSymbol
+  | __esri.SimpleLineSymbol
+  | __esri.SimpleMarkerSymbol
+  | null => {
+  if (category === "polygon") {
+    const symbolJSON = buildHighlightSymbolJSON(
+      highlightColor,
+      outlineWidth,
+      "polygon"
+    );
+    return new modules.SimpleFillSymbol(symbolJSON);
+  }
+
+  if (category === "polyline") {
+    const symbolJSON = buildHighlightSymbolJSON(
+      highlightColor,
+      outlineWidth,
+      "polyline"
+    );
+    return new modules.SimpleLineSymbol(symbolJSON);
+  }
+
+  if (category === "point") {
+    const symbolJSON = buildHighlightSymbolJSON(
+      highlightColor,
+      outlineWidth,
+      "point"
+    );
+    return new modules.SimpleMarkerSymbol(symbolJSON);
+  }
+  return null;
+};
+
+export const batchGraphicsRenderer = (params: {
+  layer: __esri.GraphicsLayer | null | undefined;
+  graphics: __esri.Graphic[];
+  chunkSize?: number;
+}): void => {
+  const { layer, graphics, chunkSize = 10 } = params;
+  if (!layer || !graphics.length) {
+    return;
+  }
+
+  const safeChunkSize = chunkSize > 0 ? chunkSize : 10;
+
+  const renderChunk = (offset: number) => {
+    if (!layer || layer.destroyed || offset >= graphics.length) {
+      return;
+    }
+
+    const nextSlice = graphics.slice(offset, offset + safeChunkSize);
+    if (nextSlice.length > 0) {
+      layer.addMany(nextSlice);
+    }
+
+    const nextOffset = offset + safeChunkSize;
+    if (nextOffset < graphics.length) {
+      requestAnimationFrame(() => {
+        renderChunk(nextOffset);
+      });
+    }
+  };
+
+  requestAnimationFrame(() => {
+    renderChunk(0);
+  });
 };
 
 // ============================================================================
@@ -2211,35 +2846,36 @@ export const cursorLifecycleHelpers = {
 
       if (!mapPoint) {
         lastCursorPointRef.current = null;
-        pendingMapPointRef.current = null;
-        updateCursorPoint(null);
+        scheduleCursorUpdate({
+          rafIdRef,
+          pendingMapPointRef,
+          nextPoint: null,
+          onUpdate: updateCursorPoint,
+        });
         cleanupHoverQuery();
         return;
       }
 
       lastCursorPointRef.current = mapPoint;
-      pendingMapPointRef.current = mapPoint;
-
-      if (rafIdRef.current === null) {
-        rafIdRef.current = requestAnimationFrame(() => {
-          rafIdRef.current = null;
-          const point = pendingMapPointRef.current;
-          if (point) updateCursorPoint(point);
-        });
-      }
+      scheduleCursorUpdate({
+        rafIdRef,
+        pendingMapPointRef,
+        nextPoint: mapPoint,
+        onUpdate: updateCursorPoint,
+      });
 
       throttledHoverQuery(mapPoint, screenPoint);
     });
 
     pointerLeaveHandleRef.current = view.on("pointer-leave", () => {
       lastCursorPointRef.current = null;
-      pendingMapPointRef.current = null;
       lastHoverQueryPointRef.current = null;
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
-      updateCursorPoint(null);
+      scheduleCursorUpdate({
+        rafIdRef,
+        pendingMapPointRef,
+        nextPoint: null,
+        onUpdate: updateCursorPoint,
+      });
       cleanupHoverQuery();
     });
   },

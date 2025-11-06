@@ -51,6 +51,8 @@ import {
   outlineWidthHelpers,
   normalizeHostValue,
   normalizeHostList,
+  computeSettingsVisibility,
+  resetDependentFields,
 } from "../shared/utils";
 import addIcon from "../assets/plus.svg";
 import removeIcon from "../assets/close.svg";
@@ -458,37 +460,34 @@ const Setting = (
     // Settings panel mounted
   });
 
-  const hasMapSelection =
-    Array.isArray(useMapWidgetIds) && useMapWidgetIds.length > 0;
-  const hasPropertyDataSource = Boolean(config.propertyDataSourceId);
-  const hasOwnerDataSource = Boolean(config.ownerDataSourceId);
-  const hasRequiredDataSources = hasPropertyDataSource && hasOwnerDataSource;
-  const canShowDisplayOptions = hasMapSelection && hasRequiredDataSources;
-  const canShowRelationshipSettings = hasMapSelection && hasRequiredDataSources;
-  const shouldDisableRelationshipSettings = !canShowRelationshipSettings;
+  const visibility = computeSettingsVisibility({
+    useMapWidgetIds,
+    config,
+  });
+  const {
+    hasMapSelection,
+    hasRequiredDataSources,
+    canShowDisplayOptions,
+    canShowRelationshipSettings,
+    shouldDisableRelationshipSettings,
+  } = visibility;
 
   hooks.useEffectWithPreviousValues(() => {
-    if (!shouldDisableRelationshipSettings) {
-      return;
-    }
-
-    if (localBatchOwnerQuery) {
-      setLocalBatchOwnerQuery(false);
-    }
-
-    if (config.enableBatchOwnerQuery) {
-      updateConfig("enableBatchOwnerQuery", false);
-    }
-
-    if (config.relationshipId !== undefined) {
-      updateConfig("relationshipId", undefined);
-    }
-
-    if (localRelationshipId !== "0") {
-      setLocalRelationshipId("0");
-    }
-
-    setFieldErrors((prev) => ({ ...prev, relationshipId: undefined }));
+    resetDependentFields({
+      shouldDisable: shouldDisableRelationshipSettings,
+      localBatchOwnerQuery,
+      setLocalBatchOwnerQuery,
+      isBatchOwnerQueryEnabled: Boolean(config.enableBatchOwnerQuery),
+      updateBatchOwnerQuery: (value) =>
+        updateConfig("enableBatchOwnerQuery", value),
+      relationshipId: config.relationshipId,
+      updateRelationshipId: (value) => updateConfig("relationshipId", value),
+      localRelationshipId,
+      setLocalRelationshipId,
+      clearRelationshipError: () => {
+        setFieldErrors((prev) => ({ ...prev, relationshipId: undefined }));
+      },
+    });
   }, [
     shouldDisableRelationshipSettings,
     localBatchOwnerQuery,

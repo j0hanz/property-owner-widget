@@ -85,6 +85,7 @@ import {
   executePropertyQueryPipeline,
   updatePropertySelectionState,
   scheduleGraphicsRendering,
+  createCursorTrackingState,
 } from "../shared/utils";
 import { createPropertySelectors } from "../extensions/store";
 import type { CursorGraphicsState } from "../shared/utils";
@@ -966,21 +967,22 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     }
     pendingMapPointRef.current = null;
 
-    if (!cursorGraphicsStateRef.current) {
+    const state = cursorGraphicsStateRef.current;
+    if (!state) {
       return;
     }
 
     const layer = cachedLayerRef.current;
     if (layer) {
-      if (cursorGraphicsStateRef.current.pointGraphic) {
-        layer.remove(cursorGraphicsStateRef.current.pointGraphic);
+      if (state.pointGraphic) {
+        layer.remove(state.pointGraphic);
       }
-      if (cursorGraphicsStateRef.current.tooltipGraphic) {
-        layer.remove(cursorGraphicsStateRef.current.tooltipGraphic);
+      if (state.tooltipGraphic) {
+        layer.remove(state.tooltipGraphic);
       }
     }
 
-    cursorGraphicsStateRef.current = null;
+    cursorGraphicsStateRef.current = createCursorTrackingState();
   });
 
   const updateCursorPoint = hooks.useEventCallback(

@@ -1,4 +1,4 @@
-import { stripHtml, formatOwnerInfo } from "./utils";
+import { sanitizeForExport, buildExportRow } from "./utils";
 import { trackEvent, trackError } from "./telemetry";
 import type {
   GridRowData,
@@ -10,41 +10,16 @@ import type {
 } from "../config/types";
 import { CSV_HEADERS } from "../config/constants";
 
-const sanitizeValue = (value: unknown): string => {
-  if (value == null) {
-    return "";
-  }
-  if (typeof value === "string") {
-    return stripHtml(value);
-  }
-  if (typeof value === "number" || typeof value === "bigint") {
-    return stripHtml(String(value));
-  }
-  if (typeof value === "boolean") {
-    return value ? "true" : "false";
-  }
-  if (typeof value === "object") {
-    try {
-      return stripHtml(JSON.stringify(value));
-    } catch (error) {
-      const typeName = (value as { constructor?: { name?: string } })
-        .constructor?.name;
-      trackError(
-        "export_sanitize_object",
-        error,
-        `failed to serialize value of type ${typeName ?? typeof value}`
-      );
-      return "";
-    }
-  }
-  if (typeof value === "symbol") {
-    return stripHtml(value.description ?? "");
-  }
-  if (typeof value === "function") {
-    return stripHtml(value.name ?? "");
-  }
-  return "";
+const handleSerializationError = (error: unknown, typeName: string): void => {
+  trackError(
+    "export_sanitize_object",
+    error,
+    `failed to serialize value of type ${typeName}`
+  );
 };
+
+const sanitizeValue = (value: unknown): string =>
+  sanitizeForExport(value, handleSerializationError);
 
 export const convertToJSON = (
   rows: GridRowData[],
@@ -56,25 +31,16 @@ export const convertToJSON = (
   }
 
   return rows.map((row) => {
-    const propertyLabel = sanitizeValue(row.FASTIGHET || row.FNR || "");
-
-    const ownerText = (() => {
-      if (row.rawOwner) {
-        const formattedOwner = formatOwnerInfo(
-          row.rawOwner,
-          maskingEnabled,
-          unknownOwnerText
-        );
-        return sanitizeValue(formattedOwner);
-      }
-
-      const fallback = row.BOSTADR || row.ADDRESS || unknownOwnerText;
-      return sanitizeValue(fallback);
-    })();
+    const exportRow = buildExportRow({
+      row,
+      maskingEnabled,
+      unknownOwnerText,
+      sanitize: sanitizeValue,
+    });
 
     return {
-      FASTIGHET: propertyLabel,
-      ADDRESS: ownerText,
+      FASTIGHET: exportRow.propertyLabel,
+      ADDRESS: exportRow.ownerLabel,
     };
   });
 };

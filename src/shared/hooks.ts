@@ -18,9 +18,10 @@ import {
 } from "../config/constants";
 import {
   popupSuppressionManager,
-  buildHighlightSymbolJSON,
   isAbortError,
   logger,
+  createSymbolCache,
+  batchGraphicsRenderer,
 } from "./utils";
 
 const isConfigDictionary = (value: unknown): value is ConfigDictionary => {
@@ -199,7 +200,7 @@ export const useGraphicsLayer = (
   const graphicsMapRef = React.useRef<Map<string | number, __esri.Graphic[]>>(
     new Map()
   );
-  const symbolCacheRef = React.useRef<Map<string, __esri.Symbol>>(new Map());
+  const symbolCacheRef = React.useRef(createSymbolCache());
 
   const ensureGraphicsLayer = hooks.useEventCallback(
     (view: __esri.MapView | null | undefined): boolean => {
@@ -274,79 +275,6 @@ export const useGraphicsLayer = (
     }
   );
 
-  const createHighlightSymbol = (
-    graphic: __esri.Graphic | null | undefined,
-    highlightColor: [number, number, number, number],
-    outlineWidth: number
-  ):
-    | __esri.SimpleFillSymbol
-    | __esri.SimpleLineSymbol
-    | __esri.SimpleMarkerSymbol
-    | null => {
-    const currentModules = modulesRef.current;
-    if (!currentModules || !graphic) return null;
-
-    const geometry = graphic.geometry;
-    if (!geometry) return null;
-
-    const geometryType = geometry.type;
-
-    const cacheKey = `${geometryType}-${highlightColor.join(",")}-${outlineWidth}`;
-    const cachedSymbol = symbolCacheRef.current.get(cacheKey);
-    if (cachedSymbol) {
-      if (geometryType === "polygon" || geometryType === "extent") {
-        return cachedSymbol as __esri.SimpleFillSymbol;
-      }
-      if (geometryType === "polyline") {
-        return cachedSymbol as __esri.SimpleLineSymbol;
-      }
-      if (geometryType === "point" || geometryType === "multipoint") {
-        return cachedSymbol as __esri.SimpleMarkerSymbol;
-      }
-    }
-
-    if (geometryType === "polygon" || geometryType === "extent") {
-      const symbolJSON = buildHighlightSymbolJSON(
-        highlightColor,
-        outlineWidth,
-        "polygon"
-      );
-      const symbol = new currentModules.SimpleFillSymbol(
-        symbolJSON as __esri.SimpleFillSymbolProperties
-      );
-      symbolCacheRef.current.set(cacheKey, symbol);
-      return symbol;
-    }
-
-    if (geometryType === "polyline") {
-      const symbolJSON = buildHighlightSymbolJSON(
-        highlightColor,
-        outlineWidth,
-        "polyline"
-      );
-      const symbol = new currentModules.SimpleLineSymbol(
-        symbolJSON as __esri.SimpleLineSymbolProperties
-      );
-      symbolCacheRef.current.set(cacheKey, symbol);
-      return symbol;
-    }
-
-    if (geometryType === "point" || geometryType === "multipoint") {
-      const symbolJSON = buildHighlightSymbolJSON(
-        highlightColor,
-        outlineWidth,
-        "point"
-      );
-      const symbol = new currentModules.SimpleMarkerSymbol(
-        symbolJSON as __esri.SimpleMarkerSymbolProperties
-      );
-      symbolCacheRef.current.set(cacheKey, symbol);
-      return symbol;
-    }
-    // Unsupported geometry type
-    return null;
-  };
-
   const addGraphicsToMap = hooks.useEventCallback(
     (
       graphic: __esri.Graphic | null | undefined,
@@ -365,11 +293,12 @@ export const useGraphicsLayer = (
 
       const attributes = (graphic.attributes ?? null) as AttributeMap | null;
       const fnr = extractFnr(attributes);
-      const symbol = createHighlightSymbol(
+      const symbol = symbolCacheRef.current.getSymbolForGraphic({
+        modules: currentModules,
         graphic,
         highlightColor,
-        outlineWidth
-      );
+        outlineWidth,
+      });
       if (!symbol) return;
 
       // Create a new graphic with the highlight symbol
@@ -425,11 +354,12 @@ export const useGraphicsLayer = (
           return;
         }
 
-        const symbol = createHighlightSymbol(
+        const symbol = symbolCacheRef.current.getSymbolForGraphic({
+          modules: currentModules,
           graphic,
           highlightColor,
-          outlineWidth
-        );
+          outlineWidth,
+        });
         if (!symbol) return;
 
         const highlightGraphic = new currentModules.Graphic({
@@ -453,29 +383,10 @@ export const useGraphicsLayer = (
       });
 
       if (highlightGraphics.length > 0) {
-        const GRAPHICS_PER_FRAME = 10;
-        const chunks: __esri.Graphic[][] = [];
-
-        for (let i = 0; i < highlightGraphics.length; i += GRAPHICS_PER_FRAME) {
-          chunks.push(highlightGraphics.slice(i, i + GRAPHICS_PER_FRAME));
-        }
-
-        const addChunk = (index: number) => {
-          if (!layer || layer.destroyed || index >= chunks.length) {
-            return;
-          }
-
-          layer.addMany(chunks[index]);
-
-          if (index + 1 < chunks.length) {
-            requestAnimationFrame(() => {
-              addChunk(index + 1);
-            });
-          }
-        };
-
-        requestAnimationFrame(() => {
-          addChunk(0);
+        batchGraphicsRenderer({
+          layer,
+          graphics: highlightGraphics,
+          chunkSize: 10,
         });
       }
     }
