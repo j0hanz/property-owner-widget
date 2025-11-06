@@ -944,6 +944,7 @@ export const useHoverQuery = (params: HoverQueryParams) => {
   const lastHoverQueryPointRef = React.useRef<{ x: number; y: number } | null>(
     null
   );
+  const hasCompletedFirstQueryRef = React.useRef(false);
 
   const queryPropertyAtPoint = hooks.useEventCallback(
     async (mapPoint: __esri.Point) => {
@@ -975,6 +976,7 @@ export const useHoverQuery = (params: HoverQueryParams) => {
           return;
         }
 
+        hasCompletedFirstQueryRef.current = true;
         setHoverTooltipData(result);
         setIsHoverQueryActive(false);
       } catch (error) {
@@ -998,6 +1000,7 @@ export const useHoverQuery = (params: HoverQueryParams) => {
     setHoverTooltipData(null);
     setIsHoverQueryActive(false);
     lastHoverQueryPointRef.current = null;
+    hasCompletedFirstQueryRef.current = false;
   });
 
   hooks.useUnmount(() => {
@@ -1010,5 +1013,6 @@ export const useHoverQuery = (params: HoverQueryParams) => {
     queryPropertyAtPoint,
     lastHoverQueryPointRef,
     cleanup,
+    hasCompletedFirstQuery: hasCompletedFirstQueryRef.current,
   };
 };

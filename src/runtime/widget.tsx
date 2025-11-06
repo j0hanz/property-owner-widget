@@ -593,6 +593,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     queryPropertyAtPoint,
     lastHoverQueryPointRef,
     cleanup: cleanupHoverQuery,
+    hasCompletedFirstQuery,
   } = useHoverQuery({
     config: {
       propertyDataSourceId: config.propertyDataSourceId,
@@ -971,14 +972,14 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         highlightOpacityConfigRef.current
       );
 
-      let tooltipText: string;
+      let tooltipText: string | null = null;
 
       if (hoverTooltipData) {
         tooltipText = tooltipFormatRef.current.replace(
           "{fastighet}",
           hoverTooltipData.fastighet
         );
-      } else {
+      } else if (hasCompletedFirstQuery && lastCursorPointRef.current) {
         tooltipText = tooltipNoPropertyRef.current;
       }
 
