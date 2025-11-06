@@ -1297,17 +1297,17 @@ describe("Property Widget - Utility Helper Functions", () => {
     const screenPoint = { x: 105, y: 102 };
     const tolerance = 10;
 
-    expect(
-      shouldSkipHoverQuery(screenPoint, lastPoint, tolerance, true)
-    ).toBe(true);
+    expect(shouldSkipHoverQuery(screenPoint, lastPoint, tolerance, true)).toBe(
+      true
+    );
 
-    expect(
-      shouldSkipHoverQuery(screenPoint, lastPoint, tolerance, false)
-    ).toBe(false);
+    expect(shouldSkipHoverQuery(screenPoint, lastPoint, tolerance, false)).toBe(
+      false
+    );
 
-    expect(
-      shouldSkipHoverQuery(screenPoint, null, tolerance, true)
-    ).toBe(false);
+    expect(shouldSkipHoverQuery(screenPoint, null, tolerance, true)).toBe(
+      false
+    );
   });
 
   it("should map property query results to each owner row for export", () => {

@@ -334,7 +334,7 @@ export const executeHoverQuery = async (params: {
   const { mapPoint, config, dsManager, signal, enablePIIMasking, translate } =
     params;
 
-  console.log('[HOVER] executeHoverQuery called', {
+  console.log("[HOVER] executeHoverQuery called", {
     mapPoint: { x: mapPoint.x, y: mapPoint.y },
     propertyDsId: config.propertyDataSourceId,
     ownerDsId: config.ownerDataSourceId,
@@ -343,10 +343,12 @@ export const executeHoverQuery = async (params: {
 
   const manager = validateAndGetManager(config, dsManager, translate);
   if (!manager) {
-    console.warn('[HOVER] validateAndGetManager returned null - data sources not valid');
+    console.warn(
+      "[HOVER] validateAndGetManager returned null - data sources not valid"
+    );
     return null;
   }
-  console.log('[HOVER] Data source validation passed');
+  console.log("[HOVER] Data source validation passed");
 
   const propertyData = await queryPropertyData(
     mapPoint,
@@ -355,21 +357,33 @@ export const executeHoverQuery = async (params: {
     signal
   );
   if (!propertyData) {
-    console.log('[HOVER] queryPropertyData returned null - no property at point or missing attributes');
+    console.log(
+      "[HOVER] queryPropertyData returned null - no property at point or missing attributes"
+    );
     return null;
   }
-  console.log('[HOVER] Property data retrieved:', propertyData);
+  console.log("[HOVER] Property data retrieved:", propertyData);
 
   const unknownOwnerLabel = translate("unknownOwner");
-  const bostadr = await queryOwnerData(
-    propertyData.fnr,
-    config.ownerDataSourceId,
-    manager,
-    signal,
-    enablePIIMasking,
-    unknownOwnerLabel
-  );
-  console.log('[HOVER] Owner data retrieved:', bostadr);
+  let bostadr: string;
+
+  try {
+    bostadr = await queryOwnerData(
+      propertyData.fnr,
+      config.ownerDataSourceId,
+      manager,
+      signal,
+      enablePIIMasking,
+      unknownOwnerLabel
+    );
+    console.log("[HOVER] Owner data retrieved:", bostadr);
+  } catch (ownerError) {
+    console.warn(
+      "[HOVER] Owner query failed, using property name only:",
+      ownerError
+    );
+    bostadr = unknownOwnerLabel;
+  }
 
   return { fastighet: propertyData.fastighet, bostadr };
 };

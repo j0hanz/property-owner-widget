@@ -43,13 +43,13 @@ import type {
   GridRowData,
   IMConfig,
   IMStateWithProperty,
+  PipelineExecutionContext,
   PipelineRunResult,
   PropertyPipelineSuccess,
   SelectionGraphicsHelpers,
   SelectionGraphicsParams,
   SerializedQueryResult,
   SerializedQueryResultMap,
-  PipelineExecutionContext,
 } from "../config/types";
 import { createPropertySelectors } from "../extensions/store";
 import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api";
@@ -973,7 +973,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
       let tooltipText: string | null = null;
 
-      console.log('[CURSOR] updateCursorPoint tooltip logic:', {
+      console.log("[CURSOR] updateCursorPoint tooltip logic:", {
         hoverTooltipData,
         isHoverQueryActive,
         mapPoint: { x: mapPoint.x, y: mapPoint.y },
@@ -984,12 +984,12 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
           "{fastighet}",
           hoverTooltipData.fastighet
         );
-        console.log('[CURSOR] Showing property name:', tooltipText);
+        console.log("[CURSOR] Showing property name:", tooltipText);
       } else if (!isHoverQueryActive) {
         tooltipText = tooltipNoPropertyRef.current;
-        console.log('[CURSOR] Showing no property text:', tooltipText);
+        console.log("[CURSOR] Showing no property text:", tooltipText);
       } else {
-        console.log('[CURSOR] Query active, showing no tooltip');
+        console.log("[CURSOR] Query active, showing no tooltip");
       }
 
       cursorGraphicsStateRef.current = syncCursorGraphics({
