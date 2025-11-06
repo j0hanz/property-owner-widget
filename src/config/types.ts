@@ -709,3 +709,59 @@ export type PropertyAction =
     };
 
 export type SeamlessImmutableFactory = <T>(input: T) => Immutable<T>;
+
+// =============================================================================
+// VALIDATION UTILITY TYPES
+// Helper types for validation result extraction
+// =============================================================================
+
+export type ValidationFailureResult<T> = Extract<
+  ValidationResult<T>,
+  { valid: false }
+>;
+
+export type HighlightSymbolJSON<T extends "polygon" | "polyline" | "point"> =
+  T extends "polygon"
+    ? __esri.SimpleFillSymbolProperties
+    : T extends "polyline"
+      ? __esri.SimpleLineSymbolProperties
+      : __esri.SimpleMarkerSymbolProperties;
+
+// =============================================================================
+// RUNTIME WIDGET TYPES
+// Types for clipboard, pipeline execution, and error boundaries
+// =============================================================================
+
+export interface ClipboardPayload {
+  text: string;
+  count: number;
+  isSorted: boolean;
+}
+
+export interface PipelineExecutionContext {
+  mapPoint: __esri.Point;
+  manager: DataSourceManager;
+  controller: AbortController;
+  isStaleRequest: () => boolean;
+  selectionForPipeline: GridRowData[];
+}
+
+export type PipelineRunResult =
+  | { status: "stale" }
+  | { status: "aborted" }
+  | { status: "empty" }
+  | { status: "success"; pipelineResult: PropertyPipelineSuccess };
+
+export type PropertyPipelineSuccess = Extract<
+  PropertySelectionPipelineResult,
+  { status: "success" }
+>;
+
+// =============================================================================
+// STORE EXTENSION TYPES
+// Types for Redux store state manipulation
+// =============================================================================
+
+export interface PropertySubStateMap {
+  [key: string]: ImmutableObject<PropertyWidgetState>;
+}

@@ -46,6 +46,10 @@ import type {
   SerializedQueryResultMap,
   ErrorState,
   IMStateWithProperty,
+  ClipboardPayload,
+  PipelineExecutionContext,
+  PipelineRunResult,
+  PropertyPipelineSuccess,
 } from "../config/types";
 import { ErrorType } from "../config/enums";
 import { useWidgetStyles } from "../config/style";
@@ -154,31 +158,6 @@ const usePropertySelectors = (widgetId: string) => {
 
   return selectorsRef.current;
 };
-
-interface ClipboardPayload {
-  text: string;
-  count: number;
-  isSorted: boolean;
-}
-
-interface PipelineExecutionContext {
-  mapPoint: __esri.Point;
-  manager: DataSourceManager;
-  controller: AbortController;
-  isStaleRequest: () => boolean;
-  selectionForPipeline: GridRowData[];
-}
-
-type PipelineRunResult =
-  | { status: "stale" }
-  | { status: "aborted" }
-  | { status: "empty" }
-  | { status: "success"; pipelineResult: PropertyPipelineSuccess };
-
-type PropertyPipelineSuccess = Extract<
-  Awaited<ReturnType<typeof executePropertyQueryPipeline>>,
-  { status: "success" }
->;
 
 // Error boundaries require class components in React (no functional equivalent)
 class PropertyWidgetErrorBoundary extends React.Component<

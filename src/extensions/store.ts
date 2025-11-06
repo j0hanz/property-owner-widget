@@ -10,6 +10,8 @@ import type {
   SerializedQueryResultMap,
   PropertyAction,
   SeamlessImmutableFactory,
+  MutableAccessor,
+  PropertySubStateMap,
 } from "../config/types";
 import { PropertyActionType } from "../config/enums";
 
@@ -76,10 +78,6 @@ const resolveImmutableFactory = (): SeamlessImmutableFactory => {
 };
 
 const Immutable = resolveImmutableFactory();
-
-interface MutableAccessor<T = unknown> {
-  asMutable?: (options?: { deep?: boolean }) => T;
-}
 
 const hasAsMutable = <T>(value: unknown): value is MutableAccessor<T> => {
   if (!value || typeof value !== "object") {
@@ -178,10 +176,6 @@ const initialPropertyState: PropertyWidgetState = {
 
 const createImmutableState = (): ImmutableObject<PropertyWidgetState> =>
   Immutable(initialPropertyState) as ImmutableObject<PropertyWidgetState>;
-
-interface PropertySubStateMap {
-  [key: string]: ImmutableObject<PropertyWidgetState>;
-}
 
 const initialGlobalState = Immutable({
   byId: {},

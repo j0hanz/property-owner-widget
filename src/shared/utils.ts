@@ -22,6 +22,7 @@ import {
 import type {
   OwnerAttributes,
   ValidationResult,
+  ValidationFailureResult,
   SelectionGraphicsHelpers,
   EsriModules,
   CursorTooltipStyle,
@@ -47,13 +48,10 @@ import type {
   OwnerQueryResolution,
   SelectionGraphicsParams,
   PropertySelectionPipelineResult,
+  PropertyPipelineSuccess,
   CreateGridRowParams,
+  HighlightSymbolJSON,
 } from "../config/types";
-
-type ValidationFailureResult<T> = Extract<
-  ValidationResult<T>,
-  { valid: false }
->;
 
 const HTML_WHITESPACE_PATTERN = /[\s\u00A0\u200B]+/g;
 const SORT_COMPARE_OPTIONS: Intl.CollatorOptions = {
@@ -1151,13 +1149,6 @@ export const buildHighlightColor = (
   return [r, g, b, clampedOpacity];
 };
 
-type HighlightSymbolJSON<T extends "polygon" | "polyline" | "point"> =
-  T extends "polygon"
-    ? __esri.SimpleFillSymbolProperties
-    : T extends "polyline"
-      ? __esri.SimpleLineSymbolProperties
-      : __esri.SimpleMarkerSymbolProperties;
-
 export const buildHighlightSymbolJSON = <
   T extends "polygon" | "polyline" | "point",
 >(
@@ -2028,11 +2019,6 @@ export const executePropertyQueryPipeline = async (params: {
 
   return pipelineResult;
 };
-
-type PropertyPipelineSuccess = Extract<
-  PropertySelectionPipelineResult,
-  { status: "success" }
->;
 
 export const updatePropertySelectionState = (params: {
   pipelineResult: PropertyPipelineSuccess;
