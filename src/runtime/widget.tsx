@@ -75,7 +75,6 @@ import {
   buildClipboardPayload,
   buildResultsMap,
   collectSelectedRawData,
-  computeWidgetsToClose,
   copyToClipboard,
   type CursorGraphicsState,
   cursorLifecycleHelpers,
@@ -88,7 +87,6 @@ import {
   isValidationFailure,
   normalizeFnrKey,
   notifyCopyOutcome,
-  readAppWidgetsFromState,
   restoreCursor,
   scheduleCursorUpdate,
   scheduleGraphicsRendering,
@@ -131,13 +129,86 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   });
 };
 
-const resolveWidgetId = (props: AllWidgetProps<IMConfig>): string => {
-  const widgetIdProp = (props as unknown as { widgetId?: string }).widgetId;
-  const fallbackId = props.id as unknown as string;
-  if (typeof widgetIdProp === "string" && widgetIdProp.length > 0) {
-    return widgetIdProp;
+interface MaybeGettable {
+  get?: (key: string) => unknown;
+  [key: string]: unknown;
+}
+
+const readNestedValue = (source: unknown, key: string): unknown => {
+  if (!source || typeof source !== "object") {
+    return undefined;
   }
-  return fallbackId ?? fallbackId;
+
+  const candidate = source as MaybeGettable;
+  if (typeof candidate.get === "function") {
+    try {
+      return candidate.get(key);
+    } catch (_error) {
+      return undefined;
+    }
+  }
+
+  return key in candidate ? candidate[key] : undefined;
+};
+
+const readStringValue = (source: unknown, key: string): string => {
+  const value = readNestedValue(source, key);
+  return typeof value === "string" ? value : "";
+};
+
+const hasPropertySignature = (value: string): boolean => {
+  if (!value) return false;
+  const normalized = value.toLowerCase();
+  return normalized.includes("property") || normalized.includes("fastighet");
+};
+
+const isPropertyWidgetEntry = (widgets: unknown, targetId: string): boolean => {
+  const entry = readNestedValue(widgets, targetId);
+  if (!entry) return false;
+
+  const manifest = readNestedValue(entry, "manifest");
+
+  const candidates = [
+    readStringValue(entry, "name"),
+    readStringValue(entry, "label"),
+    readStringValue(entry, "manifestLabel"),
+    readStringValue(entry, "uri"),
+    readStringValue(entry, "widgetName"),
+    readStringValue(manifest, "name"),
+    readStringValue(manifest, "label"),
+    readStringValue(manifest, "uri"),
+  ];
+
+  return candidates.some(hasPropertySignature);
+};
+
+const isWidgetStateActive = (state: unknown): boolean => {
+  if (state === WidgetState.Opened || state === WidgetState.Active) {
+    return true;
+  }
+
+  if (typeof state === "string") {
+    const normalized = state.toUpperCase();
+    return normalized === "OPENED" || normalized === "ACTIVE";
+  }
+
+  return false;
+};
+
+const readAppWidgets = (state: unknown): unknown => {
+  if (!state || typeof state !== "object") {
+    return null;
+  }
+
+  const appConfig = readNestedValue(state, "appConfig");
+  if (appConfig && typeof appConfig === "object") {
+    const widgets = readNestedValue(appConfig, "widgets");
+    if (widgets) {
+      return widgets;
+    }
+  }
+
+  return readNestedValue(state, "widgets");
 };
 
 // Error boundaries require class components in React (no functional equivalent)
@@ -185,7 +256,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const styles = useWidgetStyles();
   const translate = hooks.useTranslation(jimuUIMessages, defaultMessages);
 
-  const widgetId = resolveWidgetId(props);
+  const widgetId = id;
   const selectorsRef = React.useRef(createPropertySelectors(widgetId));
   const selectors = selectorsRef.current;
   const dispatch = ReactRedux.useDispatch();
@@ -673,39 +744,42 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
 
   const closeOtherWidgets = hooks.useEventCallback(() => {
     if (!config?.autoCloseOtherWidgets) return;
-    if (!widgetId) return;
 
     const store = typeof getAppStore === "function" ? getAppStore() : null;
-    if (!store) return;
-
-    const state = store.getState?.();
+    const state = store?.getState?.();
     if (!state) return;
 
-    const runtimeInfo = state.widgetsRuntimeInfo as
+    const runtimeInfo = readNestedValue(state, "widgetsRuntimeInfo") as
       | {
           [id: string]:
-            | { state?: WidgetState | string; isClassLoaded?: boolean }
+            | { state?: unknown; isClassLoaded?: boolean }
             | undefined;
         }
       | undefined;
 
-    const appWidgets = readAppWidgetsFromState(state);
-    const targets = computeWidgetsToClose(runtimeInfo, widgetId, appWidgets);
-    if (targets.length === 0) return;
+    if (!runtimeInfo) return;
 
-    const safeTargets = targets.filter((targetId) => {
-      const targetInfo = runtimeInfo?.[targetId];
-      return Boolean(targetInfo?.isClassLoaded);
+    const widgets = readAppWidgets(state);
+
+    const targets = Object.keys(runtimeInfo).filter((targetId) => {
+      if (targetId === widgetId) return false;
+
+      const info = runtimeInfo[targetId];
+      if (!info?.isClassLoaded) return false;
+      if (!isWidgetStateActive(info.state)) return false;
+
+      return isPropertyWidgetEntry(widgets, targetId);
     });
 
-    if (safeTargets.length === 0) return;
+    if (targets.length === 0) return;
 
     trackEvent({
       category: "Widget",
       action: "close_other_widgets",
-      value: safeTargets.length,
+      value: targets.length,
     });
-    dispatch(appActions.closeWidgets(safeTargets));
+
+    dispatch(appActions.closeWidgets(targets));
   });
 
   const handleExport = hooks.useEventCallback((format: ExportFormat) => {
@@ -1044,72 +1118,51 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     updateCursorPoint(lastCursorPointRef.current);
   }, [hoverTooltipData]);
 
-  hooks.useUpdateEffect(() => {
-    const view = getCurrentView();
-    if (!view) {
-      // Note: Highlight color and outline width are now applied directly when creating graphics
-      // No separate applyHighlightOptions call needed
-    }
-  }, [
-    getCurrentView,
-    highlightColorConfig,
-    highlightOpacityConfig,
-    outlineWidthConfig,
-  ]);
-
-  hooks.useUpdateEffect(() => {
-    const isOpening =
-      (runtimeState === WidgetState.Opened ||
-        runtimeState === WidgetState.Active) &&
-      (prevRuntimeState === WidgetState.Closed ||
-        prevRuntimeState === WidgetState.Hidden ||
-        typeof prevRuntimeState === "undefined");
-
-    if (isOpening && modules) {
-      const currentView = getCurrentView();
-      if (currentView) {
-        reactivateMapView();
-        trackEvent({
-          category: "Property",
-          action: "widget_reopened",
-          label: "from_controller",
-        });
-      }
-    }
-  }, [
-    runtimeState,
-    prevRuntimeState,
-    modules,
-    reactivateMapView,
-    getCurrentView,
-  ]);
-
   const performWidgetCleanup = hooks.useEventCallback(() => {
     handleWidgetReset();
     cleanup();
   });
 
   hooks.useUpdateEffect(() => {
+    const wasClosed =
+      prevRuntimeState === WidgetState.Closed ||
+      prevRuntimeState === WidgetState.Hidden ||
+      typeof prevRuntimeState === "undefined";
+    const isActive =
+      runtimeState === WidgetState.Opened ||
+      runtimeState === WidgetState.Active;
+
+    if (isActive && wasClosed) {
+      closeOtherWidgets();
+
+      if (modules) {
+        const currentView = getCurrentView();
+        if (currentView) {
+          reactivateMapView();
+          trackEvent({
+            category: "Property",
+            action: "widget_reopened",
+            label: "from_controller",
+          });
+        }
+      }
+    }
+
     if (
       runtimeState === WidgetState.Closed &&
       prevRuntimeState !== WidgetState.Closed
     ) {
       performWidgetCleanup();
     }
-  }, [runtimeState, prevRuntimeState, performWidgetCleanup]);
-
-  hooks.useUpdateEffect(() => {
-    const isOpening =
-      (runtimeState === WidgetState.Opened ||
-        runtimeState === WidgetState.Active) &&
-      (prevRuntimeState === WidgetState.Closed ||
-        prevRuntimeState === WidgetState.Hidden ||
-        typeof prevRuntimeState === "undefined");
-
-    if (isOpening) {
-      closeOtherWidgets();
-    }
-  }, [runtimeState, prevRuntimeState, closeOtherWidgets]);
+  }, [
+    runtimeState,
+    prevRuntimeState,
+    modules,
+    closeOtherWidgets,
+    reactivateMapView,
+    getCurrentView,
+    performWidgetCleanup,
+  ]);
 
   hooks.useUnmount(() => {
     abortAll();

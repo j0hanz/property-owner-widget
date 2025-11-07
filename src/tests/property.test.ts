@@ -1,4 +1,3 @@
-import { WidgetState } from "jimu-core";
 import type {
   DataSourceManager,
   FeatureDataRecord,
@@ -48,7 +47,6 @@ import {
   buildHighlightSymbolJSON,
   buildTooltipSymbol,
   calculatePropertyUpdates,
-  computeWidgetsToClose,
   convertToCSV,
   convertToGeoJSON,
   convertToJSON,
@@ -646,37 +644,6 @@ describe("createPropertyDispatcher", () => {
       "row-1": serialized,
     };
     expect(action.results).toEqual(expectedPlainObject);
-  });
-});
-
-describe("computeWidgetsToClose", () => {
-  it("returns only property widgets that are active", () => {
-    const runtimeInfo = {
-      widget_property_a: { state: WidgetState.Opened, isClassLoaded: true },
-      widget_chart_a: { state: WidgetState.Opened, isClassLoaded: true },
-    };
-    const widgets = {
-      widget_property_a: { manifest: { name: "property" } },
-      widget_chart_a: { manifest: { name: "chart" } },
-    };
-
-    const targets = computeWidgetsToClose(
-      runtimeInfo,
-      "widget_property_b",
-      widgets
-    );
-
-    expect(targets).toEqual(["widget_property_a"]);
-  });
-
-  it("ignores widgets without property metadata", () => {
-    const runtimeInfo = {
-      widget_other: { state: WidgetState.Active, isClassLoaded: true },
-    };
-
-    const targets = computeWidgetsToClose(runtimeInfo, "widget_property_b", {});
-
-    expect(targets).toEqual([]);
   });
 });
 
