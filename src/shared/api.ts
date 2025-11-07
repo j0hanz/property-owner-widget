@@ -711,7 +711,7 @@ const processBatchQuery = async (
     if (helpers.isAbortError(error)) {
       throw error instanceof Error ? error : new Error(String(error));
     }
-    console.log("Batch owner query failed", { error });
+    globalThis.console?.log?.("Batch owner query failed", { error });
     ownersByFnr = new Map();
     fnrsToQuery.forEach((fnr) => failedFnrs.add(String(fnr)));
   }

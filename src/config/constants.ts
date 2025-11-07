@@ -29,6 +29,7 @@ export const DEFAULT_MAX_RESULTS = 100;
 export const OWNER_QUERY_CONCURRENCY = 20;
 
 export const SYMBOL_CACHE_MAX_SIZE = 100;
+export const CURSOR_SYMBOL_CACHE_LIMIT = 50;
 
 export const CURSOR_TOOLTIP_STYLE = {
   textColor: "#000000",
@@ -154,6 +155,45 @@ export const CURSOR_STYLES = [
   "help",
   "text",
   "cell",
+] as const;
+
+export const STANDARD_CURSOR_VALUES = [
+  "auto",
+  "default",
+  "none",
+  "context-menu",
+  "help",
+  "pointer",
+  "progress",
+  "wait",
+  "cell",
+  "crosshair",
+  "text",
+  "vertical-text",
+  "alias",
+  "copy",
+  "move",
+  "no-drop",
+  "not-allowed",
+  "grab",
+  "grabbing",
+  "all-scroll",
+  "col-resize",
+  "row-resize",
+  "n-resize",
+  "e-resize",
+  "s-resize",
+  "w-resize",
+  "ne-resize",
+  "nw-resize",
+  "se-resize",
+  "sw-resize",
+  "ew-resize",
+  "ns-resize",
+  "nesw-resize",
+  "nwse-resize",
+  "zoom-in",
+  "zoom-out",
 ] as const;
 
 export const DEFAULT_ACTIVE_CURSOR = "crosshair";

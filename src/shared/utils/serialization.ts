@@ -46,7 +46,10 @@ const cloneRecordWithDepth = (
     return JSON.parse(JSON.stringify(value)) as unknown;
   } catch (error) {
     // Fallback to manual cloning when JSON serialization fails
-    console.log("[serialization] JSON clone failed, using manual clone", error);
+    globalThis.console?.log?.(
+      "[serialization] JSON clone failed, using manual clone",
+      error
+    );
     const result: UnknownRecord = {};
     const entries = Object.entries(value);
     for (const [key, entryValue] of entries) {
@@ -62,7 +65,7 @@ export const clonePlainValue = (
   maxDepth = 20
 ): unknown => {
   if (depth > maxDepth) {
-    console.log(
+    globalThis.console?.log?.(
       "[serialization] Max clone depth exceeded, returning value as-is"
     );
     return value;

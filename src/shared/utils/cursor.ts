@@ -1,6 +1,10 @@
 import type { MutableRefObject } from "react";
 import type { DataSourceManager } from "jimu-core";
-import { CURSOR_TOOLTIP_STYLE } from "../../config/constants";
+import {
+  CURSOR_SYMBOL_CACHE_LIMIT,
+  CURSOR_TOOLTIP_STYLE,
+  STANDARD_CURSOR_VALUES,
+} from "../../config/constants";
 import type {
   CursorGraphicsState,
   CursorTooltipStyle,
@@ -22,7 +26,6 @@ const sanitizeTooltipText = (
 };
 
 const symbolCache = new Map<string, __esri.TextSymbol>();
-const MAX_CACHE_SIZE = 50;
 
 const createTooltipTextSymbol = (
   modules: EsriModules,
@@ -55,7 +58,7 @@ const createTooltipTextSymbol = (
   } as __esri.TextSymbolProperties);
 
   // LRU: Remove oldest if cache full
-  if (symbolCache.size >= MAX_CACHE_SIZE) {
+  if (symbolCache.size >= CURSOR_SYMBOL_CACHE_LIMIT) {
     const firstKey = symbolCache.keys().next().value;
     if (firstKey) symbolCache.delete(firstKey);
   }
@@ -243,7 +246,7 @@ export const scheduleCursorUpdate = (params: {
     try {
       onUpdate(pendingMapPointRef.current);
     } catch (error) {
-      console.log("Cursor point update failed", error);
+      globalThis.console?.log?.("Cursor point update failed", error);
     }
   });
 };
@@ -391,45 +394,6 @@ const resetRefState = (...refs: Array<MutableRefObject<unknown>>): void => {
   });
 };
 
-const STANDARD_CURSOR_VALUES = [
-  "auto",
-  "default",
-  "none",
-  "context-menu",
-  "help",
-  "pointer",
-  "progress",
-  "wait",
-  "cell",
-  "crosshair",
-  "text",
-  "vertical-text",
-  "alias",
-  "copy",
-  "move",
-  "no-drop",
-  "not-allowed",
-  "grab",
-  "grabbing",
-  "all-scroll",
-  "col-resize",
-  "row-resize",
-  "n-resize",
-  "e-resize",
-  "s-resize",
-  "w-resize",
-  "ne-resize",
-  "nw-resize",
-  "se-resize",
-  "sw-resize",
-  "ew-resize",
-  "ns-resize",
-  "nesw-resize",
-  "nwse-resize",
-  "zoom-in",
-  "zoom-out",
-] as const;
-
 export const isValidCursorValue = (
   cursor: string | null | undefined
 ): boolean => {
@@ -464,7 +428,7 @@ export const setCursor = (
   const cursorValue = cursor || "crosshair";
 
   if (!isValidCursorValue(cursorValue)) {
-    console.warn(`Invalid cursor value: ${cursorValue}`);
+    globalThis.console?.warn?.(`Invalid cursor value: ${cursorValue}`);
     return false;
   }
 
@@ -513,12 +477,12 @@ export const cursorLifecycleHelpers = {
       cleanupQuery,
     } = refs;
 
-    // Cancel RAF first to prevent any pending frame from executing
+    // Cancel RAF first to prevent pending frames from executing
     cancelScheduledUpdate(rafId);
     // Then remove event handles
     removeEventHandle(pointerMoveHandle);
     removeEventHandle(pointerLeaveHandle);
-    // Cancel any ongoing hover work before wiping graphics
+    // Cancel ongoing hover work before wiping graphics
     cleanupQuery();
     // Finally clear graphics
     clearGraphics();

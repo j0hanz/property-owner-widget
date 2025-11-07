@@ -37,6 +37,7 @@ import {
 import { ErrorType } from "../config/enums";
 import { useWidgetStyles } from "../config/style";
 import type {
+  AppStateForClose,
   ErrorBoundaryProps,
   ErrorState,
   ExportFormat,
@@ -47,6 +48,8 @@ import type {
   SelectionGraphicsParams,
   SerializedQueryResult,
   SerializedQueryResultMap,
+  WidgetEntryInfo,
+  WidgetManifestInfo,
 } from "../config/types";
 import { createPropertySelectors, propertyActions } from "../extensions/store";
 import { clearQueryCache, runPropertySelectionPipeline } from "../shared/api";
@@ -129,12 +132,12 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   });
 };
 
-interface Gettable {
-  get: (key: string) => unknown;
-}
-
-const isGettable = (source: object): source is Gettable => {
-  return "get" in source && typeof (source as Gettable).get === "function";
+const isGettable = (
+  source: object
+): source is { get: (key: string) => unknown } => {
+  return (
+    "get" in source && typeof (source as { get?: unknown }).get === "function"
+  );
 };
 
 const readNestedValue = (
@@ -160,34 +163,6 @@ const readNestedValue = (
   return undefined;
 };
 
-interface WidgetManifest {
-  name?: string;
-  label?: string;
-  uri?: string;
-}
-
-interface WidgetEntry {
-  name?: string;
-  label?: string;
-  uri?: string;
-  manifest?: WidgetManifest;
-  widgetName?: string;
-  manifestLabel?: string;
-}
-
-interface WidgetRuntimeInfo {
-  state?: WidgetState;
-  isClassLoaded?: boolean;
-}
-
-interface AppStateForClose {
-  appConfig?: {
-    widgets?: { [id: string]: WidgetEntry };
-  };
-  widgets?: { [id: string]: WidgetEntry };
-  widgetsRuntimeInfo?: { [id: string]: WidgetRuntimeInfo };
-}
-
 const hasPropertySignature = (value: string): boolean => {
   if (!value) return false;
   const normalized = value.toLowerCase();
@@ -195,14 +170,16 @@ const hasPropertySignature = (value: string): boolean => {
 };
 
 const isPropertyWidgetEntry = (
-  widgets: { [id: string]: WidgetEntry } | undefined | null,
+  widgets: { [id: string]: WidgetEntryInfo } | undefined | null,
   targetId: string
 ): boolean => {
-  const entry = readNestedValue(widgets, targetId) as WidgetEntry | undefined;
+  const entry = readNestedValue(widgets, targetId) as
+    | WidgetEntryInfo
+    | undefined;
   if (!entry) return false;
 
   const manifest = readNestedValue(entry, "manifest") as
-    | WidgetManifest
+    | WidgetManifestInfo
     | undefined;
 
   const candidates: string[] = [
@@ -225,20 +202,20 @@ const isWidgetStateActive = (state: WidgetState | undefined): boolean => {
 
 const readAppWidgets = (
   state: AppStateForClose
-): { [id: string]: WidgetEntry } | undefined | null => {
+): { [id: string]: WidgetEntryInfo } | undefined | null => {
   const appConfig = readNestedValue(state, "appConfig") as
-    | { widgets?: { [id: string]: WidgetEntry } }
+    | { widgets?: { [id: string]: WidgetEntryInfo } }
     | undefined;
   if (appConfig) {
     const widgets = readNestedValue(appConfig, "widgets") as
-      | { [id: string]: WidgetEntry }
+      | { [id: string]: WidgetEntryInfo }
       | undefined;
     if (widgets) {
       return widgets;
     }
   }
   return readNestedValue(state, "widgets") as
-    | { [id: string]: WidgetEntry }
+    | { [id: string]: WidgetEntryInfo }
     | undefined;
 };
 
@@ -742,7 +719,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
               ) as SerializedQueryResult;
               nextRaw[key] = clonedValue;
             } catch (error) {
-              console.log("Failed to clone raw query result", {
+              globalThis.console?.log?.("Failed to clone raw query result", {
                 propertyId: key,
                 error,
               });
@@ -984,7 +961,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const tooltipFormatRef = hooks.useLatest(cursorTooltipFormatText);
 
   const clearCursorGraphics = hooks.useEventCallback(() => {
-    // Cancel any pending RAF update
+    // Cancel pending RAF update
     if (rafIdRef.current !== null) {
       cancelAnimationFrame(rafIdRef.current);
       rafIdRef.current = null;

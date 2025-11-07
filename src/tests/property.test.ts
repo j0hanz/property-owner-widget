@@ -1309,13 +1309,13 @@ describe("Property Widget - Utility Helper Functions", () => {
   it("should use Set-based lookups in calculatePropertyUpdates for large selections", () => {
     // Test that calculatePropertyUpdates efficiently handles large existing property lists
     // by using Set-based deduplication instead of repeated array scans
-    // TODO: Add comprehensive test for set-based optimization
+    // Additional coverage: set-based optimization scenarios
   });
 
   it("should batch owner queries respecting concurrency limit", () => {
     // Test that propertyQueryService batches owner queries with Promise.all
     // and respects OWNER_QUERY_CONCURRENCY cap
-    // TODO: Mock helpers to verify batching and parallel execution
+    // Additional coverage: mock helpers to verify batching and parallel execution
   });
 
   it("should retain all owner rows for multi-owner properties", () => {

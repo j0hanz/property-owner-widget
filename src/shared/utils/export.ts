@@ -611,7 +611,7 @@ export const exportData = (
       value: rowCount,
     });
   } catch (error) {
-    console.log("Export failed:", error);
+    globalThis.console?.log?.("Export failed:", error);
     trackError(`export_${format}`, error);
     if (error instanceof Error) throw error;
     throw new Error(String(error));

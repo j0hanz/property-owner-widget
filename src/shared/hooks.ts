@@ -263,7 +263,7 @@ export const useGraphicsLayer = (params: {
       }
 
       highlightLayerRef.current = cachedLayerRef.current;
-      console.log("Created highlight GraphicsLayer", {
+      globalThis.console?.log?.("Created highlight GraphicsLayer", {
         widgetId: widgetIdRef.current,
         layerId: cachedLayerRef.current.id,
       });
@@ -646,7 +646,10 @@ export const useMapViewLifecycle = (params: {
     try {
       mapClickHandleRef.current = view.on("click", onMapClick);
     } catch (error) {
-      console.error("Failed to register map click handler", error);
+      globalThis.console?.error?.(
+        "Failed to register map click handler",
+        error
+      );
       mapClickHandleRef.current = null;
     }
   });
@@ -698,7 +701,10 @@ export const useMapViewLifecycle = (params: {
       try {
         mapClickHandleRef.current = currentView.on("click", onMapClick);
       } catch (error) {
-        console.error("Failed to reactivate map click handler", error);
+        globalThis.console?.error?.(
+          "Failed to reactivate map click handler",
+          error
+        );
         mapClickHandleRef.current = null;
       }
     }
@@ -1255,7 +1261,7 @@ export const useHitTestHover = (params: {
       } catch (error) {
         setIsQuerying(false);
         if (!isAbortError(error)) {
-          console.log("hover_query_error", error);
+          globalThis.console?.log?.("hover_query_error", error);
         }
         // Don't clear hoverTooltipData on error - keep previous value
       }

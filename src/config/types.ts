@@ -1,4 +1,9 @@
-import type { DataSourceManager, ImmutableObject, IMState } from "jimu-core";
+import type {
+  DataSourceManager,
+  ImmutableObject,
+  IMState,
+  WidgetState,
+} from "jimu-core";
 import type { ColumnDef, SortingState } from "@tanstack/react-table";
 import type { Immutable } from "seamless-immutable";
 import type { WidgetStyles } from "./style";
@@ -171,11 +176,11 @@ export interface PropertyWidgetState {
 
 export type IMPropertyWidgetState = ImmutableObject<PropertyWidgetState>;
 
-export interface IMPropertyGlobalState {
-  readonly byId: {
-    readonly [widgetId: string]: ImmutableObject<PropertyWidgetState>;
-  };
+export interface PropertyGlobalStateData {
+  readonly byId: PropertySubStateMap;
 }
+
+export type IMPropertyGlobalState = ImmutableObject<PropertyGlobalStateData>;
 
 export interface IMStateWithProperty extends IMState {
   readonly "property-state"?: IMPropertyGlobalState;
@@ -831,6 +836,34 @@ export type PropertyPipelineSuccess = Extract<
 // Types for Redux store state manipulation
 // =============================================================================
 
-export interface PropertySubStateMap {
-  [key: string]: ImmutableObject<PropertyWidgetState>;
+export type PropertySubStateMap = ImmutableObject<{
+  readonly [key: string]: IMPropertyWidgetState;
+}>;
+
+export interface WidgetManifestInfo {
+  readonly name?: string;
+  readonly label?: string;
+  readonly uri?: string;
+}
+
+export interface WidgetEntryInfo {
+  readonly name?: string;
+  readonly label?: string;
+  readonly uri?: string;
+  readonly manifest?: WidgetManifestInfo;
+  readonly widgetName?: string;
+  readonly manifestLabel?: string;
+}
+
+export interface WidgetRuntimeInfo {
+  readonly state?: WidgetState;
+  readonly isClassLoaded?: boolean;
+}
+
+export interface AppStateForClose {
+  readonly appConfig?: {
+    readonly widgets?: { [id: string]: WidgetEntryInfo };
+  };
+  readonly widgets?: { [id: string]: WidgetEntryInfo };
+  readonly widgetsRuntimeInfo?: { [id: string]: WidgetRuntimeInfo };
 }

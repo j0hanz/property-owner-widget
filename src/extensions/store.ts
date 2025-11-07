@@ -1,4 +1,4 @@
-import type { extensionSpec, ImmutableObject, IMState } from "jimu-core";
+import type { extensionSpec, IMState } from "jimu-core";
 import SeamlessImmutable from "seamless-immutable";
 import { createSelector } from "reselect";
 import { PROPERTY_ACTION_TYPES } from "../config/constants";
@@ -11,6 +11,7 @@ import type {
   IMStateWithProperty,
   PropertyAction,
   PropertySelectors,
+  PropertySubStateMap,
   PropertyWidgetState,
   SerializedQueryResultMap,
 } from "../config/types";
@@ -63,11 +64,13 @@ const initialPropertyState: PropertyWidgetState = {
   rawPropertyResults: null,
 };
 
-const createImmutableState = (): ImmutableObject<PropertyWidgetState> =>
+const createImmutableState = (): IMPropertyWidgetState =>
   SeamlessImmutable(initialPropertyState);
 
+const emptyWidgetStateMap = SeamlessImmutable({}) as PropertySubStateMap;
+
 const initialGlobalState: IMPropertyGlobalState = SeamlessImmutable({
-  byId: {} as { [key: string]: IMPropertyWidgetState },
+  byId: emptyWidgetStateMap,
 });
 
 const isPropertyAction = (action: unknown): action is PropertyAction => {
@@ -92,67 +95,58 @@ const propertyReducer = (
   }
 
   const { widgetId } = action;
-  const widgetStatePath = ["byId", widgetId];
+  const widgetStatePath: [string, string] = ["byId", widgetId];
 
-  // Helper to ensure the widget-specific state exists before modification
   const ensureWidgetState = (
     s: IMPropertyGlobalState
   ): IMPropertyGlobalState => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sAny = s as any;
-    if (sAny.getIn(widgetStatePath)) {
+    if (s.getIn(widgetStatePath)) {
       return s;
     }
-    return sAny.setIn(widgetStatePath, createImmutableState());
+    return s.setIn(widgetStatePath, createImmutableState());
   };
 
   switch (action.type) {
     case PropertyActionType.SET_ERROR: {
       const withState = ensureWidgetState(state);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (withState as any)
-        .setIn([...widgetStatePath, "error"], action.error ?? null)
-        .setIn([...widgetStatePath, "isQueryInFlight"], false);
+      const updatedError = withState.setIn(
+        [...widgetStatePath, "error"],
+        action.error ?? null
+      );
+      return updatedError.setIn([...widgetStatePath, "isQueryInFlight"], false);
     }
     case PropertyActionType.CLEAR_ERROR: {
       const withState = ensureWidgetState(state);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (withState as any).setIn([...widgetStatePath, "error"], null);
+      return withState.setIn([...widgetStatePath, "error"], null);
     }
     case PropertyActionType.SET_SELECTED_PROPERTIES: {
       const withState = ensureWidgetState(state);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (withState as any).setIn(
+      return withState.setIn(
         [...widgetStatePath, "selectedProperties"],
         action.properties
       );
     }
     case PropertyActionType.CLEAR_ALL: {
       const withState = ensureWidgetState(state);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (withState as any).setIn(widgetStatePath, createImmutableState());
+      return withState.setIn(widgetStatePath, createImmutableState());
     }
     case PropertyActionType.SET_QUERY_IN_FLIGHT: {
       const withState = ensureWidgetState(state);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (withState as any).setIn(
+      return withState.setIn(
         [...widgetStatePath, "isQueryInFlight"],
         action.inFlight
       );
     }
     case PropertyActionType.SET_RAW_RESULTS: {
       const withState = ensureWidgetState(state);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (withState as any).setIn(
+      return withState.setIn(
         [...widgetStatePath, "rawPropertyResults"],
         action.results
       );
     }
     case PropertyActionType.REMOVE_WIDGET_STATE: {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const byId = (state as any).byId.without(widgetId);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (state as any).set("byId", byId);
+      const updatedById = state.byId.without(widgetId);
+      return state.set("byId", updatedById);
     }
     default:
       return state;
@@ -173,13 +167,26 @@ export const getStoreId = (): string => "property-state";
 export const createPropertySelectors = (
   widgetId: string
 ): PropertySelectors => {
+  const isObjectRecord = (
+    value: unknown
+  ): value is { [key: string]: unknown } => {
+    return typeof value === "object" && value !== null;
+  };
+
+  const getExtensionsState = (
+    state: IMState
+  ): { [key: string]: unknown } | undefined => {
+    if (!isObjectRecord(state) || !("extensionsState" in state)) {
+      return undefined;
+    }
+    const candidate = (state as { extensionsState?: unknown }).extensionsState;
+    return isObjectRecord(candidate) ? candidate : undefined;
+  };
+
   const getWidgetState = (
     state: IMState
   ): IMPropertyWidgetState | undefined => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const extensionsState = (state as any).extensionsState as
-      | { [key: string]: unknown }
-      | undefined;
+    const extensionsState = getExtensionsState(state);
 
     const fromExtensions = extensionsState?.[getStoreId()] as
       | IMPropertyGlobalState
