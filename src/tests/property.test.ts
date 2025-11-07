@@ -1227,18 +1227,18 @@ describe("Property Widget - Utility Helper Functions", () => {
   });
 
   it("should detect duplicate properties", () => {
-    const properties = [{ FNR: "1234" }, { FNR: 5678 }];
-    expect(isDuplicateProperty("1234", properties)).toBe(true);
-    expect(isDuplicateProperty(5678, properties)).toBe(true);
-    expect(isDuplicateProperty("9999", properties)).toBe(false);
-    expect(isDuplicateProperty(1234, properties)).toBe(true); // String/number normalization
+    const existingPropertyFnrs = new Set(["1234", "5678"]);
+    expect(isDuplicateProperty("1234", existingPropertyFnrs)).toBe(true);
+    expect(isDuplicateProperty(5678, existingPropertyFnrs)).toBe(true);
+    expect(isDuplicateProperty("9999", existingPropertyFnrs)).toBe(false);
+    expect(isDuplicateProperty(1234, existingPropertyFnrs)).toBe(true); // String/number normalization
   });
 
   it("should determine toggle removal correctly", () => {
-    const properties = [{ FNR: "1234" }];
-    expect(shouldToggleRemove("1234", properties, true)).toBe(true);
-    expect(shouldToggleRemove("1234", properties, false)).toBe(false);
-    expect(shouldToggleRemove("9999", properties, true)).toBe(false);
+    const existingPropertyFnrs = new Set(["1234"]);
+    expect(shouldToggleRemove("1234", existingPropertyFnrs, true)).toBe(true);
+    expect(shouldToggleRemove("1234", existingPropertyFnrs, false)).toBe(false);
+    expect(shouldToggleRemove("9999", existingPropertyFnrs, true)).toBe(false);
   });
 
   it("should use Set-based lookups in calculatePropertyUpdates for large selections", () => {

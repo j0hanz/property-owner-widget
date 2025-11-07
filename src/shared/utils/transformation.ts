@@ -34,14 +34,7 @@ export const buildResultsMap = (
   }
 
   if (isSerializedResultRecord(rawResults)) {
-    const resultsMap = new Map<string, SerializedQueryResult>();
-    Object.keys(rawResults).forEach((key) => {
-      const value = rawResults[key];
-      if (value) {
-        resultsMap.set(key, value);
-      }
-    });
-    return resultsMap;
+    return new Map(Object.entries(rawResults));
   }
 
   return null;

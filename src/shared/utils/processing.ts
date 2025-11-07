@@ -372,25 +372,19 @@ export const processOwnerResult = (params: {
 
 export const isDuplicateProperty = (
   fnr: string | number,
-  existingProperties: Array<{ FNR: string | number }>
+  existingPropertyFnrs: Set<string>
 ): boolean => {
   const fnrKey = normalizeFnrKey(fnr);
-  const len = existingProperties.length;
-  for (let i = 0; i < len; i++) {
-    if (normalizeFnrKey(existingProperties[i].FNR) === fnrKey) {
-      return true;
-    }
-  }
-  return false;
+  return existingPropertyFnrs.has(fnrKey);
 };
 
 export const shouldToggleRemove = (
   fnr: string | number,
-  existingProperties: Array<{ FNR: string | number }>,
+  existingPropertyFnrs: Set<string>,
   toggleEnabled: boolean
 ): boolean => {
   if (!toggleEnabled) return false;
-  return isDuplicateProperty(fnr, existingProperties);
+  return isDuplicateProperty(fnr, existingPropertyFnrs);
 };
 
 const buildFnrGroupMap = <T extends { FNR: string | number; id: string }>(

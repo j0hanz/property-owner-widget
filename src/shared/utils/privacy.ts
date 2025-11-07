@@ -233,23 +233,19 @@ export const deduplicateOwnerEntries = (
   owners: OwnerAttributes[],
   context: { fnr: FnrValue; propertyId: string }
 ): OwnerAttributes[] => {
-  if (!owners || owners.length === 0) return [];
-  if (owners.length === 1) return [owners[0]];
+  if (!owners || owners.length < 2) return owners || [];
 
   const seen = new Set<string>();
   const unique: OwnerAttributes[] = [];
+  const len = owners.length;
 
-  for (let i = 0; i < owners.length; i += 1) {
+  for (let i = 0; i < len; i += 1) {
     const owner = owners[i];
     if (!owner || typeof owner !== "object") continue;
 
-    try {
-      const key = ownerIdentity.buildKey(owner, context, i);
-      if (!seen.has(key)) {
-        seen.add(key);
-        unique.push(owner);
-      }
-    } catch (_error) {
+    const key = ownerIdentity.buildKey(owner, context, i);
+    if (!seen.has(key)) {
+      seen.add(key);
       unique.push(owner);
     }
   }
