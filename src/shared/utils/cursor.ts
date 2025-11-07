@@ -21,12 +21,22 @@ const sanitizeTooltipText = (
   return sanitized.length > 0 ? sanitized : null;
 };
 
+const symbolCache = new Map<string, __esri.TextSymbol>();
+const MAX_CACHE_SIZE = 50;
+
 const createTooltipTextSymbol = (
   modules: EsriModules,
   sanitizedText: string,
   style: CursorTooltipStyle
-): __esri.TextSymbol =>
-  new modules.TextSymbol({
+): __esri.TextSymbol => {
+  const cacheKey = `${sanitizedText}-${style.fontSize}-${style.textColor[0]},${style.textColor[1]},${style.textColor[2]},${style.textColor[3]}`;
+
+  const cached = symbolCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const symbol = new modules.TextSymbol({
     text: sanitizedText,
     color: style.textColor,
     backgroundColor: style.backgroundColor,
@@ -43,6 +53,15 @@ const createTooltipTextSymbol = (
     },
     kerning: style.kerning,
   } as __esri.TextSymbolProperties);
+
+  // LRU: Remove oldest if cache full
+  if (symbolCache.size >= MAX_CACHE_SIZE) {
+    const firstKey = symbolCache.keys().next().value;
+    if (firstKey) symbolCache.delete(firstKey);
+  }
+  symbolCache.set(cacheKey, symbol);
+  return symbol;
+};
 
 export const buildTooltipSymbol = (
   modules: EsriModules,
@@ -92,6 +111,13 @@ const updateOrCreateGraphic = <T extends __esri.Graphic>(
   return existing;
 };
 
+const shouldUpdateTooltipText = (
+  state: CursorGraphicsState,
+  sanitizedText: string
+): boolean => {
+  return state.lastTooltipText !== sanitizedText;
+};
+
 const syncTooltipGraphic = (
   modules: EsriModules,
   layer: __esri.GraphicsLayer,
@@ -106,7 +132,8 @@ const syncTooltipGraphic = (
     return;
   }
 
-  if (state.lastTooltipText === sanitized) {
+  // Performance: Skip symbol creation if text unchanged (reduces DOM updates)
+  if (!shouldUpdateTooltipText(state, sanitized)) {
     if (state.tooltipGraphic) {
       state.tooltipGraphic.geometry = mapPoint;
     }
@@ -146,10 +173,12 @@ export const syncCursorGraphics = ({
   existing: CursorGraphicsState | null;
   style?: CursorTooltipStyle;
 }): CursorGraphicsState | null => {
+  // Guard: Early exit if required modules/layer unavailable
   if (!modules?.Graphic || !modules.TextSymbol || !layer) {
     return existing || null;
   }
 
+  // Guard: Clear state if no map point
   if (!mapPoint) {
     if (existing) clearAllGraphics(layer, existing);
     return null;
@@ -191,6 +220,14 @@ export const scheduleCursorUpdate = (params: {
 }): void => {
   const { rafIdRef, pendingMapPointRef, nextPoint, onUpdate } = params;
 
+  // Avoid scheduling if the point hasn't changed
+  if (nextPoint && pendingMapPointRef.current) {
+    const prev = pendingMapPointRef.current;
+    if (prev.x === nextPoint.x && prev.y === nextPoint.y) {
+      return;
+    }
+  }
+
   pendingMapPointRef.current = nextPoint;
 
   if (!nextPoint) {
@@ -224,8 +261,9 @@ const validateAndGetManager = (
     translate,
   });
 
-  if (checkValidationFailure(dsValidation)) return null;
-  return dsValidation.data.manager;
+  return checkValidationFailure(dsValidation)
+    ? null
+    : dsValidation.data.manager;
 };
 
 const queryPropertyData = async (
@@ -344,9 +382,9 @@ const removeEventHandle = (
 };
 
 const resetRefState = (...refs: Array<MutableRefObject<unknown>>): void => {
-  for (const ref of refs) {
+  refs.forEach((ref) => {
     ref.current = null;
-  }
+  });
 };
 
 const STANDARD_CURSOR_VALUES = [

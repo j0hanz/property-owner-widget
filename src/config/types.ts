@@ -1,10 +1,4 @@
-import type {
-  DataSourceManager,
-  ImmutableArray,
-  ImmutableObject,
-  IMState,
-  UseDataSource,
-} from "jimu-core";
+import type { DataSourceManager, ImmutableObject, IMState } from "jimu-core";
 import type { ColumnDef, SortingState } from "@tanstack/react-table";
 import type { Immutable } from "seamless-immutable";
 import type { WidgetStyles } from "./style";
@@ -174,6 +168,8 @@ export interface PropertyWidgetState {
   isQueryInFlight: boolean;
   rawPropertyResults: SerializedQueryResultMap | null;
 }
+
+export type IMPropertyWidgetState = ImmutableObject<PropertyWidgetState>;
 
 export interface IMPropertyGlobalState {
   readonly byId: {
@@ -554,12 +550,6 @@ export interface UnknownRecord {
   [key: string]: unknown;
 }
 
-export type UseDataSourceCandidate =
-  | UseDataSource
-  | ImmutableObject<UseDataSource>
-  | null
-  | undefined;
-
 export type MapViewWithPopupToggle = __esri.MapView & {
   popupEnabled?: boolean;
 };
@@ -604,14 +594,6 @@ export type GeoJsonGeometry =
 
 export interface FieldErrors {
   [key: string]: string | undefined;
-}
-
-export type ImmutableArrayFactory = <T>(
-  values: readonly T[]
-) => ImmutableArray<T>;
-
-export interface MutableAccessor<T> {
-  asMutable?: (options?: { deep?: boolean }) => T;
 }
 
 // =============================================================================
@@ -716,6 +698,15 @@ export interface MapClickValidationParams {
 // REDUX ACTION TYPES
 // Redux action union types for state management
 // =============================================================================
+
+export type Property = GridRowData;
+
+export interface PropertySelectors {
+  selectError: (state: IMState) => ErrorState | null;
+  selectSelectedProperties: (state: IMState) => GridRowData[];
+  selectIsQueryInFlight: (state: IMState) => boolean;
+  selectRawPropertyResults: (state: IMState) => SerializedQueryResultMap | null;
+}
 
 export type PropertyAction =
   | {

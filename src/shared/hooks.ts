@@ -219,29 +219,50 @@ export const useGraphicsLayer = (params: {
   const highlightGraphicsMapRef = React.useRef<Map<string, __esri.Graphic>>(
     new Map()
   );
+  const cachedLayerRef = React.useRef<__esri.GraphicsLayer | null>(null);
 
   const ensureHighlightLayer = hooks.useEventCallback(
     (view: __esri.MapView | null | undefined): __esri.GraphicsLayer | null => {
+      // Guard: Early exit if prerequisites missing
       if (!view || !modules) {
         return null;
       }
 
+      // Performance: Return existing layer if valid
       if (highlightLayerRef.current && !highlightLayerRef.current.destroyed) {
         return highlightLayerRef.current;
       }
 
-      const layer = new modules.GraphicsLayer({
-        listMode: "hide",
-        title: `Property Highlights - ${widgetId}`,
-      });
+      const layerId = `Property Highlights - ${widgetId}`;
+      const existing = view.map.findLayerById(layerId) as
+        | __esri.GraphicsLayer
+        | undefined;
 
-      view.map.add(layer);
-      highlightLayerRef.current = layer;
+      if (existing && !existing.destroyed) {
+        highlightLayerRef.current = existing;
+        cachedLayerRef.current = existing;
+        return existing;
+      }
+
+      // Create and cache new layer
+      if (!cachedLayerRef.current || cachedLayerRef.current.destroyed) {
+        cachedLayerRef.current = new modules.GraphicsLayer({
+          id: layerId,
+          listMode: "hide",
+          title: layerId,
+        });
+      }
+
+      if (!view.map.findLayerById(cachedLayerRef.current.id)) {
+        view.map.add(cachedLayerRef.current);
+      }
+
+      highlightLayerRef.current = cachedLayerRef.current;
       console.log("Created highlight GraphicsLayer", {
         widgetId: widgetIdRef.current,
-        layerId: layer.id,
+        layerId: cachedLayerRef.current.id,
       });
-      return layer;
+      return cachedLayerRef.current;
     }
   );
 
@@ -255,10 +276,7 @@ export const useGraphicsLayer = (params: {
       try {
         layer.remove(graphic);
       } catch (error) {
-        console.log("Failed to remove highlight graphic", {
-          error,
-          widgetId: widgetIdRef.current,
-        });
+        // Silently ignore removal errors
       }
     }
     highlightGraphicsMapRef.current.delete(key);
@@ -270,14 +288,14 @@ export const useGraphicsLayer = (params: {
       try {
         layer.removeAll();
       } catch (error) {
-        console.log("Failed to clear highlight graphics", {
-          error,
-          widgetId: widgetIdRef.current,
-        });
+        // Silently ignore clear errors
       }
     }
     highlightGraphicsMapRef.current.clear();
   });
+
+  const symbolCacheRef = React.useRef<Map<string, __esri.Symbol>>(new Map());
+  const MAX_SYMBOL_CACHE_SIZE = 100;
 
   const createHighlightSymbol = hooks.useEventCallback(
     (
@@ -290,9 +308,17 @@ export const useGraphicsLayer = (params: {
       }
 
       const [r, g, b, a] = highlightColor;
+      const cacheKey = `${geometry.type}-${r}-${g}-${b}-${a}-${outlineWidth}`;
+
+      const cached = symbolCacheRef.current.get(cacheKey);
+      if (cached) {
+        return cached;
+      }
+
+      let symbol: __esri.Symbol | null = null;
 
       if (geometry.type === "polygon") {
-        return new modules.SimpleFillSymbol({
+        symbol = new modules.SimpleFillSymbol({
           style: "solid",
           color: [r, g, b, a],
           outline: {
@@ -301,18 +327,14 @@ export const useGraphicsLayer = (params: {
             width: outlineWidth,
           },
         });
-      }
-
-      if (geometry.type === "polyline") {
-        return new modules.SimpleLineSymbol({
+      } else if (geometry.type === "polyline") {
+        symbol = new modules.SimpleLineSymbol({
           style: "solid",
           color: [r, g, b, a],
           width: outlineWidth,
         });
-      }
-
-      if (geometry.type === "point") {
-        return new modules.SimpleMarkerSymbol({
+      } else if (geometry.type === "point") {
+        symbol = new modules.SimpleMarkerSymbol({
           style: "cross",
           color: [r, g, b, a],
           size: 12,
@@ -324,7 +346,83 @@ export const useGraphicsLayer = (params: {
         });
       }
 
-      return null;
+      if (symbol) {
+        // LRU eviction: Remove oldest entry if cache exceeds limit
+        if (symbolCacheRef.current.size >= MAX_SYMBOL_CACHE_SIZE) {
+          const firstKey = symbolCacheRef.current.keys().next().value;
+          if (firstKey) symbolCacheRef.current.delete(firstKey);
+        }
+        symbolCacheRef.current.set(cacheKey, symbol);
+      }
+      return symbol;
+    }
+  );
+
+  const processHighlightEntry = hooks.useEventCallback(
+    (params: {
+      graphic: __esri.Graphic;
+      fnr: FnrValue | null | undefined;
+      extractFnr: (attrs: AttributeMap | null | undefined) => FnrValue | null;
+      normalizeFnrKey: (fnr: FnrValue | null | undefined) => string;
+      highlightColor: [number, number, number, number];
+      outlineWidth: number;
+      layer: __esri.GraphicsLayer;
+      processedKeys: Set<string>;
+    }): boolean => {
+      const {
+        graphic,
+        fnr,
+        extractFnr,
+        normalizeFnrKey,
+        highlightColor,
+        outlineWidth,
+        layer,
+        processedKeys,
+      } = params;
+
+      const attributes = (graphic.attributes ?? null) as AttributeMap | null;
+      const resolvedFnr = fnr ?? extractFnr(attributes);
+
+      if (resolvedFnr === null || resolvedFnr === undefined) {
+        return false;
+      }
+
+      const key = normalizeFnrKey(resolvedFnr);
+      if (processedKeys.has(key)) {
+        return false;
+      }
+
+      processedKeys.add(key);
+      removeHighlightForKey(key);
+
+      const geometry = graphic.geometry;
+      if (!geometry) {
+        return false;
+      }
+
+      const symbol = createHighlightSymbol(
+        geometry,
+        highlightColor,
+        outlineWidth
+      );
+
+      if (!symbol) {
+        return false;
+      }
+
+      try {
+        const highlightGraphic = new modules.Graphic({
+          geometry,
+          symbol,
+          attributes: { fnr: resolvedFnr },
+        });
+
+        layer.add(highlightGraphic);
+        highlightGraphicsMapRef.current.set(key, highlightGraphic);
+        return true;
+      } catch (error) {
+        return false;
+      }
     }
   );
 
@@ -349,80 +447,36 @@ export const useGraphicsLayer = (params: {
         outlineWidth,
       } = params;
 
+      // Guard: Early exit if preconditions not met
       if (!view || entries.length === 0 || !modules) {
         return;
       }
 
       const layer = ensureHighlightLayer(view);
       if (!layer) {
-        console.log("highlightGraphics: Could not create highlight layer", {
-          widgetId: widgetIdRef.current,
-        });
         return;
+      }
+
+      if (view) {
+        activeViewRef.current = view;
       }
 
       const processedKeys = new Set<string>();
 
-      entries.forEach(({ graphic, fnr }) => {
-        const attributes = (graphic.attributes ?? null) as AttributeMap | null;
-        const resolvedFnr = fnr ?? extractFnr(attributes);
-
-        if (resolvedFnr === null || resolvedFnr === undefined) {
-          return;
-        }
-
-        const key = normalizeFnrKey(resolvedFnr);
-        if (processedKeys.has(key)) {
-          return;
-        }
-
-        processedKeys.add(key);
-        removeHighlightForKey(key);
-        try {
-          const geometry = graphic.geometry;
-          if (!geometry) {
-            console.log("highlightGraphics: Graphic has no geometry", {
-              widgetId: widgetIdRef.current,
-              fnr: resolvedFnr,
-            });
-            return;
-          }
-
-          const symbol = createHighlightSymbol(
-            geometry,
-            highlightColor,
-            outlineWidth
-          );
-
-          if (!symbol) {
-            console.log("highlightGraphics: Could not create symbol", {
-              widgetId: widgetIdRef.current,
-              geometryType: geometry.type,
-            });
-            return;
-          }
-
-          const highlightGraphic = new modules.Graphic({
-            geometry,
-            symbol,
-            attributes: { fnr: resolvedFnr },
-          });
-
-          layer.add(highlightGraphic);
-          highlightGraphicsMapRef.current.set(key, highlightGraphic);
-
-          console.log("highlightGraphics: Added highlight", {
-            widgetId: widgetIdRef.current,
-            fnr: resolvedFnr,
-            geometryType: geometry.type,
-          });
-        } catch (error) {
-          console.log("Failed to highlight property feature", {
-            error,
-            widgetId: widgetIdRef.current,
-          });
-        }
-      });
+      // Performance: Process entries with indexed loop (reduces closure overhead)
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        processHighlightEntry({
+          graphic: entry.graphic,
+          fnr: entry.fnr,
+          extractFnr,
+          normalizeFnrKey,
+          highlightColor,
+          outlineWidth,
+          layer,
+          processedKeys,
+        });
+      }
     }
   );
 
@@ -447,43 +501,45 @@ export const useGraphicsLayer = (params: {
       }
       clearHighlights();
 
-      const layer = highlightLayerRef.current;
+      const targetView = view ?? activeViewRef.current;
+      const layer = highlightLayerRef.current ?? cachedLayerRef.current;
       if (layer && !layer.destroyed) {
         try {
-          if (view?.map) {
-            view.map.remove(layer);
+          if (targetView?.map) {
+            targetView.map.remove(layer);
           }
           layer.destroy();
         } catch (error) {
-          console.log("Failed to destroy highlight layer", {
-            error,
-            widgetId: widgetIdRef.current,
-          });
+          // Silently ignore destroy errors
         }
       }
 
       propertyLayerRef.current = null;
       highlightLayerRef.current = null;
+      cachedLayerRef.current = null;
     }
   );
 
   hooks.useUnmount(() => {
     clearHighlights();
+    symbolCacheRef.current.clear();
 
-    const layer = highlightLayerRef.current;
+    const currentView = activeViewRef.current;
+    const layer = highlightLayerRef.current ?? cachedLayerRef.current;
     if (layer && !layer.destroyed) {
       try {
+        if (currentView?.map) {
+          currentView.map.remove(layer);
+        }
         layer.destroy();
       } catch (error) {
-        console.log("Failed to destroy highlight layer on unmount", {
-          error,
-          widgetId: widgetIdRef.current,
-        });
+        // Silently ignore destroy errors on unmount
       }
     }
 
     propertyLayerRef.current = null;
     highlightLayerRef.current = null;
+    cachedLayerRef.current = null;
     activeViewRef.current = null;
   });
 
@@ -553,7 +609,7 @@ export const usePopupManager = (widgetId: string) => {
 
 export const useMapViewLifecycle = (params: {
   modules: EsriModules | null;
-  destroyGraphicsLayer: (view: __esri.MapView) => void;
+  destroyGraphicsLayer: (view: __esri.MapView | null | undefined) => void;
   disablePopup: (view: __esri.MapView | undefined) => void;
   restorePopup: (view: __esri.MapView | undefined) => void;
   onMapClick: (event: __esri.ViewClickEvent) => void;
@@ -878,51 +934,40 @@ export const useThrottle = <T extends (...args: unknown[]) => void>(
   const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0;
   const callbackRef = hooks.useLatest(callback);
 
-  // If delay is 0, return unthrottled callback for instant execution
+  // Performance: If delay is 0, return unthrottled callback for instant execution
   const unthrottled = hooks.useEventCallback((...args: Parameters<T>) => {
-    try {
-      callbackRef.current(...args);
-    } catch (error) {
-      if (!isAbortError(error)) {
-        console.error("Unthrottled function error:", error);
-      }
-    }
+    callbackRef.current(...args);
   });
 
-  const lastCallTimeRef = React.useRef<number>(0);
-  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingArgsRef = React.useRef<Parameters<T> | null>(null);
-  const mountedRef = React.useRef(true);
+  const stateRef = React.useRef({
+    lastCallTime: 0,
+    timeoutId: null as ReturnType<typeof setTimeout> | null,
+    pendingArgs: null as Parameters<T> | null,
+    mounted: true,
+  });
 
   const execute = hooks.useEventCallback((args: Parameters<T>) => {
-    if (!mountedRef.current) return;
-    lastCallTimeRef.current = Date.now();
-    pendingArgsRef.current = null;
-    try {
-      callbackRef.current(...args);
-    } catch (error) {
-      if (!isAbortError(error)) {
-        console.error("Throttled function error:", error);
-      }
-    }
+    if (!stateRef.current.mounted) return;
+    stateRef.current.lastCallTime = Date.now();
+    stateRef.current.pendingArgs = null;
+    callbackRef.current(...args);
   });
 
   const throttled = hooks.useEventCallback((...args: Parameters<T>) => {
+    const state = stateRef.current;
     const now = Date.now();
-    const timeSinceLastCall = now - lastCallTimeRef.current;
+    const timeSinceLastCall = now - state.lastCallTime;
 
     if (timeSinceLastCall >= safeDelay) {
-      // Execute immediately if enough time has passed
       execute(args);
     } else {
-      // Schedule execution for remaining time
-      pendingArgsRef.current = args;
-      if (!timeoutRef.current) {
+      state.pendingArgs = args;
+      if (!state.timeoutId) {
         const remainingTime = safeDelay - timeSinceLastCall;
-        timeoutRef.current = setTimeout(() => {
-          timeoutRef.current = null;
-          if (pendingArgsRef.current && mountedRef.current) {
-            execute(pendingArgsRef.current);
+        state.timeoutId = setTimeout(() => {
+          state.timeoutId = null;
+          if (state.pendingArgs && state.mounted) {
+            execute(state.pendingArgs);
           }
         }, remainingTime);
       }
@@ -931,10 +976,11 @@ export const useThrottle = <T extends (...args: unknown[]) => void>(
 
   hooks.useEffectOnce(() => {
     return () => {
-      mountedRef.current = false;
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
+      const state = stateRef.current;
+      state.mounted = false;
+      if (state.timeoutId) {
+        clearTimeout(state.timeoutId);
+        state.timeoutId = null;
       }
     };
   });
@@ -950,61 +996,56 @@ export const useDebounce = <T extends (...args: unknown[]) => void>(
   const safeDelay = Number.isFinite(delay) && delay >= 0 ? delay : 0;
   const callbackRef = hooks.useLatest(callback);
 
-  // If delay is 0, return undebounced callback for instant execution
+  // Performance: If delay is 0, return undebounced callback
   const undebounced = hooks.useEventCallback((...args: Parameters<T>) => {
-    try {
-      callbackRef.current(...args);
-    } catch (error) {
-      console.log("Undebounced function error:", { error });
-    }
+    callbackRef.current(...args);
   });
 
   const undebouncedWithCancelRef = React.useRef<DebouncedFn<T> | null>(null);
   if (!undebouncedWithCancelRef.current) {
     const fn = undebounced as DebouncedFn<T>;
-    fn.cancel = () => {
-      // No-op cancel for instant execution
-    };
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    fn.cancel = () => {}; // No-op cancel for instant execution
     undebouncedWithCancelRef.current = fn;
   }
 
-  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingRef = React.useRef(false);
-  const mountedRef = React.useRef(true);
+  const stateRef = React.useRef({
+    timeoutId: null as ReturnType<typeof setTimeout> | null,
+    pending: false,
+    mounted: true,
+  });
   const optionsRef = hooks.useLatest(options);
 
   const notifyPending = hooks.useEventCallback((next: boolean) => {
-    if (pendingRef.current === next) return;
-    pendingRef.current = next;
+    const state = stateRef.current;
+    if (state.pending === next) return;
+    state.pending = next;
     const handler = optionsRef.current?.onPendingChange;
     if (typeof handler === "function") {
-      try {
-        handler(next);
-      } catch (error) {
-        // Silently ignore callback errors to prevent breaking debounce mechanism
-        console.log("onPendingChange callback failed", { error });
-      }
+      handler(next);
     }
   });
 
   const cancel = hooks.useEventCallback(() => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
+    const state = stateRef.current;
+    if (state.timeoutId) {
+      clearTimeout(state.timeoutId);
+      state.timeoutId = null;
     }
-    if (pendingRef.current) {
+    if (state.pending) {
       notifyPending(false);
     }
   });
 
   const run = hooks.useEventCallback((...args: Parameters<T>) => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
+    const state = stateRef.current;
+    if (state.timeoutId) {
+      clearTimeout(state.timeoutId);
     }
     notifyPending(true);
-    timeoutRef.current = setTimeout(() => {
-      timeoutRef.current = null;
-      if (!mountedRef.current) return;
+    state.timeoutId = setTimeout(() => {
+      state.timeoutId = null;
+      if (!state.mounted) return;
       try {
         callbackRef.current(...args);
       } finally {
@@ -1027,7 +1068,8 @@ export const useDebounce = <T extends (...args: unknown[]) => void>(
 
   hooks.useEffectOnce(() => {
     return () => {
-      mountedRef.current = false;
+      const state = stateRef.current;
+      state.mounted = false;
       cancelRef.current();
     };
   });

@@ -33,7 +33,6 @@ import type {
   ValidatedProperty,
   ValidationResult,
 } from "../config/types";
-import { isValidationFailure } from "../config/types";
 import {
   abortHelpers,
   buildFnrWhereClause,
@@ -41,7 +40,6 @@ import {
   calculatePropertyUpdates,
   createRowId,
   createValidationError,
-  createValidationPipeline,
   deriveToggleState,
   extractFnr,
   formatOwnerInfo,
@@ -53,14 +51,16 @@ import {
   parseArcGISError,
   processOwnerResult,
   processPropertyQueryResults,
-  shouldStopAccumulation,
 } from "./utils/index";
 
+// Global module cache - loaded once per session
 let cachedFeatureLayerCtor: FeatureLayerConstructor | null = null;
 let cachedQueryCtor: QueryConstructor | null = null;
 let cachedQueryTaskCtor: QueryTaskConstructor | null = null;
 let cachedRelationshipQueryCtor: RelationshipQueryConstructor | null = null;
 let cachedPromiseUtils: PromiseUtilsLike | null = null;
+
+// Instance caches - cleared on widget unmount
 const featureLayerCache = new Map<string, __esri.FeatureLayer>();
 const relationshipQueryTaskCache = new Map<string, QueryTaskLike>();
 
@@ -136,47 +136,6 @@ const appendRowsForValidatedProperty = (
     fnr: validated.fnr,
   });
 };
-const validateSingleDataSource = (
-  dataSource: FeatureLayerDataSource | null,
-  role: "property" | "owner",
-  translate: (key: string) => string
-): ValidationResult<{ dataSource: FeatureLayerDataSource }> => {
-  if (!dataSource) {
-    return createValidationError(
-      "VALIDATION_ERROR",
-      translate("errorNoDataAvailable"),
-      `${role}_data_source_missing`
-    );
-  }
-
-  return { valid: true, data: { dataSource } };
-};
-
-const validateDataSourceUrl = (
-  dataSource: FeatureLayerDataSource,
-  role: "property" | "owner",
-  allowedHosts: readonly string[] | undefined,
-  translate: (key: string) => string
-): ValidationResult<{ url: string }> => {
-  const url = getDataSourceUrl(dataSource);
-  if (!url) {
-    return createValidationError(
-      "VALIDATION_ERROR",
-      translate("errorNoDataAvailable"),
-      `${role}_missing_url`
-    );
-  }
-
-  if (!isValidArcGISUrl(url, allowedHosts)) {
-    return createValidationError(
-      "VALIDATION_ERROR",
-      translate("errorHostNotAllowed"),
-      `${role}_disallowed_host`
-    );
-  }
-
-  return { valid: true, data: { url } };
-};
 
 const toOwnerAttributes = (
   graphic: __esri.Graphic | null | undefined
@@ -210,11 +169,20 @@ const validateAndDeduplicateProperties = (
   extractFnrFn: (attrs: AttributeMap | null | undefined) => FnrValue | null,
   maxResults?: number
 ): ValidatedProperty[] => {
-  const seenFnrs = new Set<string>();
-  const validated: ValidatedProperty[] = [];
+  const limit =
+    typeof maxResults === "number" ? maxResults : propertyResults.length;
+  const seenFnrs = new Map<string, ValidatedProperty>();
+  const len = propertyResults.length;
 
-  for (const propertyResult of propertyResults) {
-    const feature = propertyResult.features?.[0];
+  // Performance: Direct indexed loop faster than for-of for large arrays
+  for (let i = 0; i < len && seenFnrs.size < limit; i++) {
+    const result = propertyResults[i];
+    const features = result?.features;
+    if (!features || features.length === 0) {
+      continue;
+    }
+
+    const feature = features[0];
     if (!feature?.attributes || !feature.geometry) {
       continue;
     }
@@ -231,19 +199,14 @@ const validateAndDeduplicateProperties = (
       continue;
     }
 
-    seenFnrs.add(normalized);
-    validated.push({
+    seenFnrs.set(normalized, {
       fnr,
       attrs: feature.attributes as PropertyAttributes,
       graphic: feature,
     });
-
-    if (typeof maxResults === "number" && validated.length >= maxResults) {
-      break;
-    }
   }
 
-  return validated;
+  return Array.from(seenFnrs.values());
 };
 
 const fetchOwnerDataForProperty = async (
@@ -253,9 +216,7 @@ const fetchOwnerDataForProperty = async (
 ): Promise<OwnerFetchSuccess> => {
   const { dsManager, signal, helpers } = context;
   try {
-    if (signal?.aborted) {
-      throw new DOMException("Aborted", "AbortError");
-    }
+    abortHelpers.throwIfAborted(signal);
 
     const graphics = await helpers.queryOwnerByFnr(
       validated.fnr,
@@ -303,25 +264,27 @@ const processBatchOfProperties = async (params: {
     graphics: [],
   };
 
+  const remainingCapacity = maxResults - currentRowCount;
+  if (remainingCapacity <= 0) {
+    return accumulator;
+  }
+
   for (let index = 0; index < ownerData.length; index += 1) {
-    const resolution = ownerData[index];
-    const validated = batch[index];
-    if (
-      shouldStopAccumulation(
-        currentRowCount,
-        accumulator.rows.length,
-        maxResults
-      )
-    ) {
+    if (accumulator.rows.length >= remainingCapacity) {
       break;
     }
+
+    const resolution = ownerData[index];
+    const validated = batch[index];
     const skip = shouldSkipOwnerResult(resolution, helpers);
 
-    if (skip.skip) {
-      if (skip.reason === "aborted" || skip.reason === "invalid_value") {
-        continue;
-      }
+    if (
+      skip.skip &&
+      (skip.reason === "aborted" || skip.reason === "invalid_value")
+    ) {
+      continue;
     }
+
     const shouldStop = processOwnerResult({
       resolution,
       validated,
@@ -331,6 +294,7 @@ const processBatchOfProperties = async (params: {
       currentRowCount,
       maxResults,
     });
+
     if (shouldStop) {
       break;
     }
@@ -346,202 +310,82 @@ export const clearQueryCache = (): void => {
 export const validateDataSources = (
   params: ValidateDataSourcesParams
 ): ValidationResult<{ manager: DataSourceManager }> => {
-  interface ValidationState {
-    propertyDsId?: string | null;
-    ownerDsId?: string | null;
-    dsManager: DataSourceManager | null;
-    manager?: DataSourceManager;
-    allowedHosts?: readonly string[];
-    translate: (key: string) => string;
-    propertyDs?: FeatureLayerDataSource;
-    ownerDs?: FeatureLayerDataSource;
+  const { propertyDsId, ownerDsId, dsManager, allowedHosts, translate } =
+    params;
+
+  if (!propertyDsId || !ownerDsId) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorNoDataAvailable"),
+      "missing_data_sources"
+    );
   }
 
-  const initialState: ValidationState = {
-    propertyDsId: params.propertyDsId,
-    ownerDsId: params.ownerDsId,
-    dsManager: params.dsManager,
-    allowedHosts: params.allowedHosts,
-    translate: params.translate,
-  };
-
-  const validateDataSourceIds = (
-    state: ValidationState
-  ): ValidationResult<ValidationState> => {
-    if (!state.propertyDsId || !state.ownerDsId) {
-      return createValidationError(
-        "VALIDATION_ERROR",
-        state.translate("errorNoDataAvailable"),
-        "missing_data_sources"
-      ) as ValidationResult<ValidationState>;
-    }
-    return { valid: true, data: state };
-  };
-
-  const validateManager = (
-    state: ValidationState
-  ): ValidationResult<ValidationState> => {
-    if (!state.dsManager) {
-      return createValidationError(
-        "QUERY_ERROR",
-        state.translate("errorQueryFailed"),
-        "no_data_source_manager"
-      ) as ValidationResult<ValidationState>;
-    }
-    return {
-      valid: true,
-      data: { ...state, manager: state.dsManager },
-    };
-  };
-
-  const validatePropertyDataSource = (
-    state: ValidationState
-  ): ValidationResult<ValidationState> => {
-    const manager = state.manager ?? state.dsManager;
-    if (!manager) {
-      return createValidationError(
-        "QUERY_ERROR",
-        state.translate("errorQueryFailed"),
-        "no_data_source_manager"
-      ) as ValidationResult<ValidationState>;
-    }
-    const propertyDs = manager.getDataSource(
-      state.propertyDsId
-    ) as FeatureLayerDataSource | null;
-    const validation = validateSingleDataSource(
-      propertyDs,
-      "property",
-      state.translate
-    );
-    if (isValidationFailure(validation)) {
-      return {
-        valid: false,
-        error: validation.error,
-        failureReason: validation.failureReason,
-      };
-    }
-    return {
-      valid: true,
-      data: {
-        ...state,
-        manager,
-        propertyDs: validation.data.dataSource,
-      },
-    };
-  };
-
-  const validateOwnerDataSource = (
-    state: ValidationState
-  ): ValidationResult<ValidationState> => {
-    const manager = state.manager ?? state.dsManager;
-    if (!manager) {
-      return createValidationError(
-        "QUERY_ERROR",
-        state.translate("errorQueryFailed"),
-        "no_data_source_manager"
-      ) as ValidationResult<ValidationState>;
-    }
-    const ownerDs = manager.getDataSource(
-      state.ownerDsId
-    ) as FeatureLayerDataSource | null;
-    const validation = validateSingleDataSource(
-      ownerDs,
-      "owner",
-      state.translate
-    );
-    if (isValidationFailure(validation)) {
-      return {
-        valid: false,
-        error: validation.error,
-        failureReason: validation.failureReason,
-      };
-    }
-    return {
-      valid: true,
-      data: {
-        ...state,
-        manager,
-        ownerDs: validation.data.dataSource,
-      },
-    };
-  };
-
-  const validatePropertyUrl = (
-    state: ValidationState
-  ): ValidationResult<ValidationState> => {
-    if (!state.propertyDs) {
-      return createValidationError(
-        "VALIDATION_ERROR",
-        state.translate("errorNoDataAvailable"),
-        "property_data_source_missing"
-      ) as ValidationResult<ValidationState>;
-    }
-    const validation = validateDataSourceUrl(
-      state.propertyDs,
-      "property",
-      state.allowedHosts,
-      state.translate
-    );
-    if (isValidationFailure(validation)) {
-      return {
-        valid: false,
-        error: validation.error,
-        failureReason: validation.failureReason,
-      };
-    }
-    return { valid: true, data: state };
-  };
-
-  const validateOwnerUrl = (
-    state: ValidationState
-  ): ValidationResult<ValidationState> => {
-    if (!state.ownerDs) {
-      return createValidationError(
-        "VALIDATION_ERROR",
-        state.translate("errorNoDataAvailable"),
-        "owner_data_source_missing"
-      ) as ValidationResult<ValidationState>;
-    }
-    const validation = validateDataSourceUrl(
-      state.ownerDs,
-      "owner",
-      state.allowedHosts,
-      state.translate
-    );
-    if (isValidationFailure(validation)) {
-      return {
-        valid: false,
-        error: validation.error,
-        failureReason: validation.failureReason,
-      };
-    }
-    return { valid: true, data: state };
-  };
-
-  const pipeline = createValidationPipeline<ValidationState>([
-    validateDataSourceIds,
-    validateManager,
-    validatePropertyDataSource,
-    validateOwnerDataSource,
-    validatePropertyUrl,
-    validateOwnerUrl,
-  ]);
-
-  const pipelineResult = pipeline(initialState);
-  if (isValidationFailure(pipelineResult)) {
-    return pipelineResult;
-  }
-
-  const resolvedManager = pipelineResult.data.manager;
-  if (!resolvedManager) {
+  if (!dsManager) {
     return createValidationError(
       "QUERY_ERROR",
-      params.translate("errorQueryFailed"),
+      translate("errorQueryFailed"),
       "no_data_source_manager"
     );
   }
 
-  return { valid: true, data: { manager: resolvedManager } };
+  const propertyDs = dsManager.getDataSource(
+    propertyDsId
+  ) as FeatureLayerDataSource | null;
+  if (!propertyDs) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorNoDataAvailable"),
+      "property_data_source_missing"
+    );
+  }
+
+  const ownerDs = dsManager.getDataSource(
+    ownerDsId
+  ) as FeatureLayerDataSource | null;
+  if (!ownerDs) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorNoDataAvailable"),
+      "owner_data_source_missing"
+    );
+  }
+
+  const propertyUrl = getDataSourceUrl(propertyDs);
+  if (!propertyUrl) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorNoDataAvailable"),
+      "property_missing_url"
+    );
+  }
+
+  if (!isValidArcGISUrl(propertyUrl, allowedHosts)) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorHostNotAllowed"),
+      "property_disallowed_host"
+    );
+  }
+
+  const ownerUrl = getDataSourceUrl(ownerDs);
+  if (!ownerUrl) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorNoDataAvailable"),
+      "owner_missing_url"
+    );
+  }
+
+  if (!isValidArcGISUrl(ownerUrl, allowedHosts)) {
+    return createValidationError(
+      "VALIDATION_ERROR",
+      translate("errorHostNotAllowed"),
+      "owner_disallowed_host"
+    );
+  }
+
+  return { valid: true, data: { manager: dsManager } };
 };
 
 export const queryPropertyByPoint = async (
@@ -566,24 +410,24 @@ export const queryPropertyByPoint = async (
     }
 
     if (!cachedFeatureLayerCtor || !cachedQueryCtor) {
-      const modules = await loadArcGISJSAPIModules([
+      const [FeatureLayer, Query] = (await loadArcGISJSAPIModules([
         "esri/layers/FeatureLayer",
         "esri/rest/support/Query",
-      ]);
-      const [FeatureLayer, Query] = modules;
-      cachedFeatureLayerCtor = FeatureLayer as FeatureLayerConstructor;
-      cachedQueryCtor = Query as QueryConstructor;
+      ])) as [FeatureLayerConstructor, QueryConstructor];
+      cachedFeatureLayerCtor = FeatureLayer;
+      cachedQueryCtor = Query;
     }
 
-    const FeatureLayerCtor = cachedFeatureLayerCtor;
-    const QueryCtor = cachedQueryCtor;
-    if (!FeatureLayerCtor || !QueryCtor) {
-      throw new Error("Property query modules failed to load");
+    if (!cachedFeatureLayerCtor || !cachedQueryCtor) {
+      throw new Error("Failed to load ArcGIS query modules");
     }
+
+    const FeatureLayer = cachedFeatureLayerCtor;
+    const Query = cachedQueryCtor;
 
     let layer = featureLayerCache.get(layerUrl);
     if (!layer) {
-      layer = new FeatureLayerCtor({
+      layer = new FeatureLayer({
         url: layerUrl,
         outFields: ["*"],
       });
@@ -601,7 +445,7 @@ export const queryPropertyByPoint = async (
       }
     }
 
-    const query = new QueryCtor({
+    const query = new Query({
       geometry: point,
       returnGeometry: true,
       outFields: ["*"],
@@ -713,31 +557,27 @@ export const queryOwnersByRelationship = async (
     }
 
     if (!cachedQueryTaskCtor || !cachedRelationshipQueryCtor) {
-      const modules = await loadArcGISJSAPIModules([
+      const [QueryTask, RelationshipQuery] = (await loadArcGISJSAPIModules([
         "esri/tasks/QueryTask",
         "esri/rest/support/RelationshipQuery",
-      ]);
-      const [QueryTask, RelationshipQuery] = modules;
-      cachedQueryTaskCtor = QueryTask as QueryTaskConstructor;
-      cachedRelationshipQueryCtor =
-        RelationshipQuery as RelationshipQueryConstructor;
+      ])) as [QueryTaskConstructor, RelationshipQueryConstructor];
+      cachedQueryTaskCtor = QueryTask;
+      cachedRelationshipQueryCtor = RelationshipQuery;
     }
 
-    const QueryTaskCtor = cachedQueryTaskCtor;
-    const RelationshipQueryCtor = cachedRelationshipQueryCtor;
-    if (!QueryTaskCtor || !RelationshipQueryCtor) {
-      throw new Error("Relationship query modules failed to load");
+    if (!cachedQueryTaskCtor || !cachedRelationshipQueryCtor) {
+      throw new Error("Failed to load relationship query modules");
     }
 
-    let queryTask = relationshipQueryTaskCache.get(layerUrl) ?? null;
+    const QueryTask = cachedQueryTaskCtor;
+    const RelationshipQuery = cachedRelationshipQueryCtor;
+
+    let queryTask = relationshipQueryTaskCache.get(layerUrl);
     if (!queryTask) {
-      queryTask = new QueryTaskCtor({ url: layerUrl });
+      queryTask = new QueryTask({ url: layerUrl });
       relationshipQueryTaskCache.set(layerUrl, queryTask);
     }
-    const relationshipQuery = new RelationshipQueryCtor();
-
-    const objectIds: number[] = [];
-    const fnrToObjectIdMap = new Map<number, string>();
+    const relationshipQuery = new RelationshipQuery();
 
     const signalOptions = createSignalOptions(options?.signal);
 
@@ -760,6 +600,10 @@ export const queryOwnersByRelationship = async (
     );
 
     const propertyRecords: FeatureDataRecord[] = [];
+    const objectIds: number[] = [];
+    const fnrToObjectIdMap = new Map<number, string>();
+
+    // Performance: Process batches with concurrency limit
     for (
       let index = 0;
       index < batchRequests.length;
@@ -769,28 +613,30 @@ export const queryOwnersByRelationship = async (
       const settled = await Promise.all(
         slice.map((createRequest) => createRequest())
       );
-      settled.forEach((result) => {
+
+      // Performance: Flatten results and build maps in single pass
+      for (let j = 0; j < settled.length; j++) {
+        const result = settled[j];
         const records = ((result?.records ?? []) as FeatureDataRecord[]) || [];
-        if (records.length > 0) {
-          propertyRecords.push(...records);
+        const recordsLen = records.length;
+
+        for (let k = 0; k < recordsLen; k++) {
+          const record = records[k];
+          propertyRecords.push(record);
+
+          const data = record.getData() as PropertyAttributes;
+          const objectId = data.OBJECTID;
+          const fnr = String(data.FNR);
+
+          if (objectId != null && fnr) {
+            objectIds.push(objectId);
+            fnrToObjectIdMap.set(objectId, fnr);
+          }
         }
-      });
+      }
+
       abortHelpers.throwIfAborted(options?.signal);
     }
-
-    if (propertyRecords.length === 0) {
-      return new Map();
-    }
-
-    propertyRecords.forEach((record: FeatureDataRecord) => {
-      const data = record.getData() as PropertyAttributes;
-      const objectId = data.OBJECTID;
-      const fnr = String(data.FNR);
-      if (objectId != null && fnr) {
-        objectIds.push(objectId);
-        fnrToObjectIdMap.set(objectId, fnr);
-      }
-    });
 
     if (objectIds.length === 0) {
       return new Map();

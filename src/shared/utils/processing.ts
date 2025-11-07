@@ -111,19 +111,27 @@ const createOwnerRows = (
   geometryType: string | null,
   serializedGeometry: SerializedRecord | null
 ): GridRowData[] => {
-  return deduplicateOwnerEntries(owners, {
+  // Deduplicate owner entries based on FNR and property ID
+  const deduplicated = deduplicateOwnerEntries(owners, {
     fnr: validated.fnr,
     propertyId: validated.attrs.UUID_FASTIGHET,
-  }).map((owner) =>
-    mapOwnerToGridRow(
-      owner,
+  });
+
+  // Performance: Pre-allocate result array to avoid dynamic resizing
+  const len = deduplicated.length;
+  const rows = new Array<GridRowData>(len);
+  for (let i = 0; i < len; i++) {
+    rows[i] = mapOwnerToGridRow(
+      deduplicated[i],
       validated,
       maskPII,
       context,
       geometryType,
       serializedGeometry
-    )
-  );
+    );
+  }
+
+  return rows;
 };
 
 const createFallbackRow = (
@@ -228,7 +236,13 @@ const buildSelectedFnrSet = (
   selectedProperties: GridRowData[],
   normalize: (fnr: FnrValue | null | undefined) => string
 ): Set<string> => {
-  return new Set(selectedProperties.map((row) => normalize(row.FNR)));
+  // Performance: Direct loop avoids temporary array allocation from map()
+  const result = new Set<string>();
+  const len = selectedProperties.length;
+  for (let i = 0; i < len; i++) {
+    result.add(normalize(selectedProperties[i].FNR));
+  }
+  return result;
 };
 
 const collectKeysToRemove = (
@@ -358,37 +372,40 @@ export const processOwnerResult = (params: {
 
 export const isDuplicateProperty = (
   fnr: string | number,
-  existingProperties: Array<{ FNR: string | number }>
+  existingPropertyFnrs: Set<string>
 ): boolean => {
   const fnrKey = normalizeFnrKey(fnr);
-  const len = existingProperties.length;
-  for (let i = 0; i < len; i++) {
-    if (normalizeFnrKey(existingProperties[i].FNR) === fnrKey) {
-      return true;
-    }
-  }
-  return false;
+  return existingPropertyFnrs.has(fnrKey);
 };
 
 export const shouldToggleRemove = (
   fnr: string | number,
-  existingProperties: Array<{ FNR: string | number }>,
+  existingPropertyFnrs: Set<string>,
   toggleEnabled: boolean
 ): boolean => {
   if (!toggleEnabled) return false;
-  return isDuplicateProperty(fnr, existingProperties);
+  return isDuplicateProperty(fnr, existingPropertyFnrs);
 };
 
 const buildFnrGroupMap = <T extends { FNR: string | number; id: string }>(
   properties: T[]
-): { byFnr: Map<string, T[]>; seenIds: Set<string> } => {
+): {
+  byFnr: Map<string, T[]>;
+  seenIds: Set<string>;
+  fnrKeys: Map<T, string>;
+} => {
   const byFnr = new Map<string, T[]>();
   const seenIds = new Set<string>();
+  const fnrKeys = new Map<T, string>();
+  // Performance: Pre-allocate capacity hints for large datasets
   const len = properties.length;
 
   for (let i = 0; i < len; i++) {
     const row = properties[i];
+    // Cache normalized key to avoid repeated String() conversions
     const fnrKey = normalizeFnrKey(row.FNR);
+    fnrKeys.set(row, fnrKey);
+
     const group = byFnr.get(fnrKey);
     if (group) {
       group.push(row);
@@ -398,17 +415,7 @@ const buildFnrGroupMap = <T extends { FNR: string | number; id: string }>(
     seenIds.add(row.id);
   }
 
-  return { byFnr, seenIds };
-};
-
-const shouldRemoveForToggle = <T extends { FNR: string | number }>(
-  row: T,
-  existingByFnr: Map<string, T[]>,
-  toggleEnabled: boolean
-): boolean => {
-  if (!toggleEnabled) return false;
-  const existingGroup = existingByFnr.get(normalizeFnrKey(row.FNR));
-  return existingGroup !== undefined && existingGroup.length > 0;
+  return { byFnr, seenIds, fnrKeys };
 };
 
 const processRowsForToggleAndDedup = <
@@ -423,14 +430,11 @@ const processRowsForToggleAndDedup = <
   const toAdd: T[] = [];
 
   for (const row of rowsToProcess) {
-    if (shouldRemoveForToggle(row, existingByFnr, toggleEnabled)) {
-      const fnrKey = normalizeFnrKey(row.FNR);
-      const existingGroup = existingByFnr.get(fnrKey);
-      if (existingGroup) {
-        for (const existingRow of existingGroup) {
-          toRemove.add(existingRow.id);
-        }
-      }
+    const fnrKey = normalizeFnrKey(row.FNR);
+    const hasExistingRows = existingByFnr.has(fnrKey);
+
+    if (toggleEnabled && hasExistingRows) {
+      toRemove.add(fnrKey);
       continue;
     }
 
@@ -451,19 +455,56 @@ const applyRemovalsAndAdditions = <
   existingProperties: T[],
   toRemove: Set<string>,
   toAdd: T[],
-  maxResults: number
+  maxResults: number,
+  cachedFnrKeys: Map<T, string>
 ): T[] => {
-  const filtered =
-    toRemove.size > 0
-      ? existingProperties.filter(
-          (row) => !toRemove.has(normalizeFnrKey(row.FNR))
-        )
-      : existingProperties;
+  // Performance: Eliminate spread operators and pre-allocate result array
+  if (toRemove.size === 0) {
+    const totalLen = existingProperties.length + toAdd.length;
+    const targetLen = Math.min(totalLen, maxResults);
+    const combined = new Array<T>(targetLen);
 
-  const combined = [...filtered, ...toAdd];
-  return combined.length > maxResults
-    ? combined.slice(0, maxResults)
-    : combined;
+    let writeIndex = 0;
+    for (
+      let i = 0;
+      i < existingProperties.length && writeIndex < targetLen;
+      i++
+    ) {
+      combined[writeIndex++] = existingProperties[i];
+    }
+    for (let i = 0; i < toAdd.length && writeIndex < targetLen; i++) {
+      combined[writeIndex++] = toAdd[i];
+    }
+    return combined;
+  }
+
+  // Performance: Single-pass filter and combine
+  const maxFiltered = Math.max(maxResults, existingProperties.length);
+  const filtered = new Array<T>(maxFiltered);
+  let filteredLen = 0;
+
+  for (let i = 0; i < existingProperties.length; i++) {
+    const row = existingProperties[i];
+    const cachedKey = cachedFnrKeys.get(row);
+    const fnrKey = cachedKey ?? normalizeFnrKey(row.FNR);
+    if (!toRemove.has(fnrKey)) {
+      filtered[filteredLen++] = row;
+    }
+  }
+
+  const totalLen = filteredLen + toAdd.length;
+  const targetLen = Math.min(totalLen, maxResults);
+  const combined = new Array<T>(targetLen);
+
+  let writeIndex = 0;
+  for (let i = 0; i < filteredLen && writeIndex < targetLen; i++) {
+    combined[writeIndex++] = filtered[i];
+  }
+  for (let i = 0; i < toAdd.length && writeIndex < targetLen; i++) {
+    combined[writeIndex++] = toAdd[i];
+  }
+
+  return combined;
 };
 
 export const calculatePropertyUpdates = <
@@ -474,8 +515,11 @@ export const calculatePropertyUpdates = <
   toggleEnabled: boolean,
   maxResults: number
 ): { toRemove: Set<string>; toAdd: T[]; updatedRows: T[] } => {
-  const { byFnr: existingByFnr, seenIds } =
-    buildFnrGroupMap(existingProperties);
+  const {
+    byFnr: existingByFnr,
+    seenIds,
+    fnrKeys,
+  } = buildFnrGroupMap(existingProperties);
   const { toRemove, toAdd } = processRowsForToggleAndDedup(
     rowsToProcess,
     existingByFnr,
@@ -486,7 +530,8 @@ export const calculatePropertyUpdates = <
     existingProperties,
     toRemove,
     toAdd,
-    maxResults
+    maxResults,
+    fnrKeys
   );
 
   return { toRemove, toAdd, updatedRows };
@@ -542,12 +587,19 @@ const buildPropertyResultsLookup = (
   propertyResults: QueryResult[],
   normalize: (fnr: FnrValue | null | undefined) => string
 ): Map<string, SerializedQueryResult> => {
+  // Performance: Direct loop with early continue for better branch prediction
   const lookup = new Map<string, SerializedQueryResult>();
   const len = propertyResults.length;
 
   for (let i = 0; i < len; i++) {
     const result = propertyResults[i];
-    const fnrValue = extractFnrFromFeature(result?.features?.[0]);
+    if (!result) continue;
+
+    const features = result.features;
+    if (!features || features.length === 0) continue;
+
+    const feature = features[0];
+    const fnrValue = extractFnrFromFeature(feature);
     if (fnrValue !== null) {
       lookup.set(normalize(fnrValue), serializePropertyResult(result));
     }
@@ -560,8 +612,9 @@ const buildSelectedPropertiesLookup = (
   selectedProperties: Array<{ FNR: string | number; id: string }>,
   normalize: (fnr: FnrValue | null | undefined) => string
 ): Map<string, string> => {
-  const lookup = new Map<string, string>();
+  // Performance: Direct loop with explicit length check
   const len = selectedProperties.length;
+  const lookup = new Map<string, string>();
 
   for (let i = 0; i < len; i++) {
     const row = selectedProperties[i];
@@ -606,12 +659,13 @@ const removeDeletedProperties = (
   toRemove: Set<string>,
   selectedByFnr: Map<string, string>
 ): void => {
-  toRemove.forEach((removedKey) => {
+  // Performance: for-of loop is optimized for Set iteration
+  for (const removedKey of toRemove) {
     const removedId = selectedByFnr.get(removedKey);
     if (removedId) {
       updated.delete(removedId);
     }
-  });
+  }
 };
 
 export const updateRawPropertyResults = (

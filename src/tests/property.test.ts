@@ -1,9 +1,10 @@
-import { WidgetState } from "jimu-core";
 import type {
   DataSourceManager,
   FeatureDataRecord,
   FeatureLayerDataSource,
+  IMState,
 } from "jimu-core";
+import SeamlessImmutable from "seamless-immutable";
 import { describe, expect, it, jest } from "@jest/globals";
 import "@testing-library/jest-dom";
 import copyLib from "copy-to-clipboard";
@@ -14,15 +15,22 @@ import { PropertyActionType } from "../config/enums";
 import type {
   EsriModules,
   GridRowData,
+  IMPropertyGlobalState,
+  IMPropertyWidgetState,
+  IMStateWithProperty,
   OwnerAttributes,
   PropertyAction,
   PropertyProcessingContext,
   PropertyQueryHelpers,
   PropertyQueryMessages,
+  PropertyWidgetState,
   QueryResult,
   RelationshipQueryLike,
+  SerializedQueryFeature,
   SerializedQueryResult,
+  SerializedQueryResultMap,
 } from "../config/types";
+import { createPropertySelectors, getStoreId } from "../extensions/store";
 import {
   clearQueryCache,
   isValidArcGISUrl,
@@ -39,7 +47,6 @@ import {
   buildHighlightSymbolJSON,
   buildTooltipSymbol,
   calculatePropertyUpdates,
-  computeWidgetsToClose,
   convertToCSV,
   convertToGeoJSON,
   convertToJSON,
@@ -71,6 +78,95 @@ jest.mock("copy-to-clipboard", () => ({
 }));
 
 const copyMock = copyLib as unknown as jest.MockedFunction<typeof copyLib>;
+
+const createSelectorsTestState = (widgetId: string) => {
+  const rowId = "row-1";
+  const fnr = "1234";
+  const error = {
+    type: "NETWORK_ERROR" as const,
+    message: "Test error",
+  };
+
+  const baseState: PropertyWidgetState = {
+    error,
+    selectedProperties: [
+      {
+        id: rowId,
+        FNR: fnr,
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Fastighet 1",
+        BOSTADR: "Owner 1",
+        ADDRESS: "Owner 1",
+        geometryType: null,
+        geometry: null,
+      } as GridRowData,
+    ],
+    isQueryInFlight: true,
+    rawPropertyResults: {
+      [rowId]: {
+        propertyId: fnr,
+        features: [] as SerializedQueryFeature[],
+      },
+    } as SerializedQueryResultMap,
+  };
+
+  const widgetState = SeamlessImmutable(baseState) as IMPropertyWidgetState;
+
+  const globalState = SeamlessImmutable({
+    byId: {
+      [widgetId]: widgetState,
+    },
+  }) as IMPropertyGlobalState;
+
+  return {
+    rowId,
+    fnr,
+    error,
+    globalState,
+  };
+};
+
+describe("property store selectors", () => {
+  it("reads widget state from property-state root key", () => {
+    const widgetId = "widget-selectors-root";
+    const selectors = createPropertySelectors(widgetId);
+    const { rowId, fnr, error, globalState } =
+      createSelectorsTestState(widgetId);
+
+    const state = {
+      "property-state": globalState,
+    } as unknown as IMStateWithProperty;
+
+    const selected = selectors.selectSelectedProperties(state);
+    expect(selectors.selectError(state)).toMatchObject(error);
+    expect(selectors.selectIsQueryInFlight(state)).toBe(true);
+    expect(selected).toHaveLength(1);
+    expect(selected[0]).toMatchObject({ id: rowId, FNR: fnr });
+
+    const rawResults = selectors.selectRawPropertyResults(state);
+    expect(rawResults).toMatchObject({
+      [rowId]: {
+        propertyId: fnr,
+        features: [],
+      },
+    });
+  });
+
+  it("supports selectors stored under extensionsState", () => {
+    const widgetId = "widget-selectors-extensions";
+    const selectors = createPropertySelectors(widgetId);
+    const { globalState } = createSelectorsTestState(widgetId);
+
+    const state = {
+      extensionsState: {
+        [getStoreId()]: globalState,
+      },
+    } as unknown as IMState;
+
+    const selected = selectors.selectSelectedProperties(state);
+    expect(selected).toHaveLength(1);
+  });
+});
 
 interface MockFeature {
   attributes: { [key: string]: unknown };
@@ -548,37 +644,6 @@ describe("createPropertyDispatcher", () => {
       "row-1": serialized,
     };
     expect(action.results).toEqual(expectedPlainObject);
-  });
-});
-
-describe("computeWidgetsToClose", () => {
-  it("returns only property widgets that are active", () => {
-    const runtimeInfo = {
-      widget_property_a: { state: WidgetState.Opened, isClassLoaded: true },
-      widget_chart_a: { state: WidgetState.Opened, isClassLoaded: true },
-    };
-    const widgets = {
-      widget_property_a: { manifest: { name: "property" } },
-      widget_chart_a: { manifest: { name: "chart" } },
-    };
-
-    const targets = computeWidgetsToClose(
-      runtimeInfo,
-      "widget_property_b",
-      widgets
-    );
-
-    expect(targets).toEqual(["widget_property_a"]);
-  });
-
-  it("ignores widgets without property metadata", () => {
-    const runtimeInfo = {
-      widget_other: { state: WidgetState.Active, isClassLoaded: true },
-    };
-
-    const targets = computeWidgetsToClose(runtimeInfo, "widget_property_b", {});
-
-    expect(targets).toEqual([]);
   });
 });
 
@@ -1227,18 +1292,18 @@ describe("Property Widget - Utility Helper Functions", () => {
   });
 
   it("should detect duplicate properties", () => {
-    const properties = [{ FNR: "1234" }, { FNR: 5678 }];
-    expect(isDuplicateProperty("1234", properties)).toBe(true);
-    expect(isDuplicateProperty(5678, properties)).toBe(true);
-    expect(isDuplicateProperty("9999", properties)).toBe(false);
-    expect(isDuplicateProperty(1234, properties)).toBe(true); // String/number normalization
+    const existingPropertyFnrs = new Set(["1234", "5678"]);
+    expect(isDuplicateProperty("1234", existingPropertyFnrs)).toBe(true);
+    expect(isDuplicateProperty(5678, existingPropertyFnrs)).toBe(true);
+    expect(isDuplicateProperty("9999", existingPropertyFnrs)).toBe(false);
+    expect(isDuplicateProperty(1234, existingPropertyFnrs)).toBe(true); // String/number normalization
   });
 
   it("should determine toggle removal correctly", () => {
-    const properties = [{ FNR: "1234" }];
-    expect(shouldToggleRemove("1234", properties, true)).toBe(true);
-    expect(shouldToggleRemove("1234", properties, false)).toBe(false);
-    expect(shouldToggleRemove("9999", properties, true)).toBe(false);
+    const existingPropertyFnrs = new Set(["1234"]);
+    expect(shouldToggleRemove("1234", existingPropertyFnrs, true)).toBe(true);
+    expect(shouldToggleRemove("1234", existingPropertyFnrs, false)).toBe(false);
+    expect(shouldToggleRemove("9999", existingPropertyFnrs, true)).toBe(false);
   });
 
   it("should use Set-based lookups in calculatePropertyUpdates for large selections", () => {
@@ -1276,6 +1341,39 @@ describe("Property Widget - Utility Helper Functions", () => {
     expect(result.toRemove.size).toBe(0);
     expect(result.updatedRows).toHaveLength(2);
     expect(result.updatedRows.map((row) => row.id)).toEqual(["123_1", "123_2"]);
+  });
+
+  it("should expose normalized FNR keys when calculating removals", () => {
+    const existingRow: GridRowData = {
+      id: createRowId("123", 1),
+      FNR: "123",
+      UUID_FASTIGHET: "uuid-123",
+      FASTIGHET: "Property 123",
+      BOSTADR: "Owner 123",
+      ADDRESS: "Address 123",
+    };
+
+    const rowsToProcess: GridRowData[] = [
+      {
+        id: createRowId("123", 1),
+        FNR: "123",
+        UUID_FASTIGHET: "uuid-123",
+        FASTIGHET: "Property 123",
+        BOSTADR: "Owner 123",
+        ADDRESS: "Address 123",
+      },
+    ];
+
+    const result = calculatePropertyUpdates(
+      rowsToProcess,
+      [existingRow],
+      true,
+      5
+    );
+
+    const normalized = normalizeFnrKey("123");
+    expect(result.toRemove.has(normalized)).toBe(true);
+    expect(result.updatedRows).toHaveLength(0);
   });
 
   it("should sanitize tooltip content when building text symbols", () => {
