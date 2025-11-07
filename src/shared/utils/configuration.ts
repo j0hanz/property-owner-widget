@@ -1,11 +1,40 @@
 import type { ImmutableArray } from "jimu-core";
 import type { IMConfig } from "../../config/types";
-import {
-  normalizeHostValue,
-  getStringValue as readString,
-  resolveCollectionLength,
-  resolveEntry,
-} from "./helpers";
+import { normalizeHostValue } from "./helpers";
+
+const resolveCollectionLength = (collection: unknown): number => {
+  if (!collection) return 0;
+  if (typeof (collection as { size?: unknown }).size === "number") {
+    return (collection as { size: number }).size;
+  }
+  if (typeof (collection as { length?: unknown }).length === "number") {
+    return (collection as { length: number }).length;
+  }
+  return 0;
+};
+
+const readString = (source: unknown, key: string): string => {
+  if (!source || typeof source !== "object") return "";
+
+  const value = (source as { [key: string]: unknown })[key];
+  return typeof value === "string" ? value : "";
+};
+
+interface Gettable {
+  get: (key: string) => unknown;
+}
+
+const getProperty = (source: unknown, key: string): unknown => {
+  if (source && typeof source === "object") {
+    if (typeof (source as Gettable).get === "function") {
+      return (source as Gettable).get(key);
+    }
+    if (key in source) {
+      return (source as { [key: string]: unknown })[key];
+    }
+  }
+  return undefined;
+};
 
 export const computeSettingsVisibility = (params: {
   useMapWidgetIds?: ImmutableArray<string> | string[] | null;
@@ -76,10 +105,10 @@ const hasPropertyKeyword = (value: string): boolean => {
 };
 
 const isPropertyWidget = (targetId: string, widgets: unknown): boolean => {
-  const entry = resolveEntry(widgets, targetId);
+  const entry = getProperty(widgets, targetId);
   if (!entry) return false;
 
-  const manifest = resolveEntry(entry, "manifest");
+  const manifest = getProperty(entry, "manifest");
   const values: string[] = [
     readString(entry, "name"),
     readString(entry, "label"),

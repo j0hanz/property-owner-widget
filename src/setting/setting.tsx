@@ -3,8 +3,6 @@
 import {
   DataSourceTypes,
   hooks,
-  Immutable,
-  type ImmutableArray,
   jsx,
   React,
   ReactRedux,
@@ -31,14 +29,10 @@ import {
   Tooltip,
 } from "jimu-ui";
 import type { AllWidgetSettingProps } from "jimu-for-builder";
+import Immutable from "seamless-immutable";
 import { CURSOR_STYLES, DEFAULT_ACTIVE_CURSOR } from "../config/constants";
 import { useSettingStyles } from "../config/style";
-import type {
-  FieldErrors,
-  IMConfig,
-  ImmutableArrayFactory,
-  MutableAccessor,
-} from "../config/types";
+import type { FieldErrors, IMConfig } from "../config/types";
 import { createPropertySelectors } from "../extensions/store";
 import {
   useBooleanConfigValue,
@@ -50,6 +44,7 @@ import {
 } from "../shared/hooks";
 import {
   computeSettingsVisibility,
+  dataSourceHelpers,
   normalizeHostList,
   normalizeHostValue,
   opacityHelpers,
@@ -60,22 +55,6 @@ import defaultMessages from "./translations/default";
 import removeIcon from "../assets/close.svg";
 import infoIcon from "../assets/info.svg";
 import addIcon from "../assets/plus.svg";
-
-const getImmutableArrayFactory = (): ImmutableArrayFactory =>
-  Immutable as unknown as ImmutableArrayFactory;
-
-function toImmutableArray<T>(values: readonly T[]): ImmutableArray<T> {
-  const factory = getImmutableArrayFactory();
-  return factory(values);
-}
-
-function hasAsMutable<T>(value: unknown): value is MutableAccessor<T> {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as MutableAccessor<T>;
-  return typeof candidate.asMutable === "function";
-}
 
 const Setting = (
   props: AllWidgetSettingProps<IMConfig>
@@ -122,37 +101,21 @@ const Setting = (
     );
   };
 
-  const toMutableUseDataSourceArray = (
-    collection?: ImmutableArray<UseDataSource> | UseDataSource[] | null
-  ): UseDataSource[] => {
-    if (!collection) {
-      return [];
-    }
+  const propertyUseDataSource = dataSourceHelpers.findById(
+    props.useDataSources,
+    config.propertyDataSourceId
+  );
+  const propertySelectorValue = propertyUseDataSource
+    ? Immutable([propertyUseDataSource])
+    : Immutable([]);
 
-    if (Array.isArray(collection)) {
-      return collection.slice();
-    }
-
-    if (hasAsMutable<UseDataSource[]>(collection)) {
-      const mutable = collection.asMutable?.({ deep: true });
-      return Array.isArray(mutable) ? mutable : [];
-    }
-
-    return [];
-  };
-
-  const buildSelectorValue = (dataSourceId?: string) => {
-    if (!dataSourceId || !props.useDataSources) {
-      return toImmutableArray<UseDataSource>([]);
-    }
-
-    const collection = toMutableUseDataSourceArray(props.useDataSources);
-    const mutableMatches = collection.filter(
-      (ds) => ds?.dataSourceId === dataSourceId
-    );
-
-    return toImmutableArray<UseDataSource>(mutableMatches);
-  };
+  const ownerUseDataSource = dataSourceHelpers.findById(
+    props.useDataSources,
+    config.ownerDataSourceId
+  );
+  const ownerSelectorValue = ownerUseDataSource
+    ? Immutable([ownerUseDataSource])
+    : Immutable([]);
 
   const getBooleanConfig = useBooleanConfigValue(config);
   const updateConfig = useUpdateConfig(id, config, onSettingChange);
@@ -335,83 +298,14 @@ const Setting = (
   const handlePropertyDataSourceChange = hooks.useEventCallback(
     (useDataSources: UseDataSource[]) => {
       const selectedDs = useDataSources?.[0] ?? null;
-      const propertyId = selectedDs?.dataSourceId ?? "";
-      const existingSources = toMutableUseDataSourceArray(props.useDataSources);
-      const ownerMutable =
-        existingSources.find(
-          (ds) => ds?.dataSourceId === config.ownerDataSourceId
-        ) ?? null;
-      const shouldSyncOwner =
-        (!!propertyId && !config.ownerDataSourceId) ||
-        (!!propertyId &&
-          config.ownerDataSourceId &&
-          config.ownerDataSourceId === config.propertyDataSourceId);
-
-      const updatedUseDataSources: UseDataSource[] = [];
-      if (selectedDs) {
-        updatedUseDataSources.push(selectedDs);
-      }
-      if (
-        ownerMutable &&
-        ownerMutable.dataSourceId &&
-        ownerMutable.dataSourceId !== propertyId &&
-        !shouldSyncOwner
-      ) {
-        updatedUseDataSources.push(ownerMutable);
-      }
-
-      const nextConfig = shouldSyncOwner
-        ? config
-            .set("propertyDataSourceId", propertyId)
-            .set("ownerDataSourceId", propertyId)
-        : config.set("propertyDataSourceId", propertyId);
-
-      onSettingChange({
-        id,
-        useDataSources: updatedUseDataSources,
-        config: nextConfig,
-      });
+      updateConfig("propertyDataSourceId", selectedDs?.dataSourceId ?? "");
     }
   );
 
   const handleOwnerDataSourceChange = hooks.useEventCallback(
     (useDataSources: UseDataSource[]) => {
       const selectedOwner = useDataSources?.[0] ?? null;
-      const ownerId = selectedOwner?.dataSourceId ?? "";
-      const existingSources = toMutableUseDataSourceArray(props.useDataSources);
-
-      let propertyMutable =
-        existingSources.find(
-          (ds) => ds?.dataSourceId === config.propertyDataSourceId
-        ) ?? null;
-      if (!propertyMutable && config.propertyDataSourceId) {
-        propertyMutable = {
-          dataSourceId: config.propertyDataSourceId,
-          mainDataSourceId: config.propertyDataSourceId,
-          rootDataSourceId: config.propertyDataSourceId,
-        } as UseDataSource;
-      }
-
-      const updatedUseDataSources: UseDataSource[] = [];
-      if (propertyMutable) {
-        updatedUseDataSources.push(propertyMutable);
-      }
-
-      // Add owner source if different from property
-      const ownerIsDifferent =
-        !propertyMutable ||
-        propertyMutable.dataSourceId !== selectedOwner?.dataSourceId;
-      if (selectedOwner && ownerIsDifferent) {
-        updatedUseDataSources.push(selectedOwner);
-      }
-
-      const nextConfig = config.set("ownerDataSourceId", ownerId);
-
-      onSettingChange({
-        id,
-        useDataSources: updatedUseDataSources,
-        config: nextConfig,
-      });
+      updateConfig("ownerDataSourceId", selectedOwner?.dataSourceId ?? "");
     }
   );
 
@@ -524,9 +418,6 @@ const Setting = (
     sanitizedAllowedHostInput.length > 0 &&
     !localAllowedHostsList.includes(sanitizedAllowedHostInput);
 
-  const propertySelectorValue = buildSelectorValue(config.propertyDataSourceId);
-  const ownerSelectorValue = buildSelectorValue(config.ownerDataSourceId);
-
   return (
     <>
       {(selectedCount > 0 || isQueryInFlight || hasError) && (
@@ -580,7 +471,7 @@ const Setting = (
               )}
             >
               <DataSourceSelector
-                types={toImmutableArray([DataSourceTypes.FeatureLayer])}
+                types={Immutable([DataSourceTypes.FeatureLayer])}
                 useDataSources={propertySelectorValue}
                 mustUseDataSource
                 onChange={handlePropertyDataSourceChange}
@@ -599,7 +490,7 @@ const Setting = (
               )}
             >
               <DataSourceSelector
-                types={toImmutableArray([DataSourceTypes.FeatureLayer])}
+                types={Immutable([DataSourceTypes.FeatureLayer])}
                 useDataSources={ownerSelectorValue}
                 mustUseDataSource
                 onChange={handleOwnerDataSourceChange}
@@ -742,7 +633,9 @@ const Setting = (
                           borderless
                           disabled
                           spellCheck={false}
-                          aria-label={`${translate("allowedHostsListLabel")}: ${host}`}
+                          aria-label={`${translate(
+                            "allowedHostsListLabel"
+                          )}: ${host}`}
                         />
                         <Button
                           type="tertiary"

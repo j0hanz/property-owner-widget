@@ -7,12 +7,10 @@ import {
   DataSourceManager,
   getAppStore,
   hooks,
-  type ImmutableObject,
   type IMState,
   jsx,
   React,
   ReactRedux,
-  type UseDataSource,
   WidgetState,
 } from "jimu-core";
 import { JimuMapViewComponent } from "jimu-arcgis";
@@ -211,7 +209,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
   const rawPropertyResults = ReactRedux.useSelector<
     IMStateWithProperty,
     SerializedQueryResultMap | null
-  >(selectors.selectRawResults, shallowEqual);
+  >(selectors.selectRawPropertyResults, shallowEqual);
   const selectedCount = selectedProperties.length;
   const hasSelectedProperties = selectedCount > 0;
 
@@ -371,38 +369,16 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     // Widget mounted
   });
 
-  const propertyUseDataSource = (() => {
-    const candidate = dataSourceHelpers.findById(
-      props.useDataSources,
-      config.propertyDataSourceId
-    );
-    if (!candidate) return null;
-    const mutableCandidate = candidate as {
-      asMutable?: (options?: { deep?: boolean }) => unknown;
-    };
-    if (typeof mutableCandidate.asMutable === "function") {
-      return candidate as ImmutableObject<UseDataSource>;
-    }
-    return null;
-  })();
-  const ownerUseDataSource = (() => {
-    const candidate = dataSourceHelpers.findById(
-      props.useDataSources,
-      config.ownerDataSourceId
-    );
-    if (!candidate) return null;
-    const mutableCandidate = candidate as {
-      asMutable?: (options?: { deep?: boolean }) => unknown;
-    };
-    if (typeof mutableCandidate.asMutable === "function") {
-      return candidate as ImmutableObject<UseDataSource>;
-    }
-    return null;
-  })();
-  const propertyUseDataSourceId = dataSourceHelpers.extractId(
-    propertyUseDataSource
+  const propertyUseDataSource = dataSourceHelpers.findById(
+    props.useDataSources,
+    config.propertyDataSourceId
   );
-  const ownerUseDataSourceId = dataSourceHelpers.extractId(ownerUseDataSource);
+  const ownerUseDataSource = dataSourceHelpers.findById(
+    props.useDataSources,
+    config.ownerDataSourceId
+  );
+  const propertyUseDataSourceId = propertyUseDataSource?.dataSourceId;
+  const ownerUseDataSourceId = ownerUseDataSource?.dataSourceId;
 
   // ArcGIS resource refs: Singleton manager and query tracking
   const dsManagerRef = React.useRef<DataSourceManager | null>(null);
