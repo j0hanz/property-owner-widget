@@ -44,7 +44,9 @@ const cloneRecordWithDepth = (
 
   try {
     return JSON.parse(JSON.stringify(value)) as unknown;
-  } catch (_error) {
+  } catch (error) {
+    // Fallback to manual cloning when JSON serialization fails
+    console.log("[serialization] JSON clone failed, using manual clone", error);
     const result: UnknownRecord = {};
     const entries = Object.entries(value);
     for (const [key, entryValue] of entries) {

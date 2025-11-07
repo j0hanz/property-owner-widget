@@ -1936,15 +1936,34 @@ describe("Clipboard Formatting", () => {
     );
   });
 
-  it("should mask owner data when masking is enabled", () => {
+  it("should keep owner data unmasked for clipboard regardless of masking", () => {
     const result = formatPropertiesForClipboard(
       [baseRow],
       true,
       "Unknown owner"
     );
 
-    expect(result).toContain("Lund 1:1\tJ*** D**");
-    expect(result).not.toContain("John Doe");
+    expect(result).toContain(
+      "Lund 1:1\tJohn Doe, Testgatan 1, 12345 Lund (556677-8899)"
+    );
+    expect(result).not.toContain("J*** D**");
+  });
+
+  it("should ignore masked grid values when raw owner data is present", () => {
+    const maskedRow: GridRowData = {
+      ...baseRow,
+      BOSTADR: "J*** D**",
+      ADDRESS: "J*** D**",
+    };
+
+    const result = formatPropertiesForClipboard(
+      [maskedRow],
+      true,
+      "Unknown owner"
+    );
+
+    expect(result).toContain("John Doe");
+    expect(result).not.toContain("J*** D**");
   });
 
   it("should sanitize HTML content in cells", () => {
@@ -2221,7 +2240,7 @@ describe("Export Utilities - CSV", () => {
       },
     ];
 
-    const csv = convertToCSV(rows);
+    const csv = convertToCSV(rows, "Unknown owner");
     expect(csv.split("\n")[1]).toContain('"Value, with comma"');
   });
 
@@ -2233,7 +2252,7 @@ describe("Export Utilities - CSV", () => {
       },
     ];
 
-    const csv = convertToCSV(rows);
+    const csv = convertToCSV(rows, "Unknown owner");
     expect(csv.split("\n")[1]).toContain('"Address ""quoted"" street"');
   });
 
@@ -2245,7 +2264,7 @@ describe("Export Utilities - CSV", () => {
       },
     ];
 
-    const csv = convertToCSV(rows);
+    const csv = convertToCSV(rows, "Unknown owner");
     expect(csv).toContain("Malmö");
   });
 
@@ -2257,7 +2276,7 @@ describe("Export Utilities - CSV", () => {
       },
     ];
 
-    const csv = convertToCSV(rows);
+    const csv = convertToCSV(rows, "Unknown owner");
     expect(csv).toContain("Secure");
     expect(csv).not.toContain("<strong>");
   });
@@ -2270,7 +2289,7 @@ describe("Export Utilities - CSV", () => {
       },
     ];
 
-    const csv = convertToCSV(rows);
+    const csv = convertToCSV(rows, "Unknown owner");
     const lines = csv.split("\n");
     expect(lines[0]).toBe("FNR,UUID_FASTIGHET,FASTIGHET,BOSTADR,ADDRESS");
     expect(lines[1]).toContain("Test Street 123");
@@ -2285,9 +2304,36 @@ describe("Export Utilities - CSV", () => {
       },
     ];
 
-    const csv = convertToCSV(rows);
+    const csv = convertToCSV(rows, "Unknown owner");
     const lines = csv.split("\n");
     expect(lines[1]).toMatch(/,""$/);
+  });
+
+  it("should use raw owner data when UI values are masked", () => {
+    const rows: GridRowData[] = [
+      {
+        ...baseRow,
+        BOSTADR: "J*** D**",
+        ADDRESS: "J*** D**",
+        rawOwner: {
+          OBJECTID: 1,
+          FNR: "123",
+          UUID_FASTIGHET: "uuid-123",
+          FASTIGHET: "Property",
+          NAMN: "John Doe",
+          BOSTADR: "Test Street 123",
+          POSTNR: "12345",
+          POSTADR: "City",
+          ORGNR: "556677-8899",
+        },
+      },
+    ];
+
+    const csv = convertToCSV(rows, "Unknown owner");
+    const lines = csv.split("\n");
+    expect(lines[1]).toContain("Test Street 123");
+    expect(lines[1]).toContain("John Doe");
+    expect(lines[1]).not.toContain("J*** D**");
   });
 });
 
@@ -2393,7 +2439,7 @@ describe("Export Utilities - JSON", () => {
     expect(json[2].ADDRESS).toContain("Hovstadius, Claes Johan Oscar");
   });
 
-  it("should apply PII masking when enabled", () => {
+  it("should keep export data unmasked even when masking is enabled", () => {
     const rows: GridRowData[] = [
       {
         ...baseRow,
@@ -2409,8 +2455,8 @@ describe("Export Utilities - JSON", () => {
 
     const json = convertToJSON(rows, true, "Unknown Owner");
 
-    expect(json[0].ADDRESS).toContain("T***");
-    expect(json[0].ADDRESS).not.toContain("Test Owner Name");
+    expect(json[0].ADDRESS).toContain("Test Owner Name");
+    expect(json[0].ADDRESS).not.toContain("T***");
   });
 
   it("should handle missing owner with BOSTADR fallback", () => {
@@ -2588,9 +2634,10 @@ describe("Export Utilities - GeoJSON", () => {
       },
     };
 
-    const geojson = convertToGeoJSON([
-      polygonRow,
-    ]) as unknown as FeatureCollectionLike;
+    const geojson = convertToGeoJSON(
+      [polygonRow],
+      "Unknown owner"
+    ) as unknown as FeatureCollectionLike;
     expect(geojson.features).toHaveLength(1);
     const feature = geojson.features[0];
     expect(feature.geometry.type).toBe("Polygon");
@@ -2599,7 +2646,10 @@ describe("Export Utilities - GeoJSON", () => {
 
   it("should skip rows without geometry", () => {
     const rows: GridRowData[] = [{ ...baseRow }];
-    const geojson = convertToGeoJSON(rows) as unknown as FeatureCollectionLike;
+    const geojson = convertToGeoJSON(
+      rows,
+      "Unknown owner"
+    ) as unknown as FeatureCollectionLike;
     expect(geojson.features).toHaveLength(0);
   });
 
@@ -2617,7 +2667,10 @@ describe("Export Utilities - GeoJSON", () => {
       },
     ];
 
-    const geojson = convertToGeoJSON(rows) as unknown as FeatureCollectionLike;
+    const geojson = convertToGeoJSON(
+      rows,
+      "Unknown owner"
+    ) as unknown as FeatureCollectionLike;
     expect(geojson.features).toHaveLength(0);
   });
 
@@ -2632,9 +2685,10 @@ describe("Export Utilities - GeoJSON", () => {
       },
     };
 
-    const geojson = convertToGeoJSON([
-      rowWithHtml,
-    ]) as unknown as FeatureCollectionLike;
+    const geojson = convertToGeoJSON(
+      [rowWithHtml],
+      "Unknown owner"
+    ) as unknown as FeatureCollectionLike;
     expect(geojson.features[0].properties.FASTIGHET).toBe("Geo property");
     expect(geojson.features[0].properties.BOSTADR).toBe("Geo owner");
   });
@@ -2650,12 +2704,46 @@ describe("Export Utilities - GeoJSON", () => {
       },
     };
 
-    const geojson = convertToGeoJSON([
-      pointRow,
-    ]) as unknown as FeatureCollectionLike;
+    const geojson = convertToGeoJSON(
+      [pointRow],
+      "Unknown owner"
+    ) as unknown as FeatureCollectionLike;
 
     expect(geojson.features).toHaveLength(1);
     expect(geojson.features[0].geometry.coordinates).toEqual([14.2, 55.7]);
+  });
+
+  it("should prefer raw owner address when grid values are masked", () => {
+    const maskedRow: GridRowData = {
+      ...baseRow,
+      geometryType: "polygon",
+      geometry: {
+        type: "polygon",
+        rings: polygonCoordinates,
+      },
+      BOSTADR: "J*** D**",
+      ADDRESS: "J*** D**",
+      rawOwner: {
+        OBJECTID: 42,
+        FNR: "456",
+        UUID_FASTIGHET: "uuid-geo",
+        FASTIGHET: "Geo property",
+        NAMN: "Jane Doe",
+        BOSTADR: "Geo Street 1",
+        POSTNR: "22222",
+        POSTADR: "Sample City",
+        ORGNR: "",
+      },
+    };
+
+    const geojson = convertToGeoJSON(
+      [maskedRow],
+      "Unknown owner"
+    ) as unknown as FeatureCollectionLike;
+
+    const ownerValue = geojson.features[0].properties.BOSTADR as string;
+    expect(ownerValue).toContain("Geo Street 1");
+    expect(ownerValue).not.toContain("J***");
   });
 });
 
@@ -2685,7 +2773,10 @@ describe("Export Integration - GeoJSON Validation", () => {
       },
     ];
 
-    const geojson = convertToGeoJSON(rows) as unknown as FeatureCollectionLike;
+    const geojson = convertToGeoJSON(
+      rows,
+      "Unknown owner"
+    ) as unknown as FeatureCollectionLike;
 
     expect(geojson.type).toBe("FeatureCollection");
     expect(Array.isArray(geojson.features)).toBe(true);
@@ -3208,7 +3299,7 @@ describe("Property Widget - Sort-Aware Export", () => {
     const sorting = [{ id: "ADDRESS", desc: false }];
 
     const sorted = applySortingToProperties(properties, sorting);
-    const csv = convertToCSV(sorted);
+    const csv = convertToCSV(sorted, "Unknown owner");
 
     const lines = csv.split("\n");
     expect(lines).toHaveLength(4); // header + 3 rows
@@ -3223,7 +3314,7 @@ describe("Property Widget - Sort-Aware Export", () => {
     const sorting = [{ id: "ADDRESS", desc: true }];
 
     const sorted = applySortingToProperties(properties, sorting);
-    const csv = convertToCSV(sorted);
+    const csv = convertToCSV(sorted, "Unknown owner");
 
     const lines = csv.split("\n");
     expect(lines).toHaveLength(4);
@@ -3280,7 +3371,7 @@ describe("Property Widget - Sort-Aware Export", () => {
 
     const sorting = [{ id: "FASTIGHET", desc: false }];
     const sorted = applySortingToProperties(properties, sorting);
-    const geojson = convertToGeoJSON(sorted);
+    const geojson = convertToGeoJSON(sorted, "Unknown owner");
 
     expect(geojson.type).toBe("FeatureCollection");
     expect(geojson.features).toHaveLength(2);
@@ -3376,7 +3467,7 @@ describe("Property Widget - Sort-Aware Export", () => {
 
     const sorting = [{ id: "FASTIGHET", desc: false }];
     const sorted = applySortingToProperties(properties, sorting);
-    const csv = convertToCSV(sorted);
+    const csv = convertToCSV(sorted, "Unknown owner");
 
     const lines = csv.split("\n");
     expect(lines[1]).toContain('"Property ""A"""'); // CSV escaped quotes
@@ -3435,9 +3526,11 @@ describe("Property Widget - Sort-Aware Export", () => {
 
     expect(exported).toHaveLength(2);
     expect(exported[0].FASTIGHET).toBe("Alpha 1:1");
-    expect(exported[0].ADDRESS).toContain("***"); // Masked
+    expect(exported[0].ADDRESS).toContain("Jane Smith");
+    expect(exported[0].ADDRESS).not.toContain("***");
     expect(exported[1].FASTIGHET).toBe("Zeta 1:1");
-    expect(exported[1].ADDRESS).toContain("***"); // Masked
+    expect(exported[1].ADDRESS).toContain("John Doe");
+    expect(exported[1].ADDRESS).not.toContain("***");
   });
 });
 

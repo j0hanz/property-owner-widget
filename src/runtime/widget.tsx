@@ -129,32 +129,64 @@ const syncSelectionGraphics = (params: SelectionGraphicsParams) => {
   });
 };
 
-interface MaybeGettable {
-  get?: (key: string) => unknown;
-  [key: string]: unknown;
+interface Gettable {
+  get: (key: string) => unknown;
 }
 
-const readNestedValue = (source: unknown, key: string): unknown => {
-  if (!source || typeof source !== "object") {
+const isGettable = (source: object): source is Gettable => {
+  return "get" in source && typeof (source as Gettable).get === "function";
+};
+
+const readNestedValue = (
+  source: object | undefined | null,
+  key: string
+): unknown => {
+  if (!source) {
     return undefined;
   }
 
-  const candidate = source as MaybeGettable;
-  if (typeof candidate.get === "function") {
+  if (isGettable(source)) {
     try {
-      return candidate.get(key);
+      return source.get(key);
     } catch (_error) {
       return undefined;
     }
   }
 
-  return key in candidate ? candidate[key] : undefined;
+  if (key in source) {
+    return (source as { [key: string]: unknown })[key];
+  }
+
+  return undefined;
 };
 
-const readStringValue = (source: unknown, key: string): string => {
-  const value = readNestedValue(source, key);
-  return typeof value === "string" ? value : "";
-};
+interface WidgetManifest {
+  name?: string;
+  label?: string;
+  uri?: string;
+}
+
+interface WidgetEntry {
+  name?: string;
+  label?: string;
+  uri?: string;
+  manifest?: WidgetManifest;
+  widgetName?: string;
+  manifestLabel?: string;
+}
+
+interface WidgetRuntimeInfo {
+  state?: WidgetState;
+  isClassLoaded?: boolean;
+}
+
+interface AppStateForClose {
+  appConfig?: {
+    widgets?: { [id: string]: WidgetEntry };
+  };
+  widgets?: { [id: string]: WidgetEntry };
+  widgetsRuntimeInfo?: { [id: string]: WidgetRuntimeInfo };
+}
 
 const hasPropertySignature = (value: string): boolean => {
   if (!value) return false;
@@ -162,53 +194,52 @@ const hasPropertySignature = (value: string): boolean => {
   return normalized.includes("property") || normalized.includes("fastighet");
 };
 
-const isPropertyWidgetEntry = (widgets: unknown, targetId: string): boolean => {
-  const entry = readNestedValue(widgets, targetId);
+const isPropertyWidgetEntry = (
+  widgets: { [id: string]: WidgetEntry } | undefined | null,
+  targetId: string
+): boolean => {
+  const entry = readNestedValue(widgets, targetId) as WidgetEntry | undefined;
   if (!entry) return false;
 
-  const manifest = readNestedValue(entry, "manifest");
+  const manifest = readNestedValue(entry, "manifest") as
+    | WidgetManifest
+    | undefined;
 
-  const candidates = [
-    readStringValue(entry, "name"),
-    readStringValue(entry, "label"),
-    readStringValue(entry, "manifestLabel"),
-    readStringValue(entry, "uri"),
-    readStringValue(entry, "widgetName"),
-    readStringValue(manifest, "name"),
-    readStringValue(manifest, "label"),
-    readStringValue(manifest, "uri"),
-  ];
+  const candidates: string[] = [
+    entry.name,
+    entry.label,
+    entry.uri,
+    entry.widgetName,
+    entry.manifestLabel,
+    manifest?.name,
+    manifest?.label,
+    manifest?.uri,
+  ].filter((v): v is string => typeof v === "string");
 
   return candidates.some(hasPropertySignature);
 };
 
-const isWidgetStateActive = (state: unknown): boolean => {
-  if (state === WidgetState.Opened || state === WidgetState.Active) {
-    return true;
-  }
-
-  if (typeof state === "string") {
-    const normalized = state.toUpperCase();
-    return normalized === "OPENED" || normalized === "ACTIVE";
-  }
-
-  return false;
+const isWidgetStateActive = (state: WidgetState | undefined): boolean => {
+  return state === WidgetState.Opened || state === WidgetState.Active;
 };
 
-const readAppWidgets = (state: unknown): unknown => {
-  if (!state || typeof state !== "object") {
-    return null;
-  }
-
-  const appConfig = readNestedValue(state, "appConfig");
-  if (appConfig && typeof appConfig === "object") {
-    const widgets = readNestedValue(appConfig, "widgets");
+const readAppWidgets = (
+  state: AppStateForClose
+): { [id: string]: WidgetEntry } | undefined | null => {
+  const appConfig = readNestedValue(state, "appConfig") as
+    | { widgets?: { [id: string]: WidgetEntry } }
+    | undefined;
+  if (appConfig) {
+    const widgets = readNestedValue(appConfig, "widgets") as
+      | { [id: string]: WidgetEntry }
+      | undefined;
     if (widgets) {
       return widgets;
     }
   }
-
-  return readNestedValue(state, "widgets");
+  return readNestedValue(state, "widgets") as
+    | { [id: string]: WidgetEntry }
+    | undefined;
 };
 
 // Error boundaries require class components in React (no functional equivalent)
@@ -705,10 +736,18 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
         if (!removedIds.has(key)) {
           const rawValue = existingRaw[key];
           if (rawValue) {
-            const clonedValue = JSON.parse(
-              JSON.stringify(rawValue)
-            ) as SerializedQueryResult;
-            nextRaw[key] = clonedValue;
+            try {
+              const clonedValue = JSON.parse(
+                JSON.stringify(rawValue)
+              ) as SerializedQueryResult;
+              nextRaw[key] = clonedValue;
+            } catch (error) {
+              console.log("Failed to clone raw query result", {
+                propertyId: key,
+                error,
+              });
+              trackError("clone_query_result", error, `Property: ${key}`);
+            }
           }
         }
       });
@@ -746,16 +785,10 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
     if (!config?.autoCloseOtherWidgets) return;
 
     const store = typeof getAppStore === "function" ? getAppStore() : null;
-    const state = store?.getState?.();
+    const state: AppStateForClose | undefined = store?.getState?.();
     if (!state) return;
 
-    const runtimeInfo = readNestedValue(state, "widgetsRuntimeInfo") as
-      | {
-          [id: string]:
-            | { state?: unknown; isClassLoaded?: boolean }
-            | undefined;
-        }
-      | undefined;
+    const runtimeInfo = readNestedValue(state, "widgetsRuntimeInfo");
 
     if (!runtimeInfo) return;
 

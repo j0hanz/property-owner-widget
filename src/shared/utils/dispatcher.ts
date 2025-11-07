@@ -2,6 +2,7 @@ import type {
   DispatchFn,
   ErrorState,
   GridRowData,
+  PropertyAction,
   SerializedQueryResult,
 } from "../../config/types";
 import { propertyActions } from "../../extensions/store";
@@ -9,7 +10,7 @@ import { propertyActions } from "../../extensions/store";
 const safeDispatch = (
   dispatch: DispatchFn,
   widgetId: string,
-  action: unknown
+  action: PropertyAction
 ) => {
   if (!widgetId || typeof dispatch !== "function") return;
   dispatch(action);

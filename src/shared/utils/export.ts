@@ -17,6 +17,59 @@ import { trackError, trackEvent } from "../telemetry";
 import { sanitizeClipboardCell, stripHtml } from "./helpers";
 import { formatOwnerInfo } from "./privacy";
 
+const isString = (value: unknown): value is string => typeof value === "string";
+
+const getGridString = (
+  row: GridRowData,
+  key: "BOSTADR" | "ADDRESS"
+): string | null => {
+  const rowRecord = row as unknown as { [key: string]: unknown };
+  const value = rowRecord[key];
+  return isString(value) ? value : null;
+};
+
+const hasContent = (value: string | null): value is string =>
+  typeof value === "string" && value.trim().length > 0;
+
+const resolveOwnerLabelForExport = (
+  row: GridRowData,
+  unknownOwnerText: string
+): string => {
+  if (row.rawOwner) {
+    return formatOwnerInfo(row.rawOwner, false, unknownOwnerText);
+  }
+
+  const bostadrValue = getGridString(row, "BOSTADR");
+  if (hasContent(bostadrValue)) {
+    return bostadrValue;
+  }
+
+  const addressValue = getGridString(row, "ADDRESS");
+  if (hasContent(addressValue)) {
+    return addressValue;
+  }
+
+  return unknownOwnerText;
+};
+
+const resolveOwnerAddressForExport = (row: GridRowData): string => {
+  if (row.rawOwner && typeof row.rawOwner.BOSTADR === "string") {
+    return row.rawOwner.BOSTADR;
+  }
+
+  const bostadrValue = getGridString(row, "BOSTADR");
+  if (bostadrValue !== null) {
+    return bostadrValue;
+  }
+
+  const addressValue = getGridString(row, "ADDRESS");
+  if (addressValue !== null) {
+    return addressValue;
+  }
+
+  return "";
+};
+
 const handleSerializationError: SerializationErrorHandler = (
   error,
   typeName
@@ -53,6 +106,11 @@ export const sanitizeForExport = (
       const typeName = (value as { constructor?: { name?: string } })
         .constructor?.name;
       onSerializationError?.(error, typeName ?? typeof value);
+      trackError(
+        "sanitize_export_object",
+        error,
+        `Type: ${typeName ?? typeof value}`
+      );
       return "";
     }
   }
@@ -62,14 +120,12 @@ export const sanitizeForExport = (
 
 export const buildExportRow = (
   row: GridRowData,
-  maskingEnabled: boolean,
+  _maskingEnabled: boolean,
   unknownOwnerText: string
 ): { propertyLabel: string; ownerLabel: string } => {
   const propertySource = row.FASTIGHET || row.FNR || "";
 
-  const ownerSource = row.rawOwner
-    ? formatOwnerInfo(row.rawOwner, maskingEnabled, unknownOwnerText)
-    : row.BOSTADR || row.ADDRESS || unknownOwnerText;
+  const ownerSource = resolveOwnerLabelForExport(row, unknownOwnerText);
 
   return {
     propertyLabel: sanitizeForExport(propertySource, handleSerializationError),
@@ -149,7 +205,7 @@ export const applySortingToProperties = (
 
 export const formatPropertiesForClipboard = (
   properties: GridRowData[] | null | undefined,
-  maskingEnabled: boolean,
+  _maskingEnabled: boolean,
   unknownOwnerText: string
 ): string => {
   if (!properties || properties.length === 0) {
@@ -165,16 +221,17 @@ export const formatPropertiesForClipboard = (
 
     const ownerText = (() => {
       if (property.rawOwner) {
-        const formattedOwner = formatOwnerInfo(
-          property.rawOwner,
-          maskingEnabled,
+        const formattedOwner = resolveOwnerLabelForExport(
+          property,
           unknownOwnerText
         );
         const sanitizedOwner = sanitizeClipboardCell(formattedOwner);
         return sanitizedOwner || sanitizedUnknown;
       }
 
-      const fallbackSanitized = sanitizeClipboardCell(property.BOSTADR);
+      const fallbackSanitized = sanitizeClipboardCell(
+        property.BOSTADR || property.ADDRESS
+      );
       return fallbackSanitized || sanitizedUnknown;
     })();
 
@@ -227,18 +284,28 @@ const escapeCsvValue = (value: unknown): string => {
   return sanitized;
 };
 
-export const convertToCSV = (rows: GridRowData[]): string => {
+export const convertToCSV = (
+  rows: GridRowData[],
+  unknownOwnerText: string
+): string => {
   if (!rows || rows.length === 0) return "";
 
   const csvHeaders = CSV_HEADERS.join(",");
 
   const csvRows = rows.map((row) => {
+    const ownerAddress = resolveOwnerAddressForExport(row);
+    const ownerLabel = row.rawOwner
+      ? resolveOwnerLabelForExport(row, unknownOwnerText)
+      : (getGridString(row, "ADDRESS") ??
+        getGridString(row, "BOSTADR") ??
+        unknownOwnerText);
+
     const values: CsvHeaderValues = {
       FNR: escapeCsvValue(row.FNR),
       UUID_FASTIGHET: escapeCsvValue(row.UUID_FASTIGHET),
       FASTIGHET: escapeCsvValue(row.FASTIGHET),
-      BOSTADR: escapeCsvValue(row.BOSTADR),
-      ADDRESS: escapeCsvValue(row.ADDRESS),
+      BOSTADR: escapeCsvValue(ownerAddress),
+      ADDRESS: escapeCsvValue(ownerLabel),
     };
 
     return CSV_HEADERS.map((header) => values[header]).join(",");
@@ -362,7 +429,10 @@ const convertArcGISGeometryToGeoJSON = (
   return null;
 };
 
-const buildGeoJSONFeature = (row: GridRowData): SerializedRecord | null => {
+const buildGeoJSONFeature = (
+  row: GridRowData,
+  unknownOwnerText: string
+): SerializedRecord | null => {
   if (!row.geometryType || !row.geometry) return null;
 
   const geometry = row.geometry as GeometryInput;
@@ -372,6 +442,8 @@ const buildGeoJSONFeature = (row: GridRowData): SerializedRecord | null => {
   );
 
   if (!geojsonGeometry) return null;
+
+  const ownerAddress = resolveOwnerAddressForExport(row);
 
   return {
     type: "Feature",
@@ -383,19 +455,25 @@ const buildGeoJSONFeature = (row: GridRowData): SerializedRecord | null => {
         handleSerializationError
       ),
       FASTIGHET: sanitizeForExport(row.FASTIGHET, handleSerializationError),
-      BOSTADR: sanitizeForExport(row.BOSTADR, handleSerializationError),
+      BOSTADR: sanitizeForExport(
+        ownerAddress || resolveOwnerLabelForExport(row, unknownOwnerText),
+        handleSerializationError
+      ),
     },
     geometry: geojsonGeometry,
   } as SerializedRecord;
 };
 
-export const convertToGeoJSON = (rows: GridRowData[]): SerializedRecord => {
+export const convertToGeoJSON = (
+  rows: GridRowData[],
+  unknownOwnerText: string
+): SerializedRecord => {
   if (!rows || rows.length === 0) {
     return { type: "FeatureCollection", features: [] };
   }
 
   const features = rows
-    .map(buildGeoJSONFeature)
+    .map((row) => buildGeoJSONFeature(row, unknownOwnerText))
     .filter((feature): feature is SerializedRecord => feature !== null);
 
   return {
@@ -428,27 +506,49 @@ const buildExportContent = (
       maskingEnabled,
       unknownOwnerText
     );
-    return {
-      content: JSON.stringify(jsonData, null, 2),
-      mimeType: definition?.mimeType || "application/json;charset=utf-8",
-      extension: definition?.extension || "json",
-    };
+    try {
+      return {
+        content: JSON.stringify(jsonData, null, 2),
+        mimeType: definition?.mimeType || "application/json;charset=utf-8",
+        extension: definition?.extension || "json",
+      };
+    } catch (error) {
+      trackError(
+        "export_json_stringify",
+        error,
+        "Failed to serialize JSON data"
+      );
+      throw new Error("Failed to convert data to JSON format");
+    }
   }
 
   if (format === "csv") {
     return {
-      content: convertToCSV(selectedProperties),
+      content: convertToCSV(selectedProperties, unknownOwnerText),
       mimeType: definition?.mimeType || "text/csv;charset=utf-8",
       extension: definition?.extension || "csv",
     };
   }
 
   if (format === "geojson") {
-    return {
-      content: JSON.stringify(convertToGeoJSON(selectedProperties), null, 2),
-      mimeType: definition?.mimeType || "application/geo+json;charset=utf-8",
-      extension: definition?.extension || "geojson",
-    };
+    try {
+      return {
+        content: JSON.stringify(
+          convertToGeoJSON(selectedProperties, unknownOwnerText),
+          null,
+          2
+        ),
+        mimeType: definition?.mimeType || "application/geo+json;charset=utf-8",
+        extension: definition?.extension || "geojson",
+      };
+    } catch (error) {
+      trackError(
+        "export_geojson_stringify",
+        error,
+        "Failed to serialize GeoJSON data"
+      );
+      throw new Error("Failed to convert data to GeoJSON format");
+    }
   }
 
   throw new Error(`Unsupported format: ${format}`);
@@ -471,8 +571,13 @@ const downloadFile = (
   link.click();
 
   setTimeout(() => {
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    try {
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      // Silent cleanup failure - link may already be removed
+      URL.revokeObjectURL(url);
+    }
   }, 100);
 };
 

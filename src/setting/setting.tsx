@@ -296,14 +296,14 @@ const Setting = (
   );
 
   const handlePropertyDataSourceChange = hooks.useEventCallback(
-    (useDataSources: UseDataSource[]) => {
+    (useDataSources: readonly UseDataSource[]) => {
       const selectedDs = useDataSources?.[0] ?? null;
       updateConfig("propertyDataSourceId", selectedDs?.dataSourceId ?? "");
     }
   );
 
   const handleOwnerDataSourceChange = hooks.useEventCallback(
-    (useDataSources: UseDataSource[]) => {
+    (useDataSources: readonly UseDataSource[]) => {
       const selectedOwner = useDataSources?.[0] ?? null;
       updateConfig("ownerDataSourceId", selectedOwner?.dataSourceId ?? "");
     }

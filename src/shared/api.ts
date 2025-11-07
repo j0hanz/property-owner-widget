@@ -69,12 +69,12 @@ const getPromiseUtils = async (): Promise<PromiseUtilsLike> => {
     return cachedPromiseUtils;
   }
 
-  const [promiseUtils] = (await loadArcGISJSAPIModules([
+  const [promiseUtils] = await loadArcGISJSAPIModules([
     "esri/core/promiseUtils",
-  ])) as [PromiseUtilsLike];
+  ]);
 
-  cachedPromiseUtils = promiseUtils;
-  return promiseUtils;
+  cachedPromiseUtils = promiseUtils as PromiseUtilsLike;
+  return promiseUtils as PromiseUtilsLike;
 };
 
 const createSignalOptions = (
@@ -94,9 +94,8 @@ const clearFeatureLayerCache = (): void => {
   });
   featureLayerCache.clear();
   relationshipQueryTaskCache.forEach((task) => {
-    const destroy = (task as { destroy?: () => void }).destroy;
-    if (typeof destroy === "function") {
-      destroy.call(task);
+    if (typeof task.destroy === "function") {
+      task.destroy();
     }
   });
   relationshipQueryTaskCache.clear();
@@ -410,12 +409,12 @@ export const queryPropertyByPoint = async (
     }
 
     if (!cachedFeatureLayerCtor || !cachedQueryCtor) {
-      const [FeatureLayer, Query] = (await loadArcGISJSAPIModules([
+      const [FeatureLayer, Query] = await loadArcGISJSAPIModules([
         "esri/layers/FeatureLayer",
         "esri/rest/support/Query",
-      ])) as [FeatureLayerConstructor, QueryConstructor];
-      cachedFeatureLayerCtor = FeatureLayer;
-      cachedQueryCtor = Query;
+      ]);
+      cachedFeatureLayerCtor = FeatureLayer as FeatureLayerConstructor;
+      cachedQueryCtor = Query as QueryConstructor;
     }
 
     if (!cachedFeatureLayerCtor || !cachedQueryCtor) {
@@ -516,7 +515,10 @@ export const queryOwnerByFnr = async (
 
     return records.map((record: FeatureDataRecord) => {
       const attributes = record.getData() as OwnerAttributes;
-      return { attributes } as __esri.Graphic;
+      return {
+        attributes,
+        geometry: record.getGeometry(),
+      } as __esri.Graphic;
     });
   } catch (error) {
     abortHelpers.handleOrThrow(error);
@@ -546,29 +548,24 @@ export const queryOwnersByRelationship = async (
       throw new Error("Property data source not found");
     }
 
-    const layerDefinition = propertyDs.getLayerDefinition?.();
-    const layerUrl =
-      layerDefinition && typeof layerDefinition === "object"
-        ? ((layerDefinition as { url?: string | null }).url ?? null)
-        : null;
-
+    const layerUrl = propertyDs.url;
     if (!layerUrl) {
       throw new Error("Property layer URL not available");
     }
 
     if (!cachedQueryTaskCtor || !cachedRelationshipQueryCtor) {
-      const [QueryTask, RelationshipQuery] = (await loadArcGISJSAPIModules([
+      const [QueryTask, RelationshipQuery] = await loadArcGISJSAPIModules([
         "esri/tasks/QueryTask",
         "esri/rest/support/RelationshipQuery",
-      ])) as [QueryTaskConstructor, RelationshipQueryConstructor];
-      cachedQueryTaskCtor = QueryTask;
-      cachedRelationshipQueryCtor = RelationshipQuery;
+      ]);
+      cachedQueryTaskCtor = QueryTask as QueryTaskConstructor;
+      cachedRelationshipQueryCtor =
+        RelationshipQuery as RelationshipQueryConstructor;
     }
 
     if (!cachedQueryTaskCtor || !cachedRelationshipQueryCtor) {
       throw new Error("Failed to load relationship query modules");
     }
-
     const QueryTask = cachedQueryTaskCtor;
     const RelationshipQuery = cachedRelationshipQueryCtor;
 
@@ -916,22 +913,31 @@ export const queryPropertiesInBuffer = async (
   try {
     abortHelpers.throwIfAborted(options?.signal);
 
-    const modules = (await loadArcGISJSAPIModules([
+    const modules = await loadArcGISJSAPIModules([
       "esri/geometry/geometryEngine",
-    ])) as [__esri.geometryEngine];
-    const [geometryEngine] = modules;
+    ]);
+    const [geometryEngine] = modules as [__esri.geometryEngine];
 
-    const bufferGeometry = geometryEngine.buffer(
+    let buffer: __esri.Geometry | null = null;
+    const bufferResult = geometryEngine.buffer(
       point,
       bufferDistance,
       bufferUnit
-    ) as __esri.Polygon;
+    );
 
-    if (!bufferGeometry) {
+    if (Array.isArray(bufferResult)) {
+      if (bufferResult.length > 0) {
+        buffer = geometryEngine.union(bufferResult);
+      }
+    } else {
+      buffer = bufferResult;
+    }
+
+    if (!buffer) {
       throw new Error("Failed to create buffer geometry");
     }
 
-    if (!bufferGeometry.extent || bufferGeometry.extent.width === 0) {
+    if (!buffer.extent || buffer.extent.width === 0) {
       throw new Error("Invalid buffer geometry: empty extent");
     }
 
@@ -948,7 +954,7 @@ export const queryPropertiesInBuffer = async (
 
     const result = await ds.query(
       {
-        geometry: bufferGeometry,
+        geometry: buffer,
         spatialRel: "esriSpatialRelIntersects",
         returnGeometry: true,
         outFields: ["*"],

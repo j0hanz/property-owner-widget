@@ -628,12 +628,15 @@ export interface QueryTaskLike {
   ) => Promise<{
     [objectId: number]: { features?: __esri.Graphic[] } | undefined;
   }>;
+  destroy: () => void;
 }
 
-export type QueryTaskConstructor = new (...args: unknown[]) => QueryTaskLike;
+export type QueryTaskConstructor = new (properties?: {
+  url: string;
+}) => QueryTaskLike;
 
 export type RelationshipQueryConstructor = new (
-  ...args: unknown[]
+  properties?: __esri.RelationshipQueryProperties
 ) => RelationshipQueryLike;
 
 export interface SignalOptions {
@@ -746,7 +749,7 @@ export type PropertyAction =
  * Redux dispatch function type
  * Used in dispatcher to safely dispatch actions to Redux store
  */
-export type DispatchFn = ((action: unknown) => void) | undefined;
+export type DispatchFn = (action: PropertyAction) => void;
 
 /**
  * Property dispatcher interface

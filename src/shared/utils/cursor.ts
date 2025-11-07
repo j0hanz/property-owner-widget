@@ -240,7 +240,11 @@ export const scheduleCursorUpdate = (params: {
 
   rafIdRef.current = requestAnimationFrame(() => {
     rafIdRef.current = null;
-    onUpdate(pendingMapPointRef.current);
+    try {
+      onUpdate(pendingMapPointRef.current);
+    } catch (error) {
+      console.log("Cursor point update failed", error);
+    }
   });
 };
 
