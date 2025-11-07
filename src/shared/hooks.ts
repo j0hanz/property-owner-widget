@@ -1,4 +1,9 @@
-import { type DataSourceManager, hooks, React } from "jimu-core";
+import {
+  type DataSourceManager,
+  type FeatureLayerDataSource,
+  hooks,
+  React,
+} from "jimu-core";
 import { loadArcGISJSAPIModules } from "jimu-arcgis";
 import type { JimuMapView } from "jimu-arcgis";
 import {
@@ -1179,6 +1184,7 @@ export const useHitTestHover = (params: {
       // Abort previous query
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
+        abortControllerRef.current = null;
       }
 
       const view = params.viewRef.current;
@@ -1186,6 +1192,16 @@ export const useHitTestHover = (params: {
       const dataSourceId = params.dataSourceId;
 
       if (!view || !dsManager || !dataSourceId) {
+        setHoverTooltipData(null);
+        setIsQuerying(false);
+        return;
+      }
+
+      const dataSource = dsManager.getDataSource(
+        dataSourceId
+      ) as FeatureLayerDataSource | null;
+
+      if (!dataSource || typeof dataSource.query !== "function") {
         setHoverTooltipData(null);
         setIsQuerying(false);
         return;
