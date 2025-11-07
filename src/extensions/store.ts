@@ -8,6 +8,7 @@ import type {
   GridRowData,
   IMPropertyGlobalState,
   IMPropertyWidgetState,
+  IMStateWithProperty,
   PropertyAction,
   PropertySelectors,
   PropertyWidgetState,
@@ -176,12 +177,17 @@ export const createPropertySelectors = (
     state: IMState
   ): IMPropertyWidgetState | undefined => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const extensionsState = (state as any).extensionsState as {
-      [key: string]: unknown;
-    };
-    const propertyState = extensionsState?.[
-      getStoreId()
-    ] as IMPropertyGlobalState;
+    const extensionsState = (state as any).extensionsState as
+      | { [key: string]: unknown }
+      | undefined;
+
+    const fromExtensions = extensionsState?.[getStoreId()] as
+      | IMPropertyGlobalState
+      | undefined;
+
+    const legacyState = (state as IMStateWithProperty)["property-state"];
+
+    const propertyState = fromExtensions ?? legacyState;
     return propertyState?.byId?.[widgetId];
   };
 

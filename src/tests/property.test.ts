@@ -3,7 +3,9 @@ import type {
   DataSourceManager,
   FeatureDataRecord,
   FeatureLayerDataSource,
+  IMState,
 } from "jimu-core";
+import SeamlessImmutable from "seamless-immutable";
 import { describe, expect, it, jest } from "@jest/globals";
 import "@testing-library/jest-dom";
 import copyLib from "copy-to-clipboard";
@@ -14,15 +16,22 @@ import { PropertyActionType } from "../config/enums";
 import type {
   EsriModules,
   GridRowData,
+  IMPropertyGlobalState,
+  IMPropertyWidgetState,
+  IMStateWithProperty,
   OwnerAttributes,
   PropertyAction,
   PropertyProcessingContext,
   PropertyQueryHelpers,
   PropertyQueryMessages,
+  PropertyWidgetState,
   QueryResult,
   RelationshipQueryLike,
+  SerializedQueryFeature,
   SerializedQueryResult,
+  SerializedQueryResultMap,
 } from "../config/types";
+import { createPropertySelectors, getStoreId } from "../extensions/store";
 import {
   clearQueryCache,
   isValidArcGISUrl,
@@ -71,6 +80,95 @@ jest.mock("copy-to-clipboard", () => ({
 }));
 
 const copyMock = copyLib as unknown as jest.MockedFunction<typeof copyLib>;
+
+const createSelectorsTestState = (widgetId: string) => {
+  const rowId = "row-1";
+  const fnr = "1234";
+  const error = {
+    type: "NETWORK_ERROR" as const,
+    message: "Test error",
+  };
+
+  const baseState: PropertyWidgetState = {
+    error,
+    selectedProperties: [
+      {
+        id: rowId,
+        FNR: fnr,
+        UUID_FASTIGHET: "uuid-1",
+        FASTIGHET: "Fastighet 1",
+        BOSTADR: "Owner 1",
+        ADDRESS: "Owner 1",
+        geometryType: null,
+        geometry: null,
+      } as GridRowData,
+    ],
+    isQueryInFlight: true,
+    rawPropertyResults: {
+      [rowId]: {
+        propertyId: fnr,
+        features: [] as SerializedQueryFeature[],
+      },
+    } as SerializedQueryResultMap,
+  };
+
+  const widgetState = SeamlessImmutable(baseState) as IMPropertyWidgetState;
+
+  const globalState = SeamlessImmutable({
+    byId: {
+      [widgetId]: widgetState,
+    },
+  }) as IMPropertyGlobalState;
+
+  return {
+    rowId,
+    fnr,
+    error,
+    globalState,
+  };
+};
+
+describe("property store selectors", () => {
+  it("reads widget state from property-state root key", () => {
+    const widgetId = "widget-selectors-root";
+    const selectors = createPropertySelectors(widgetId);
+    const { rowId, fnr, error, globalState } =
+      createSelectorsTestState(widgetId);
+
+    const state = {
+      "property-state": globalState,
+    } as unknown as IMStateWithProperty;
+
+    const selected = selectors.selectSelectedProperties(state);
+    expect(selectors.selectError(state)).toMatchObject(error);
+    expect(selectors.selectIsQueryInFlight(state)).toBe(true);
+    expect(selected).toHaveLength(1);
+    expect(selected[0]).toMatchObject({ id: rowId, FNR: fnr });
+
+    const rawResults = selectors.selectRawPropertyResults(state);
+    expect(rawResults).toMatchObject({
+      [rowId]: {
+        propertyId: fnr,
+        features: [],
+      },
+    });
+  });
+
+  it("supports selectors stored under extensionsState", () => {
+    const widgetId = "widget-selectors-extensions";
+    const selectors = createPropertySelectors(widgetId);
+    const { globalState } = createSelectorsTestState(widgetId);
+
+    const state = {
+      extensionsState: {
+        [getStoreId()]: globalState,
+      },
+    } as unknown as IMState;
+
+    const selected = selectors.selectSelectedProperties(state);
+    expect(selected).toHaveLength(1);
+  });
+});
 
 interface MockFeature {
   attributes: { [key: string]: unknown };
