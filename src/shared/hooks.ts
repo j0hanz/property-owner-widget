@@ -234,12 +234,18 @@ export const useGraphicsLayer = (params: {
       }
 
       const layerId = `Property Highlights - ${widgetId}`;
-      const existing = view.map.findLayerById(layerId);
+      const existing = view.map.findLayerById(layerId) as
+        | __esri.GraphicsLayer
+        | undefined;
 
-      if (existing) return existing as __esri.GraphicsLayer;
+      if (existing && !existing.destroyed) {
+        highlightLayerRef.current = existing;
+        cachedLayerRef.current = existing;
+        return existing;
+      }
 
       // Create and cache new layer
-      if (!cachedLayerRef.current) {
+      if (!cachedLayerRef.current || cachedLayerRef.current.destroyed) {
         cachedLayerRef.current = new modules.GraphicsLayer({
           id: layerId,
           listMode: "hide",
@@ -451,6 +457,10 @@ export const useGraphicsLayer = (params: {
         return;
       }
 
+      if (view) {
+        activeViewRef.current = view;
+      }
+
       const processedKeys = new Set<string>();
 
       // Performance: Process entries with indexed loop (reduces closure overhead)
@@ -491,11 +501,12 @@ export const useGraphicsLayer = (params: {
       }
       clearHighlights();
 
-      const layer = highlightLayerRef.current;
+      const targetView = view ?? activeViewRef.current;
+      const layer = highlightLayerRef.current ?? cachedLayerRef.current;
       if (layer && !layer.destroyed) {
         try {
-          if (view?.map) {
-            view.map.remove(layer);
+          if (targetView?.map) {
+            targetView.map.remove(layer);
           }
           layer.destroy();
         } catch (error) {
@@ -505,6 +516,7 @@ export const useGraphicsLayer = (params: {
 
       propertyLayerRef.current = null;
       highlightLayerRef.current = null;
+      cachedLayerRef.current = null;
     }
   );
 
@@ -512,9 +524,13 @@ export const useGraphicsLayer = (params: {
     clearHighlights();
     symbolCacheRef.current.clear();
 
-    const layer = highlightLayerRef.current;
+    const currentView = activeViewRef.current;
+    const layer = highlightLayerRef.current ?? cachedLayerRef.current;
     if (layer && !layer.destroyed) {
       try {
+        if (currentView?.map) {
+          currentView.map.remove(layer);
+        }
         layer.destroy();
       } catch (error) {
         // Silently ignore destroy errors on unmount
@@ -523,6 +539,7 @@ export const useGraphicsLayer = (params: {
 
     propertyLayerRef.current = null;
     highlightLayerRef.current = null;
+    cachedLayerRef.current = null;
     activeViewRef.current = null;
   });
 
@@ -592,7 +609,7 @@ export const usePopupManager = (widgetId: string) => {
 
 export const useMapViewLifecycle = (params: {
   modules: EsriModules | null;
-  destroyGraphicsLayer: (view: __esri.MapView) => void;
+  destroyGraphicsLayer: (view: __esri.MapView | null | undefined) => void;
   disablePopup: (view: __esri.MapView | undefined) => void;
   restorePopup: (view: __esri.MapView | undefined) => void;
   onMapClick: (event: __esri.ViewClickEvent) => void;
