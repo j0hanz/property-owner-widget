@@ -243,9 +243,13 @@ export const deduplicateOwnerEntries = (
     const owner = owners[i];
     if (!owner || typeof owner !== "object") continue;
 
-    const key = ownerIdentity.buildKey(owner, context, i);
-    if (!seen.has(key)) {
-      seen.add(key);
+    try {
+      const key = ownerIdentity.buildKey(owner, context, i);
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(owner);
+      }
+    } catch (_error) {
       unique.push(owner);
     }
   }
