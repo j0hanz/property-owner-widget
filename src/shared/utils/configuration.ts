@@ -40,39 +40,33 @@ export const computeSettingsVisibility = (params: {
   } as const;
 };
 
-export const resetDependentFields = (params: {
-  shouldDisable: boolean;
-  localBatchOwnerQuery: boolean;
-  setLocalBatchOwnerQuery: (value: boolean) => void;
-  isBatchOwnerQueryEnabled: boolean;
-  updateBatchOwnerQuery: (value: boolean) => void;
-  relationshipId: number | undefined;
-  updateRelationshipId: (value: number | undefined) => void;
-  localRelationshipId: string;
-  setLocalRelationshipId: (value: string) => void;
-  clearRelationshipError: () => void;
-}): void => {
-  if (!params.shouldDisable) {
-    return;
+export const resetDependentFields = (
+  props: {
+    shouldDisable: boolean;
+    isBatchOwnerQueryEnabled: boolean;
+    relationshipId: number | undefined;
+  },
+  prevProps: {
+    shouldDisable: boolean;
+    isBatchOwnerQueryEnabled: boolean;
+    relationshipId: number | undefined;
+  },
+  actions: {
+    updateBatchOwnerQuery: (value: boolean) => void;
+    updateRelationshipId: (value: number | undefined) => void;
+    clearRelationshipError: () => void;
   }
-
-  if (params.localBatchOwnerQuery) {
-    params.setLocalBatchOwnerQuery(false);
+): void => {
+  // If the section is being disabled, reset all dependent fields.
+  if (props.shouldDisable && !prevProps.shouldDisable) {
+    if (props.isBatchOwnerQueryEnabled) {
+      actions.updateBatchOwnerQuery(false);
+    }
+    if (typeof props.relationshipId !== "undefined") {
+      actions.updateRelationshipId(undefined);
+    }
+    actions.clearRelationshipError();
   }
-
-  if (params.isBatchOwnerQueryEnabled) {
-    params.updateBatchOwnerQuery(false);
-  }
-
-  if (typeof params.relationshipId !== "undefined") {
-    params.updateRelationshipId(undefined);
-  }
-
-  if (params.localRelationshipId !== "0") {
-    params.setLocalRelationshipId("0");
-  }
-
-  params.clearRelationshipError();
 };
 
 export const normalizeHostList = (

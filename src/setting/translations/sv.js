@@ -3,72 +3,67 @@ System.register([], function (e) {
     execute: function () {
       e({
         configurationInstructions:
-          "Konfigurera widgeten genom att ange lager-URL:er och visningsinställningar.",
-        mapWidgetTitle: "Kartkonfiguration",
+          "Konfigurera datakällor och visningsinställningar.",
+        mapWidgetTitle: "Kartwidget",
         mapWidgetDescription:
-          "Välj en befintlig kartwidget för att aktivera fastighetssökning.",
+          "Välj den kartwidget som ska användas för fastighetssökningar.",
         dataSourcesDescription:
-          "Säkerställ att fastighets- och ägarlager delar FNR-fält.",
+          "Fastighets- och ägarlager måste ha ett matchande FNR-fält.",
         propertyDataSourceLabel: "Fastighetslager",
         propertyDataSourceDescription:
-          "Fastighetslager med geometri och FNR-värden.",
+          "Lager med fastighetsgeometri och FNR-värden.",
         ownerDataSourceLabel: "Ägarlager",
         ownerDataSourceDescription:
-          "Ägarlager eller tabell med NAMN- och BOSTADR-fält.",
+          "Lager eller tabell med ägarnamn och adressuppgifter.",
         displayOptionsTitle: "Visningsalternativ",
         panelDisplaySettings: "Visningsbeteende",
         advancedSettingsTitle: "Avancerade inställningar",
         panelHighlightSettings: "Markeringsstil",
         highlightColorLabelTooltip:
-          "Välj färg för att markera valda fastigheter.",
+          "Ange markeringsfärg för valda fastigheter.",
         highlightOpacityLabelTooltip:
-          "Ange fyllnadsopacitet för markerade fastigheter.",
-        maxResultsLabel: "Maximalt antal resultat",
+          "Ange fyllnadsopacitet för valda fastigheter.",
+        maxResultsLabel: "Max resultat",
         maxResultsDescription:
-          "Maximalt antal fastigheter som ska returneras per fråga.",
-        resetMaxResults: "Återställ standardvärde",
-        enableToggleRemovalLabel: "Växlingsborttagning",
+          "Begränsa antalet fastigheter som returneras per fråga.",
+        resetMaxResults: "Återställ standard",
+        enableToggleRemovalLabel: "Växla borttagning",
         enableToggleRemovalDescription:
-          "Tillåt ett nytt klick för att avmarkera fastigheten.",
-        enablePIIMaskingLabel: "PII-maskning",
-        enablePIIMaskingDescription: "Maskera namn och adresser i widgeten.",
+          "Klicka på en vald fastighet igen för att avmarkera den.",
+        enablePIIMaskingLabel: "PII-maskering",
+        enablePIIMaskingDescription:
+          "Maskera ägarnamn och adresser i widgeten.",
         highlightOptionsDescription:
-          "Styr hur markerade fastigheter visas på kartan.",
+          "Anpassa hur valda fastigheter visas på kartan.",
         highlightColorLabel: "Markeringsfärg",
         highlightOpacityLabel: "Fyllnadsopacitet",
         highlightOutlineWidthLabel: "Linjebredd",
         highlightOutlineWidthLabelTooltip:
-          "Ange linjebredden för markerade fastigheter.",
+          "Ange linjebredd för valda fastigheter.",
         allowedHostsLabel: "Tillåtna värdar",
         allowedHostsDescription:
-          "Tillåtna HTTPS-värdar som ska användas för tjänster.",
-        allowedHostsPlaceholder: "lund.se",
-        addAllowedHostLabel: "Lägg till tillåten värd",
-        allowedHostsListLabel: "Tillåtna värdposter",
-        allowedHostsEmptyHint: "Inga värdar tillåtna ännu.",
-        removeAllowedHostLabel: "Ta bort tillåten värd",
-        enableBatchOwnerQueryLabel: "Batch-ägarförfrågan",
+          "Vitlista betrodda HTTPS-värdar för datakällor.",
+        allowedHostsPlaceholder: "example.com",
+        addAllowedHostLabel: "Lägg till värd",
+        allowedHostsListLabel: "Tillåtna värdar",
+        allowedHostsEmptyHint: "Inga värdar har lagts till.",
+        removeAllowedHostLabel: "Ta bort värd",
+        enableBatchOwnerQueryLabel: "Batch-ägarfrågor",
         enableBatchOwnerQueryDescription:
-          "Aktivera relation för att hämta alla ägare i en förfrågan.",
+          "Använd en relation för att hämta alla ägare i en enda begäran.",
         relationshipIdLabel: "Relations-ID",
         relationshipIdDescription:
-          "ID för relationen mellan fastigheter och ägare.",
-        relationshipIdPlaceholder: "t.ex. 0, 1, 2",
+          "ID för relationen som länkar fastigheter till ägare.",
+        relationshipIdPlaceholder: "t.ex. 0",
         relationshipIdTooltip:
-          "Öppna /MapServer/[layerId]?f=json för att se relations-ID.",
+          "Hitta ID:t på lagrets REST-tjänstsida (t.ex. /MapServer/0).",
         errorInvalidUrl: "Ange en giltig ArcGIS REST-tjänst-URL.",
         errorInvalidNumber: "Ange ett heltal större än noll.",
         errorMaxResultsInvalid: "Max resultat måste vara mellan 1 och 1000.",
         errorRelationshipIdInvalid: "Relations-ID måste vara mellan 0 och 99.",
-        runtimeStateQuerying: "Fråga pågår...",
-        runtimeStateError: "Frågefel uppstod. Kontrollera widget för detaljer.",
-        runtimeStateSelected: "{count} fastigheter valda för närvarande",
-        cursorStyleLabel: "Aktiv markörstil",
-        cursorStyleDescription:
-          "CSS-markör som visas när widgeten är aktiv. Stöder standardvärden (crosshair, pointer, grab) och anpassade url()-markörer.",
-        cursorStyleTooltip:
-          "Välj markörstil eller ange anpassat CSS-värde (t.ex. url(cursor.png), auto)",
-        cursorStylePlaceholder: "Ange CSS-markör värde...",
+        runtimeStateQuerying: "Sökning pågår…",
+        runtimeStateError: "Frågefel. Se widgeten för detaljer.",
+        runtimeStateSelected: "{count} fastigheter valda.",
       });
     },
   };

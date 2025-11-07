@@ -41,7 +41,6 @@ export interface Config {
   highlightOpacity?: number;
   outlineWidth?: number;
   autoCloseOtherWidgets?: boolean;
-  activeCursor?: string;
 }
 
 export type IMConfig = ImmutableObject<Config>;

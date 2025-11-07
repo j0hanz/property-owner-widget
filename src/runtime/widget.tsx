@@ -1057,7 +1057,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       isActive && !!modules?.TextSymbol && !!modules?.Graphic;
 
     if (canTrackCursor) {
-      setCursor(view, config.activeCursor || "crosshair", previousCursorRef);
+      setCursor(view, previousCursorRef);
 
       ensureGraphicsLayer(view);
       cachedLayerRef.current = view.map.findLayerById(
@@ -1099,7 +1099,7 @@ const WidgetContent = (props: AllWidgetProps<IMConfig>): React.ReactElement => {
       });
       restoreCursor(view, previousCursorRef);
     };
-  }, [runtimeState, modules, widgetId, config.activeCursor]);
+  }, [runtimeState, modules, widgetId]);
 
   // Cleanup cursor point on unmount
   hooks.useUnmount(() => {

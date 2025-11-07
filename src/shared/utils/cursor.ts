@@ -3,7 +3,7 @@ import type { DataSourceManager } from "jimu-core";
 import {
   CURSOR_SYMBOL_CACHE_LIMIT,
   CURSOR_TOOLTIP_STYLE,
-  STANDARD_CURSOR_VALUES,
+  DEFAULT_ACTIVE_CURSOR,
 } from "../../config/constants";
 import type {
   CursorGraphicsState,
@@ -394,43 +394,13 @@ const resetRefState = (...refs: Array<MutableRefObject<unknown>>): void => {
   });
 };
 
-export const isValidCursorValue = (
-  cursor: string | null | undefined
-): boolean => {
-  if (!cursor || typeof cursor !== "string") return false;
-
-  const trimmed = cursor.trim();
-  if (trimmed.length === 0) return false;
-
-  // Check if it's a standard cursor keyword
-  if (
-    STANDARD_CURSOR_VALUES.includes(
-      trimmed as (typeof STANDARD_CURSOR_VALUES)[number]
-    )
-  ) {
-    return true;
-  }
-
-  if (trimmed.startsWith("url(")) {
-    return true;
-  }
-
-  return false;
-};
-
 export const setCursor = (
   view: __esri.MapView | null,
-  cursor: string | null | undefined,
   previousCursorRef: MutableRefObject<string | null>
 ): boolean => {
   if (!view?.container) return false;
 
-  const cursorValue = cursor || "crosshair";
-
-  if (!isValidCursorValue(cursorValue)) {
-    globalThis.console?.warn?.(`Invalid cursor value: ${cursorValue}`);
-    return false;
-  }
+  const cursorValue = DEFAULT_ACTIVE_CURSOR;
 
   // Store previous cursor if not already stored
   if (previousCursorRef.current === null) {

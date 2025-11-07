@@ -21,7 +21,6 @@ import {
   CollapsablePanel,
   defaultMessages as jimuUIMessages,
   NumericInput,
-  Select,
   Slider,
   SVG,
   Switch,
@@ -30,7 +29,6 @@ import {
 } from "jimu-ui";
 import type { AllWidgetSettingProps } from "jimu-for-builder";
 import Immutable from "seamless-immutable";
-import { CURSOR_STYLES, DEFAULT_ACTIVE_CURSOR } from "../config/constants";
 import { useSettingStyles } from "../config/style";
 import type { FieldErrors, IMConfig } from "../config/types";
 import { createPropertySelectors } from "../extensions/store";
@@ -141,9 +139,6 @@ const Setting = (
   );
   const [localHighlightColor, setLocalHighlightColor] = React.useState(
     config.highlightColor
-  );
-  const [localActiveCursor, setLocalActiveCursor] = React.useState(
-    config.activeCursor || DEFAULT_ACTIVE_CURSOR
   );
   const [localHighlightOpacity, setLocalHighlightOpacity] = React.useState(
     () => {
@@ -271,14 +266,6 @@ const Setting = (
     updateConfig("highlightColor", nextColor);
   });
 
-  const handleActiveCursorChange = hooks.useEventCallback(
-    (evt: React.ChangeEvent<HTMLSelectElement>) => {
-      const nextCursor = evt.target.value || DEFAULT_ACTIVE_CURSOR;
-      setLocalActiveCursor(nextCursor);
-      updateConfig("activeCursor", nextCursor);
-    }
-  );
-
   const handleHighlightOpacityChange = useSliderConfigHandler(
     localHighlightOpacity,
     setLocalHighlightOpacity,
@@ -379,30 +366,42 @@ const Setting = (
     shouldDisableRelationshipSettings,
   } = visibility;
 
-  hooks.useEffectWithPreviousValues(() => {
-    resetDependentFields({
-      shouldDisable: shouldDisableRelationshipSettings,
-      localBatchOwnerQuery,
-      setLocalBatchOwnerQuery,
-      isBatchOwnerQueryEnabled: Boolean(config.enableBatchOwnerQuery),
-      updateBatchOwnerQuery: (value) =>
-        updateConfig("enableBatchOwnerQuery", value),
-      relationshipId: config.relationshipId,
-      updateRelationshipId: (value) => updateConfig("relationshipId", value),
-      localRelationshipId,
-      setLocalRelationshipId,
-      clearRelationshipError: () => {
-        setFieldErrors((prev) => ({ ...prev, relationshipId: undefined }));
-      },
-    });
-  }, [
-    shouldDisableRelationshipSettings,
-    localBatchOwnerQuery,
-    config.enableBatchOwnerQuery,
-    config.relationshipId,
-    localRelationshipId,
-    updateConfig,
-  ]);
+  hooks.useEffectWithPreviousValues(
+    (prevValues) => {
+      const [
+        prevShouldDisableRelationshipSettings,
+        prevIsBatchOwnerQueryEnabled,
+        prevRelationshipId,
+      ] = prevValues;
+
+      resetDependentFields(
+        {
+          shouldDisable: shouldDisableRelationshipSettings,
+          isBatchOwnerQueryEnabled: config.enableBatchOwnerQuery,
+          relationshipId: config.relationshipId,
+        },
+        {
+          shouldDisable: prevShouldDisableRelationshipSettings as boolean,
+          isBatchOwnerQueryEnabled: prevIsBatchOwnerQueryEnabled as boolean,
+          relationshipId: prevRelationshipId as number,
+        },
+        {
+          updateBatchOwnerQuery: (value) =>
+            updateConfig("enableBatchOwnerQuery", value),
+          updateRelationshipId: (value) =>
+            updateConfig("relationshipId", value),
+          clearRelationshipError: () => {
+            setFieldErrors((prev) => ({ ...prev, relationshipId: undefined }));
+          },
+        }
+      );
+    },
+    [
+      shouldDisableRelationshipSettings,
+      config.enableBatchOwnerQuery,
+      config.relationshipId,
+    ]
+  );
 
   const highlightOpacityPercent = opacityHelpers.toPercent(
     localHighlightOpacity
@@ -749,32 +748,6 @@ const Setting = (
                       {outlineWidthLabel}
                     </div>
                   </div>
-                </div>
-              </SettingRow>
-
-              <SettingRow
-                flow="wrap"
-                level={1}
-                css={styles.row}
-                label={renderLabelWithTooltip(
-                  "cursorStyleLabel",
-                  "cursorStyleTooltip"
-                )}
-              >
-                <Select
-                  value={localActiveCursor}
-                  onChange={handleActiveCursorChange}
-                  aria-label={translate("cursorStyleLabel")}
-                  css={styles.fullWidth}
-                >
-                  {CURSOR_STYLES.map((cursor) => (
-                    <option key={cursor} value={cursor}>
-                      {cursor}
-                    </option>
-                  ))}
-                </Select>
-                <div css={styles.description} role="note">
-                  {translate("cursorStyleDescription")}
                 </div>
               </SettingRow>
             </CollapsablePanel>
